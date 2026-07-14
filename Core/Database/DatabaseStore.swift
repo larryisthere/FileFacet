@@ -188,6 +188,341 @@ actor DatabaseStore {
         return try fetchVideo(id: videoID)
     }
 
+    func fetchTags(libraryID: String) throws -> [TagRecord] {
+        try prepareIfNeeded()
+        let statement = try prepare(
+            """
+            WITH RECURSIVE descendants(root_id, id) AS (
+                SELECT id, id FROM tags WHERE library_id = ?
+                UNION ALL
+                SELECT descendants.root_id, tags.id
+                FROM tags JOIN descendants ON tags.parent_id = descendants.id
+            )
+            SELECT tags.id, tags.library_id, tags.name, tags.parent_id, tags.color,
+                   tags.sort_order, tags.source, COUNT(DISTINCT video_tags.video_id)
+            FROM tags
+            LEFT JOIN descendants ON descendants.root_id = tags.id
+            LEFT JOIN video_tags ON video_tags.tag_id = descendants.id
+            WHERE tags.library_id = ?
+            GROUP BY tags.id
+            ORDER BY tags.sort_order, tags.name COLLATE NOCASE
+            """,
+            operation: "读取标签"
+        )
+        defer { sqlite3_finalize(statement) }
+        bindText(libraryID, to: 1, in: statement)
+        bindText(libraryID, to: 2, in: statement)
+        var tags: [TagRecord] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let id = text(at: 0, in: statement),
+                let storedLibraryID = text(at: 1, in: statement),
+                let name = text(at: 2, in: statement),
+                let source = text(at: 6, in: statement)
+            else { throw DatabaseError.statementFailed("读取标签") }
+            tags.append(TagRecord(
+                id: id,
+                libraryID: storedLibraryID,
+                name: name,
+                parentID: text(at: 3, in: statement),
+                color: text(at: 4, in: statement),
+                sortOrder: Int(sqlite3_column_int(statement, 5)),
+                source: source,
+                videoCount: Int(sqlite3_column_int(statement, 7))
+            ))
+        }
+        return tags
+    }
+
+    @discardableResult
+    func createTag(libraryID: String, name: String, parentID: String?, source: String = "user") throws -> String {
+        try prepareIfNeeded()
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanName.isEmpty == false else { throw DatabaseError.statementFailed("创建标签") }
+        try ensureUniqueTagName(cleanName, libraryID: libraryID, parentID: parentID, excludingID: nil)
+        let orderStatement = try prepare(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tags WHERE library_id = ? AND parent_id IS ?",
+            operation: "创建标签"
+        )
+        bindText(libraryID, to: 1, in: orderStatement)
+        bindOptionalText(parentID, to: 2, in: orderStatement)
+        guard sqlite3_step(orderStatement) == SQLITE_ROW else {
+            sqlite3_finalize(orderStatement)
+            throw DatabaseError.statementFailed("创建标签")
+        }
+        let sortOrder = sqlite3_column_int(orderStatement, 0)
+        sqlite3_finalize(orderStatement)
+
+        let statement = try prepare(
+            """
+            INSERT INTO tags (id, library_id, name, normalized_name, parent_id, color,
+                              sort_order, source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+            """,
+            operation: "创建标签"
+        )
+        defer { sqlite3_finalize(statement) }
+        let now = Date().timeIntervalSince1970
+        let id = UUID().uuidString
+        bindText(id, to: 1, in: statement)
+        bindText(libraryID, to: 2, in: statement)
+        bindText(cleanName, to: 3, in: statement)
+        bindText(normalizedTagName(cleanName), to: 4, in: statement)
+        bindOptionalText(parentID, to: 5, in: statement)
+        sqlite3_bind_int(statement, 6, sortOrder)
+        bindText(source, to: 7, in: statement)
+        sqlite3_bind_double(statement, 8, now)
+        sqlite3_bind_double(statement, 9, now)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("创建标签") }
+        return id
+    }
+
+    func renameTag(id: String, name: String) throws {
+        try prepareIfNeeded()
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanName.isEmpty == false else { throw DatabaseError.statementFailed("重命名标签") }
+        let lookup = try prepare("SELECT library_id, parent_id FROM tags WHERE id = ?", operation: "重命名标签")
+        bindText(id, to: 1, in: lookup)
+        guard sqlite3_step(lookup) == SQLITE_ROW, let libraryID = text(at: 0, in: lookup) else {
+            sqlite3_finalize(lookup)
+            throw DatabaseError.statementFailed("重命名标签")
+        }
+        let parentID = text(at: 1, in: lookup)
+        sqlite3_finalize(lookup)
+        try ensureUniqueTagName(cleanName, libraryID: libraryID, parentID: parentID, excludingID: id)
+        let statement = try prepare(
+            "UPDATE tags SET name = ?, normalized_name = ?, updated_at = ? WHERE id = ?",
+            operation: "重命名标签"
+        )
+        defer { sqlite3_finalize(statement) }
+        bindText(cleanName, to: 1, in: statement)
+        bindText(normalizedTagName(cleanName), to: 2, in: statement)
+        sqlite3_bind_double(statement, 3, Date().timeIntervalSince1970)
+        bindText(id, to: 4, in: statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("重命名标签") }
+    }
+
+    func setTagColor(id: String, color: String?) throws {
+        try prepareIfNeeded()
+        let statement = try prepare("UPDATE tags SET color = ?, updated_at = ? WHERE id = ?", operation: "设置标签颜色")
+        defer { sqlite3_finalize(statement) }
+        bindOptionalText(color, to: 1, in: statement)
+        sqlite3_bind_double(statement, 2, Date().timeIntervalSince1970)
+        bindText(id, to: 3, in: statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("设置标签颜色") }
+    }
+
+    func deleteTag(id: String) throws {
+        try prepareIfNeeded()
+        let statement = try prepare("DELETE FROM tags WHERE id = ?", operation: "删除标签")
+        defer { sqlite3_finalize(statement) }
+        bindText(id, to: 1, in: statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("删除标签") }
+    }
+
+    func moveTag(id: String, parentID: String?, sortOrder: Int) throws {
+        try prepareIfNeeded()
+        guard id != parentID else { throw DatabaseError.statementFailed("移动标签") }
+        if let parentID {
+            let cycle = try prepare(
+                """
+                WITH RECURSIVE descendants(id) AS (
+                    SELECT id FROM tags WHERE parent_id = ?
+                    UNION ALL SELECT tags.id FROM tags JOIN descendants ON tags.parent_id = descendants.id
+                ) SELECT 1 FROM descendants WHERE id = ? LIMIT 1
+                """,
+                operation: "移动标签"
+            )
+            bindText(id, to: 1, in: cycle)
+            bindText(parentID, to: 2, in: cycle)
+            let createsCycle = sqlite3_step(cycle) == SQLITE_ROW
+            sqlite3_finalize(cycle)
+            guard createsCycle == false else { throw DatabaseError.statementFailed("移动标签") }
+        }
+        let statement = try prepare(
+            "UPDATE tags SET parent_id = ?, sort_order = ?, updated_at = ? WHERE id = ?",
+            operation: "移动标签"
+        )
+        defer { sqlite3_finalize(statement) }
+        bindOptionalText(parentID, to: 1, in: statement)
+        sqlite3_bind_int64(statement, 2, Int64(sortOrder))
+        sqlite3_bind_double(statement, 3, Date().timeIntervalSince1970)
+        bindText(id, to: 4, in: statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("移动标签") }
+    }
+
+    func mergeTag(sourceID: String, targetID: String) throws {
+        try prepareIfNeeded()
+        guard sourceID != targetID else { return }
+        guard try isTag(targetID, descendantOf: sourceID) == false else {
+            throw DatabaseError.statementFailed("合并标签")
+        }
+        try execute("BEGIN IMMEDIATE")
+        do {
+            let relations = try prepare(
+                "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) SELECT video_id, ?, created_at FROM video_tags WHERE tag_id = ?",
+                operation: "合并标签"
+            )
+            bindText(targetID, to: 1, in: relations)
+            bindText(sourceID, to: 2, in: relations)
+            guard sqlite3_step(relations) == SQLITE_DONE else { sqlite3_finalize(relations); throw DatabaseError.statementFailed("合并标签") }
+            sqlite3_finalize(relations)
+            let children = try prepare("UPDATE tags SET parent_id = ? WHERE parent_id = ?", operation: "合并标签")
+            bindText(targetID, to: 1, in: children)
+            bindText(sourceID, to: 2, in: children)
+            guard sqlite3_step(children) == SQLITE_DONE else { sqlite3_finalize(children); throw DatabaseError.statementFailed("合并标签") }
+            sqlite3_finalize(children)
+            let mappings = try prepare("UPDATE finder_tag_import_mappings SET tag_id = ? WHERE tag_id = ?", operation: "合并标签")
+            bindText(targetID, to: 1, in: mappings)
+            bindText(sourceID, to: 2, in: mappings)
+            guard sqlite3_step(mappings) == SQLITE_DONE else { sqlite3_finalize(mappings); throw DatabaseError.statementFailed("合并标签") }
+            sqlite3_finalize(mappings)
+            try deleteTag(id: sourceID)
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    func setTagAssignment(tagID: String, videoIDs: [String], enabled: Bool) throws {
+        try prepareIfNeeded()
+        guard videoIDs.isEmpty == false else { return }
+        try execute("BEGIN IMMEDIATE")
+        do {
+            if enabled {
+                let statement = try prepare(
+                    "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) VALUES (?, ?, ?)",
+                    operation: "添加标签"
+                )
+                defer { sqlite3_finalize(statement) }
+                for videoID in videoIDs {
+                    sqlite3_reset(statement); sqlite3_clear_bindings(statement)
+                    bindText(videoID, to: 1, in: statement)
+                    bindText(tagID, to: 2, in: statement)
+                    sqlite3_bind_double(statement, 3, Date().timeIntervalSince1970)
+                    guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("添加标签") }
+                }
+            } else {
+                let placeholders = Array(repeating: "?", count: videoIDs.count).joined(separator: ",")
+                let statement = try prepare(
+                    "DELETE FROM video_tags WHERE tag_id = ? AND video_id IN (\(placeholders))",
+                    operation: "移除标签"
+                )
+                defer { sqlite3_finalize(statement) }
+                bindText(tagID, to: 1, in: statement)
+                for (index, videoID) in videoIDs.enumerated() { bindText(videoID, to: Int32(index + 2), in: statement) }
+                guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("移除标签") }
+            }
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    func tagAssignmentStates(videoIDs: [String], tags: [TagRecord]) throws -> [String: TagAssignmentState] {
+        try prepareIfNeeded()
+        guard videoIDs.isEmpty == false else { return [:] }
+        let placeholders = Array(repeating: "?", count: videoIDs.count).joined(separator: ",")
+        let statement = try prepare(
+            "SELECT tag_id, COUNT(DISTINCT video_id) FROM video_tags WHERE video_id IN (\(placeholders)) GROUP BY tag_id",
+            operation: "读取视频标签"
+        )
+        defer { sqlite3_finalize(statement) }
+        for (index, videoID) in videoIDs.enumerated() { bindText(videoID, to: Int32(index + 1), in: statement) }
+        var counts: [String: Int] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let tagID = text(at: 0, in: statement) { counts[tagID] = Int(sqlite3_column_int(statement, 1)) }
+        }
+        return Dictionary(uniqueKeysWithValues: tags.map { tag in
+            let count = counts[tag.id] ?? 0
+            let state: TagAssignmentState = count == 0 ? .off : (count == videoIDs.count ? .on : .mixed)
+            return (tag.id, state)
+        })
+    }
+
+    func captureTagState(libraryID: String) throws -> TagStateSnapshot {
+        let tags = try fetchTags(libraryID: libraryID)
+        let statement = try prepare(
+            """
+            SELECT video_tags.video_id, video_tags.tag_id
+            FROM video_tags JOIN tags ON tags.id = video_tags.tag_id
+            WHERE tags.library_id = ?
+            """,
+            operation: "读取标签状态"
+        )
+        defer { sqlite3_finalize(statement) }
+        bindText(libraryID, to: 1, in: statement)
+        var relations: [VideoTagRelation] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let videoID = text(at: 0, in: statement), let tagID = text(at: 1, in: statement) {
+                relations.append(VideoTagRelation(videoID: videoID, tagID: tagID))
+            }
+        }
+        return TagStateSnapshot(libraryID: libraryID, tags: tags, relations: relations)
+    }
+
+    func restoreTagState(_ snapshot: TagStateSnapshot) throws {
+        try prepareIfNeeded()
+        try execute("BEGIN IMMEDIATE")
+        do {
+            let delete = try prepare("DELETE FROM tags WHERE library_id = ?", operation: "恢复标签状态")
+            bindText(snapshot.libraryID, to: 1, in: delete)
+            guard sqlite3_step(delete) == SQLITE_DONE else { sqlite3_finalize(delete); throw DatabaseError.statementFailed("恢复标签状态") }
+            sqlite3_finalize(delete)
+
+            var pending = snapshot.tags
+            var inserted = Set<String>()
+            while pending.isEmpty == false {
+                let ready = pending.filter { $0.parentID == nil || inserted.contains($0.parentID!) }
+                guard ready.isEmpty == false else { throw DatabaseError.statementFailed("恢复标签状态") }
+                for tag in ready {
+                    let statement = try prepare(
+                        """
+                        INSERT INTO tags (id, library_id, name, normalized_name, parent_id, color,
+                                          sort_order, source, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        operation: "恢复标签状态"
+                    )
+                    bindText(tag.id, to: 1, in: statement)
+                    bindText(tag.libraryID, to: 2, in: statement)
+                    bindText(tag.name, to: 3, in: statement)
+                    bindText(normalizedTagName(tag.name), to: 4, in: statement)
+                    bindOptionalText(tag.parentID, to: 5, in: statement)
+                    bindOptionalText(tag.color, to: 6, in: statement)
+                    sqlite3_bind_int64(statement, 7, Int64(tag.sortOrder))
+                    bindText(tag.source, to: 8, in: statement)
+                    let now = Date().timeIntervalSince1970
+                    sqlite3_bind_double(statement, 9, now)
+                    sqlite3_bind_double(statement, 10, now)
+                    guard sqlite3_step(statement) == SQLITE_DONE else { sqlite3_finalize(statement); throw DatabaseError.statementFailed("恢复标签状态") }
+                    sqlite3_finalize(statement)
+                    inserted.insert(tag.id)
+                }
+                let readyIDs = Set(ready.map(\.id))
+                pending.removeAll { readyIDs.contains($0.id) }
+            }
+            let relationStatement = try prepare(
+                "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) VALUES (?, ?, ?)",
+                operation: "恢复标签状态"
+            )
+            defer { sqlite3_finalize(relationStatement) }
+            for relation in snapshot.relations {
+                sqlite3_reset(relationStatement); sqlite3_clear_bindings(relationStatement)
+                bindText(relation.videoID, to: 1, in: relationStatement)
+                bindText(relation.tagID, to: 2, in: relationStatement)
+                sqlite3_bind_double(relationStatement, 3, Date().timeIntervalSince1970)
+                guard sqlite3_step(relationStatement) == SQLITE_DONE else { throw DatabaseError.statementFailed("恢复标签状态") }
+            }
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
     func applyScan(
         libraryID: String,
         discoveredVideos: [DiscoveredVideo],
@@ -457,6 +792,53 @@ actor DatabaseStore {
         _ = value.withUnsafeBytes { bytes in
             sqlite3_bind_blob(statement, index, bytes.baseAddress, Int32(bytes.count), sqliteTransient)
         }
+    }
+
+    private func normalizedTagName(_ name: String) -> String {
+        name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func ensureUniqueTagName(
+        _ name: String,
+        libraryID: String,
+        parentID: String?,
+        excludingID: String?
+    ) throws {
+        let statement = try prepare(
+            """
+            SELECT 1 FROM tags
+            WHERE library_id = ? AND parent_id IS ? AND normalized_name = ?
+              AND (? IS NULL OR id != ?)
+            LIMIT 1
+            """,
+            operation: "检查标签名称"
+        )
+        defer { sqlite3_finalize(statement) }
+        bindText(libraryID, to: 1, in: statement)
+        bindOptionalText(parentID, to: 2, in: statement)
+        bindText(normalizedTagName(name), to: 3, in: statement)
+        bindOptionalText(excludingID, to: 4, in: statement)
+        bindOptionalText(excludingID, to: 5, in: statement)
+        guard sqlite3_step(statement) != SQLITE_ROW else {
+            throw DatabaseError.statementFailed("标签名称重复")
+        }
+    }
+
+    private func isTag(_ candidateID: String, descendantOf tagID: String) throws -> Bool {
+        let statement = try prepare(
+            """
+            WITH RECURSIVE descendants(id) AS (
+                SELECT id FROM tags WHERE parent_id = ?
+                UNION ALL SELECT tags.id FROM tags JOIN descendants ON tags.parent_id = descendants.id
+            ) SELECT 1 FROM descendants WHERE id = ? LIMIT 1
+            """,
+            operation: "检查标签层级"
+        )
+        defer { sqlite3_finalize(statement) }
+        bindText(tagID, to: 1, in: statement)
+        bindText(candidateID, to: 2, in: statement)
+        return sqlite3_step(statement) == SQLITE_ROW
     }
 
     private func bindDate(_ value: Date?, to index: Int32, in statement: OpaquePointer) {

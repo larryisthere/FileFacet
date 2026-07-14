@@ -1,31 +1,40 @@
 import Foundation
 
-struct SidebarSection: Equatable {
-    let title: String
-    let items: [SidebarItem]
+enum LibraryFilter: Equatable, Sendable {
+    case all
+    case untagged
+    case recent
+    case missing
+    case tag(String)
 }
 
-struct SidebarItem: Equatable {
+final class SidebarGroupNode {
+    let title: String
+    var children: [Any]
+
+    init(title: String, children: [Any]) {
+        self.title = title
+        self.children = children
+    }
+}
+
+final class SidebarFilterNode {
     let title: String
     let systemImageName: String
+    let filter: LibraryFilter
+
+    init(title: String, systemImageName: String, filter: LibraryFilter) {
+        self.title = title
+        self.systemImageName = systemImageName
+        self.filter = filter
+    }
 }
 
-enum SidebarModel {
-    static let defaultSections = [
-        SidebarSection(
-            title: "资料库",
-            items: [
-                SidebarItem(title: "全部视频", systemImageName: "film"),
-                SidebarItem(title: "未打标签", systemImageName: "tag.slash"),
-                SidebarItem(title: "最近新增", systemImageName: "clock"),
-                SidebarItem(title: "无法访问", systemImageName: "exclamationmark.triangle"),
-            ]
-        ),
-        SidebarSection(
-            title: "标签",
-            items: [
-                SidebarItem(title: "Finder 标签", systemImageName: "tag"),
-            ]
-        ),
-    ]
+final class TagNode {
+    let tag: TagRecord
+    var children: [TagNode] = []
+
+    init(tag: TagRecord) {
+        self.tag = tag
+    }
 }

@@ -118,6 +118,92 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertEqual(updated?.thumbnailStatus, .completed)
     }
 
+    func testHierarchicalTagsRejectDuplicatesAndCyclesAndCountDescendants() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        let videos = try await store.applyScan(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: [makeDiscoveredVideo(path: "A.mp4", size: 10)]
+        )
+        let parentID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "工作", parentID: nil)
+        let childID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "客户", parentID: parentID)
+        try await store.setTagAssignment(tagID: childID, videoIDs: videos.map(\.id), enabled: true)
+
+        do {
+            _ = try await store.createTag(libraryID: LibraryRecord.primaryID, name: " 工作 ", parentID: nil)
+            XCTFail("同层级规范化重名应被拒绝")
+        } catch {}
+        do {
+            try await store.moveTag(id: parentID, parentID: childID, sortOrder: 0)
+            XCTFail("将父标签移到后代下应被拒绝")
+        } catch {}
+
+        let tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        XCTAssertEqual(tags.first(where: { $0.id == parentID })?.videoCount, 1)
+        XCTAssertEqual(tags.first(where: { $0.id == childID })?.videoCount, 1)
+    }
+
+    func testBatchAssignmentStatesAndMergePreserveRelationsAndChildren() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        let videos = try await store.applyScan(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: [
+                makeDiscoveredVideo(path: "A.mp4", size: 10),
+                makeDiscoveredVideo(path: "B.mp4", size: 20),
+            ]
+        )
+        let sourceID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "来源", parentID: nil)
+        let targetID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "目标", parentID: nil)
+        let childID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "子项", parentID: sourceID)
+        try await store.setTagAssignment(tagID: sourceID, videoIDs: [videos[0].id], enabled: true)
+
+        var tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        var states = try await store.tagAssignmentStates(videoIDs: videos.map(\.id), tags: tags)
+        XCTAssertEqual(states[sourceID], .mixed)
+        XCTAssertEqual(states[targetID], .off)
+
+        try await store.setTagAssignment(tagID: sourceID, videoIDs: videos.map(\.id), enabled: true)
+        tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        states = try await store.tagAssignmentStates(videoIDs: videos.map(\.id), tags: tags)
+        XCTAssertEqual(states[sourceID], .on)
+
+        try await store.mergeTag(sourceID: sourceID, targetID: targetID)
+        tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        states = try await store.tagAssignmentStates(videoIDs: videos.map(\.id), tags: tags)
+        XCTAssertNil(tags.first(where: { $0.id == sourceID }))
+        XCTAssertEqual(tags.first(where: { $0.id == childID })?.parentID, targetID)
+        XCTAssertEqual(states[targetID], .on)
+    }
+
+    func testDeletingParentRemovesSubtreeAndSnapshotRestoresTagState() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        let videos = try await store.applyScan(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: [makeDiscoveredVideo(path: "A.mp4", size: 10)]
+        )
+        let parentID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "父级", parentID: nil)
+        let childID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "子级", parentID: parentID)
+        try await store.setTagAssignment(tagID: childID, videoIDs: videos.map(\.id), enabled: true)
+        let snapshot = try await store.captureTagState(libraryID: LibraryRecord.primaryID)
+
+        try await store.deleteTag(id: parentID)
+        let afterDelete = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        XCTAssertTrue(afterDelete.isEmpty)
+
+        try await store.restoreTagState(snapshot)
+        let restored = try await store.captureTagState(libraryID: LibraryRecord.primaryID)
+        XCTAssertEqual(Set(restored.tags.map(\.id)), Set([parentID, childID]))
+        XCTAssertEqual(restored.relations, snapshot.relations)
+    }
+
     private func makeLibraryRecord(name: String = "Videos") -> LibraryRecord {
         LibraryRecord(
             id: LibraryRecord.primaryID,

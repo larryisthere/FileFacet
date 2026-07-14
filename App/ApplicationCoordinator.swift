@@ -15,7 +15,18 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         onOpenVideo: { [weak self] video in self?.openVideo(video) },
         onRevealVideo: { [weak self] video in self?.revealVideo(video) },
         onCopyPath: { [weak self] video in self?.copyPath(video) },
-        thumbnailURL: { [weak self] video in self?.libraryAccessCoordinator?.thumbnailURL(for: video) }
+        thumbnailURL: { [weak self] video in self?.libraryAccessCoordinator?.thumbnailURL(for: video) },
+        onFilterChanged: { [weak self] filter in self?.applyFilter(filter) },
+        onCreateTag: { [weak self] name, parentID in self?.libraryAccessCoordinator?.createTag(name: name, parentID: parentID) },
+        onRenameTag: { [weak self] tag, name in self?.libraryAccessCoordinator?.renameTag(tag, name: name) },
+        onDeleteTag: { [weak self] tag in self?.libraryAccessCoordinator?.deleteTag(tag) },
+        onMoveTag: { [weak self] tag, parentID, order in self?.libraryAccessCoordinator?.moveTag(tag, parentID: parentID, sortOrder: order) },
+        onSetTagColor: { [weak self] tag, color in self?.libraryAccessCoordinator?.setTagColor(tag, color: color) },
+        onMergeTag: { [weak self] source, target in self?.libraryAccessCoordinator?.mergeTag(source, into: target) },
+        onAssignVideos: { [weak self] tag, videoIDs in self?.libraryAccessCoordinator?.setTagAssignment(tag, videoIDs: videoIDs, enabled: true) },
+        onAssignTagID: { [weak self] tagID, videoIDs in self?.libraryAccessCoordinator?.setTagAssignment(tagID: tagID, videoIDs: videoIDs, enabled: true) },
+        onSetTagAssignment: { [weak self] tag, videoIDs, enabled in self?.libraryAccessCoordinator?.setTagAssignment(tag, videoIDs: videoIDs, enabled: enabled) },
+        loadTagStates: { [weak self] videoIDs, completion in self?.libraryAccessCoordinator?.tagAssignmentStates(videoIDs: videoIDs, completion: completion) }
     )
 
     private lazy var libraryAccessCoordinator: LibraryAccessCoordinator? = {
@@ -65,6 +76,12 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         libraryAccessCoordinator?.onScanStateChanged = { [weak self] state in
             self?.libraryViewController.setScanState(state)
         }
+        libraryAccessCoordinator?.onTagsChanged = { [weak self] tags in
+            self?.libraryViewController.setTags(tags)
+        }
+        libraryAccessCoordinator?.onTagAssignmentsChanged = { [weak self] in
+            self?.libraryViewController.refreshTagAssignments()
+        }
         libraryAccessCoordinator?.onError = { [weak self] message in
             self?.libraryViewController.setLibraryError(message)
         }
@@ -73,6 +90,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         render(lockState: lockCoordinator.state)
         windowController.showWindow(nil)
         windowController.window?.center()
+        libraryAccessCoordinator?.undoManager = windowController.window?.undoManager
         libraryAccessCoordinator?.restoreLibrary()
         AppLogger.lifecycle.notice("Application started")
     }
@@ -163,6 +181,10 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         guard let path = libraryAccessCoordinator?.fileURL(for: video)?.path else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(path, forType: .string)
+    }
+
+    private func applyFilter(_ filter: LibraryFilter) {
+        libraryAccessCoordinator?.applyFilter(filter)
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {

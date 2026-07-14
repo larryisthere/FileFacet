@@ -20,12 +20,16 @@ final class LibraryAccessCoordinator {
     private var activeResource: SecurityScopedResource?
     private var scanTask: Task<Void, Never>?
     private var mediaTask: Task<Void, Never>?
+    private var tags: [TagRecord] = []
 
     var onLibraryChanged: ((LibrarySummary) -> Void)?
     var onVideosChanged: (([VideoRecord]) -> Void)?
     var onVideoChanged: ((VideoRecord) -> Void)?
     var onScanStateChanged: ((LibraryScanState) -> Void)?
+    var onTagsChanged: (([TagRecord]) -> Void)?
+    var onTagAssignmentsChanged: (() -> Void)?
     var onError: ((String) -> Void)?
+    weak var undoManager: UndoManager?
 
     var hasActiveLibrary: Bool { activeResource != nil }
 
@@ -68,6 +72,7 @@ final class LibraryAccessCoordinator {
                 }
 
                 let existingVideos = try await database.fetchVideos(libraryID: record.id)
+                try await refreshTags(libraryID: record.id)
                 onVideosChanged?(existingVideos)
                 startMediaProcessing(videos: existingVideos, rootURL: url)
                 startScan(url: url, libraryID: record.id)
@@ -99,6 +104,8 @@ final class LibraryAccessCoordinator {
                     try await database.replaceLibrary(record)
                     onLibraryChanged?(LibrarySummary(name: url.lastPathComponent))
                     onVideosChanged?([])
+                    tags = []
+                    onTagsChanged?([])
                     AppLogger.library.notice("Library authorization saved")
                     startScan(url: url, libraryID: record.id)
                 } catch {
@@ -117,6 +124,10 @@ final class LibraryAccessCoordinator {
         startScan(url: url, libraryID: LibraryRecord.primaryID)
     }
 
+    func applyFilter(_ filter: LibraryFilter) {
+        // Filtering is applied by the query layer in stage 4.
+    }
+
     func fileURL(for video: VideoRecord) -> URL? {
         guard let rootURL = activeResource?.url else { return nil }
         return fileURL(for: video, rootURL: rootURL)
@@ -133,6 +144,51 @@ final class LibraryAccessCoordinator {
     func thumbnailURL(for video: VideoRecord) -> URL? {
         guard let thumbnailID = video.thumbnailID else { return nil }
         return mediaService?.thumbnailURL(for: thumbnailID)
+    }
+
+    func createTag(name: String, parentID: String?) {
+        mutateTags(actionName: "新建标签") { database in
+            _ = try await database.createTag(libraryID: LibraryRecord.primaryID, name: name, parentID: parentID)
+        }
+    }
+
+    func renameTag(_ tag: TagRecord, name: String) {
+        mutateTags(actionName: "重命名标签") { database in try await database.renameTag(id: tag.id, name: name) }
+    }
+
+    func deleteTag(_ tag: TagRecord) {
+        mutateTags(actionName: "删除标签") { database in try await database.deleteTag(id: tag.id) }
+    }
+
+    func moveTag(_ tag: TagRecord, parentID: String?, sortOrder: Int) {
+        mutateTags(actionName: "移动标签") { database in try await database.moveTag(id: tag.id, parentID: parentID, sortOrder: sortOrder) }
+    }
+
+    func setTagColor(_ tag: TagRecord, color: String?) {
+        mutateTags(actionName: "设置标签颜色") { database in try await database.setTagColor(id: tag.id, color: color) }
+    }
+
+    func mergeTag(_ source: TagRecord, into target: TagRecord) {
+        mutateTags(actionName: "合并标签") { database in try await database.mergeTag(sourceID: source.id, targetID: target.id) }
+    }
+
+    func setTagAssignment(_ tag: TagRecord, videoIDs: [String], enabled: Bool) {
+        mutateTags(actionName: enabled ? "添加标签" : "移除标签") { database in
+            try await database.setTagAssignment(tagID: tag.id, videoIDs: videoIDs, enabled: enabled)
+        }
+    }
+
+    func setTagAssignment(tagID: String, videoIDs: [String], enabled: Bool) {
+        guard let tag = tags.first(where: { $0.id == tagID }) else { return }
+        setTagAssignment(tag, videoIDs: videoIDs, enabled: enabled)
+    }
+
+    func tagAssignmentStates(videoIDs: [String], completion: @escaping ([String: TagAssignmentState]) -> Void) {
+        let tags = self.tags
+        Task {
+            let states = (try? await database.tagAssignmentStates(videoIDs: videoIDs, tags: tags)) ?? [:]
+            completion(states)
+        }
     }
 
     private func connect(url: URL) throws {
@@ -204,6 +260,50 @@ final class LibraryAccessCoordinator {
                 } catch {
                     AppLogger.library.error("Media processing failed with category: \(String(describing: type(of: error)), privacy: .public)")
                 }
+            }
+        }
+    }
+
+    private func refreshTags(libraryID: String) async throws {
+        tags = try await database.fetchTags(libraryID: libraryID)
+        onTagsChanged?(tags)
+    }
+
+    private func mutateTags(
+        actionName: String,
+        operation: @escaping @Sendable (DatabaseStore) async throws -> Void
+    ) {
+        let database = self.database
+        Task {
+            do {
+                let snapshot = try await database.captureTagState(libraryID: LibraryRecord.primaryID)
+                try await operation(database)
+                try await refreshTags(libraryID: LibraryRecord.primaryID)
+                onTagAssignmentsChanged?()
+                undoManager?.registerUndo(withTarget: self) { target in
+                    target.restoreTagState(snapshot, actionName: actionName)
+                }
+                undoManager?.setActionName(actionName)
+            } catch {
+                AppLogger.database.error("Tag mutation failed with category: \(String(describing: type(of: error)), privacy: .public)")
+                onError?("标签操作未完成，请检查名称或层级后重试。")
+            }
+        }
+    }
+
+    private func restoreTagState(_ snapshot: TagStateSnapshot, actionName: String) {
+        Task {
+            do {
+                let redoSnapshot = try await database.captureTagState(libraryID: snapshot.libraryID)
+                try await database.restoreTagState(snapshot)
+                try await refreshTags(libraryID: snapshot.libraryID)
+                onTagAssignmentsChanged?()
+                undoManager?.registerUndo(withTarget: self) { target in
+                    target.restoreTagState(redoSnapshot, actionName: actionName)
+                }
+                undoManager?.setActionName(actionName)
+            } catch {
+                AppLogger.database.error("Tag undo failed with category: \(String(describing: type(of: error)), privacy: .public)")
             }
         }
     }

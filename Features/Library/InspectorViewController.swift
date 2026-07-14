@@ -6,16 +6,25 @@ final class InspectorViewController: NSViewController {
     private let onOpen: (VideoRecord) -> Void
     private let onReveal: (VideoRecord) -> Void
     private let onCopyPath: (VideoRecord) -> Void
+    private let onSetTagAssignment: (TagRecord, [String], Bool) -> Void
+    private let loadTagStates: ([String], @escaping ([String: TagAssignmentState]) -> Void) -> Void
     private var selectedVideo: VideoRecord?
+    private var selectedVideos: [VideoRecord] = []
+    private var tags: [TagRecord] = []
+    private var tagStates: [String: TagAssignmentState] = [:]
 
     init(
         onOpen: @escaping (VideoRecord) -> Void,
         onReveal: @escaping (VideoRecord) -> Void,
-        onCopyPath: @escaping (VideoRecord) -> Void
+        onCopyPath: @escaping (VideoRecord) -> Void,
+        onSetTagAssignment: @escaping (TagRecord, [String], Bool) -> Void,
+        loadTagStates: @escaping ([String], @escaping ([String: TagAssignmentState]) -> Void) -> Void
     ) {
         self.onOpen = onOpen
         self.onReveal = onReveal
         self.onCopyPath = onCopyPath
+        self.onSetTagAssignment = onSetTagAssignment
+        self.loadTagStates = loadTagStates
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -41,12 +50,35 @@ final class InspectorViewController: NSViewController {
     }
 
     func setSelection(_ videos: [VideoRecord]) {
+        selectedVideos = videos
+        selectedVideo = videos.count == 1 ? videos[0] : nil
+        renderSelection()
+        refreshTagAssignments()
+    }
+
+    func setTags(_ tags: [TagRecord]) {
+        self.tags = tags
+        renderSelection()
+        refreshTagAssignments()
+    }
+
+    func refreshTagAssignments() {
+        let videoIDs = selectedVideos.map(\.id)
+        guard videoIDs.isEmpty == false else { return }
+        loadTagStates(videoIDs) { [weak self] states in
+            guard let self, self.selectedVideos.map(\.id) == videoIDs else { return }
+            self.tagStates = states
+            self.renderSelection()
+        }
+    }
+
+    private func renderSelection() {
         loadViewIfNeeded()
         stack.arrangedSubviews.forEach {
             stack.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
-        selectedVideo = videos.count == 1 ? videos[0] : nil
+        let videos = selectedVideos
 
         let heading = NSTextField(labelWithString: "检查器")
         heading.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -60,6 +92,7 @@ final class InspectorViewController: NSViewController {
             addPrimaryText("已选择 \(videos.count) 个视频")
             let totalBytes = videos.reduce(Int64(0)) { $0 + $1.fileSize }
             addField(title: "总大小", value: ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file))
+            addTagControls()
             return
         }
 
@@ -90,6 +123,7 @@ final class InspectorViewController: NSViewController {
         buttons.addArrangedSubview(revealButton)
         buttons.addArrangedSubview(copyButton)
         stack.addArrangedSubview(buttons)
+        addTagControls()
     }
 
     private func addPrimaryText(_ value: String) {
@@ -128,6 +162,28 @@ final class InspectorViewController: NSViewController {
             : String(format: "%d:%02d", minutes, seconds)
     }
 
+    private func addTagControls() {
+        guard tags.isEmpty == false, selectedVideos.isEmpty == false else { return }
+        let separator = NSBox(); separator.boxType = .separator
+        stack.addArrangedSubview(separator)
+        separator.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        let heading = NSTextField(labelWithString: "应用标签")
+        heading.font = .systemFont(ofSize: 12, weight: .semibold)
+        stack.addArrangedSubview(heading)
+        for tag in tags {
+            let button = TagCheckbox(tag: tag, target: self, action: #selector(toggleTag(_:)))
+            button.title = tag.name
+            button.setButtonType(.switch)
+            button.allowsMixedState = true
+            switch tagStates[tag.id] ?? .off {
+            case .off: button.state = .off
+            case .mixed: button.state = .mixed
+            case .on: button.state = .on
+            }
+            stack.addArrangedSubview(button)
+        }
+    }
+
     @objc private func openVideo() {
         if let selectedVideo { onOpen(selectedVideo) }
     }
@@ -139,4 +195,22 @@ final class InspectorViewController: NSViewController {
     @objc private func copyPath() {
         if let selectedVideo { onCopyPath(selectedVideo) }
     }
+
+    @objc private func toggleTag(_ sender: TagCheckbox) {
+        let videoIDs = selectedVideos.map(\.id)
+        let enabled = sender.state == .on
+        onSetTagAssignment(sender.tagRecord, videoIDs, enabled)
+    }
+}
+
+private final class TagCheckbox: NSButton {
+    let tagRecord: TagRecord
+    init(tag: TagRecord, target: AnyObject?, action: Selector?) {
+        self.tagRecord = tag
+        super.init(frame: .zero)
+        self.target = target
+        self.action = action
+    }
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }

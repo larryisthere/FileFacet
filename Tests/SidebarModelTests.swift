@@ -2,19 +2,33 @@ import XCTest
 @testable import VideoTagManager
 
 final class SidebarModelTests: XCTestCase {
-    func testDefaultSidebarContainsUserFacingLibraryFilters() {
-        let titles = SidebarModel.defaultSections.flatMap(\.items).map(\.title)
-
-        XCTAssertEqual(
-            titles,
-            ["全部视频", "未打标签", "最近新增", "无法访问", "Finder 标签"]
-        )
+    func testLibraryFiltersPreserveAssociatedTagIdentity() {
+        XCTAssertEqual(LibraryFilter.all, .all)
+        XCTAssertEqual(LibraryFilter.untagged, .untagged)
+        XCTAssertEqual(LibraryFilter.recent, .recent)
+        XCTAssertEqual(LibraryFilter.missing, .missing)
+        XCTAssertEqual(LibraryFilter.tag("tag-id"), .tag("tag-id"))
     }
 
-    func testFinderTagsLiveInDedicatedSection() {
-        let tagsSection = SidebarModel.defaultSections[1]
+    func testTagNodeKeepsTagAndChildren() {
+        let parent = TagNode(tag: makeTag(id: "parent", name: "父级"))
+        let child = TagNode(tag: makeTag(id: "child", name: "子级", parentID: "parent"))
+        parent.children.append(child)
 
-        XCTAssertEqual(tagsSection.title, "标签")
-        XCTAssertEqual(tagsSection.items.map(\.title), ["Finder 标签"])
+        XCTAssertEqual(parent.tag.id, "parent")
+        XCTAssertEqual(parent.children.map(\.tag.id), ["child"])
+    }
+
+    private func makeTag(id: String, name: String, parentID: String? = nil) -> TagRecord {
+        TagRecord(
+            id: id,
+            libraryID: LibraryRecord.primaryID,
+            name: name,
+            parentID: parentID,
+            color: nil,
+            sortOrder: 0,
+            source: "user",
+            videoCount: 0
+        )
     }
 }

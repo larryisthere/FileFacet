@@ -10,6 +10,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     private let onOpenVideo: (VideoRecord) -> Void
     private let onSelectionChanged: ([VideoRecord]) -> Void
     private let thumbnailURL: (VideoRecord) -> URL?
+    private let onAssignTagID: (String, [String]) -> Void
     private var videos: [VideoRecord] = []
     private var hasLibrary = false
 
@@ -45,13 +46,15 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         onRescan: @escaping () -> Void,
         onOpenVideo: @escaping (VideoRecord) -> Void,
         onSelectionChanged: @escaping ([VideoRecord]) -> Void,
-        thumbnailURL: @escaping (VideoRecord) -> URL?
+        thumbnailURL: @escaping (VideoRecord) -> URL?,
+        onAssignTagID: @escaping (String, [String]) -> Void
     ) {
         self.onChooseLibrary = onChooseLibrary
         self.onRescan = onRescan
         self.onOpenVideo = onOpenVideo
         self.onSelectionChanged = onSelectionChanged
         self.thumbnailURL = thumbnailURL
+        self.onAssignTagID = onAssignTagID
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -96,6 +99,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         collectionView.allowsMultipleSelection = true
         collectionView.backgroundColors = [.clear]
         collectionView.register(VideoCollectionViewItem.self, forItemWithIdentifier: Self.itemIdentifier)
+        collectionView.registerForDraggedTypes([SidebarViewController.tagPasteboardType])
         let doubleClickRecognizer = NSClickGestureRecognizer(target: self, action: #selector(openSelectedVideo))
         doubleClickRecognizer.numberOfClicksRequired = 2
         collectionView.addGestureRecognizer(doubleClickRecognizer)
@@ -225,6 +229,39 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
 
     func collectionViewSelectionDidChange(_ notification: Notification) {
         notifySelectionChanged()
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> NSPasteboardWriting? {
+        let selectedIDs = collectionView.selectionIndexPaths.contains(indexPath)
+            ? collectionView.selectionIndexPaths.sorted().map { videos[$0.item].id }
+            : [videos[indexPath.item].id]
+        let item = NSPasteboardItem()
+        item.setString(selectedIDs.joined(separator: "\n"), forType: SidebarViewController.videoPasteboardType)
+        return item
+    }
+
+    func collectionView(
+        _ collectionView: NSCollectionView,
+        validateDrop draggingInfo: NSDraggingInfo,
+        proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>,
+        dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>
+    ) -> NSDragOperation {
+        draggingInfo.draggingPasteboard.string(forType: SidebarViewController.tagPasteboardType) == nil ? [] : .copy
+    }
+
+    func collectionView(
+        _ collectionView: NSCollectionView,
+        acceptDrop draggingInfo: NSDraggingInfo,
+        indexPath: IndexPath,
+        dropOperation: NSCollectionView.DropOperation
+    ) -> Bool {
+        guard let tagID = draggingInfo.draggingPasteboard.string(forType: SidebarViewController.tagPasteboardType),
+              videos.indices.contains(indexPath.item) else { return false }
+        let videoIDs = collectionView.selectionIndexPaths.contains(indexPath)
+            ? collectionView.selectionIndexPaths.sorted().map { videos[$0.item].id }
+            : [videos[indexPath.item].id]
+        onAssignTagID(tagID, videoIDs)
+        return true
     }
 
     private func updateEmptyState() {

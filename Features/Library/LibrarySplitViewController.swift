@@ -4,6 +4,7 @@ import AppKit
 final class LibrarySplitViewController: NSSplitViewController {
     private let videoGridViewController: VideoGridViewController
     private let inspectorViewController: InspectorViewController
+    private let sidebarViewController: SidebarViewController
 
     init(
         onChooseLibrary: @escaping () -> Void,
@@ -11,20 +12,44 @@ final class LibrarySplitViewController: NSSplitViewController {
         onOpenVideo: @escaping (VideoRecord) -> Void,
         onRevealVideo: @escaping (VideoRecord) -> Void,
         onCopyPath: @escaping (VideoRecord) -> Void,
-        thumbnailURL: @escaping (VideoRecord) -> URL?
+        thumbnailURL: @escaping (VideoRecord) -> URL?,
+        onFilterChanged: @escaping (LibraryFilter) -> Void,
+        onCreateTag: @escaping (String, String?) -> Void,
+        onRenameTag: @escaping (TagRecord, String) -> Void,
+        onDeleteTag: @escaping (TagRecord) -> Void,
+        onMoveTag: @escaping (TagRecord, String?, Int) -> Void,
+        onSetTagColor: @escaping (TagRecord, String?) -> Void,
+        onMergeTag: @escaping (TagRecord, TagRecord) -> Void,
+        onAssignVideos: @escaping (TagRecord, [String]) -> Void,
+        onAssignTagID: @escaping (String, [String]) -> Void,
+        onSetTagAssignment: @escaping (TagRecord, [String], Bool) -> Void,
+        loadTagStates: @escaping ([String], @escaping ([String: TagAssignmentState]) -> Void) -> Void
     ) {
         let inspector = InspectorViewController(
             onOpen: onOpenVideo,
             onReveal: onRevealVideo,
-            onCopyPath: onCopyPath
+            onCopyPath: onCopyPath,
+            onSetTagAssignment: onSetTagAssignment,
+            loadTagStates: loadTagStates
         )
         inspectorViewController = inspector
+        sidebarViewController = SidebarViewController(
+            onFilterChanged: onFilterChanged,
+            onCreateTag: onCreateTag,
+            onRenameTag: onRenameTag,
+            onDeleteTag: onDeleteTag,
+            onMoveTag: onMoveTag,
+            onSetColor: onSetTagColor,
+            onMergeTag: onMergeTag,
+            onAssignVideos: onAssignVideos
+        )
         videoGridViewController = VideoGridViewController(
             onChooseLibrary: onChooseLibrary,
             onRescan: onRescan,
             onOpenVideo: onOpenVideo,
             onSelectionChanged: { [weak inspector] videos in inspector?.setSelection(videos) },
-            thumbnailURL: thumbnailURL
+            thumbnailURL: thumbnailURL,
+            onAssignTagID: onAssignTagID
         )
         super.init(nibName: nil, bundle: nil)
     }
@@ -37,7 +62,7 @@ final class LibrarySplitViewController: NSSplitViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        let sidebarItem = NSSplitViewItem(sidebarWithViewController: SidebarViewController())
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarViewController)
         sidebarItem.minimumThickness = 190
         sidebarItem.maximumThickness = 320
 
@@ -69,6 +94,15 @@ final class LibrarySplitViewController: NSSplitViewController {
 
     func updateVideo(_ video: VideoRecord) {
         videoGridViewController.updateVideo(video)
+    }
+
+    func setTags(_ tags: [TagRecord]) {
+        sidebarViewController.setTags(tags)
+        inspectorViewController.setTags(tags)
+    }
+
+    func refreshTagAssignments() {
+        inspectorViewController.refreshTagAssignments()
     }
 
     func setScanState(_ state: LibraryScanState) {
