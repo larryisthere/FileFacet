@@ -17,6 +17,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         onCopyPath: { [weak self] video in self?.copyPath(video) },
         thumbnailURL: { [weak self] video in self?.libraryAccessCoordinator?.thumbnailURL(for: video) },
         onFilterChanged: { [weak self] filter in self?.applyFilter(filter) },
+        onSearchChanged: { [weak self] text in self?.libraryAccessCoordinator?.applySearch(text) },
         onCreateTag: { [weak self] name, parentID in self?.libraryAccessCoordinator?.createTag(name: name, parentID: parentID) },
         onRenameTag: { [weak self] tag, name in self?.libraryAccessCoordinator?.renameTag(tag, name: name) },
         onDeleteTag: { [weak self] tag in self?.libraryAccessCoordinator?.deleteTag(tag) },

@@ -55,6 +55,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         outlineView.style = .sourceList
         outlineView.dataSource = self
         outlineView.delegate = self
+        outlineView.allowsMultipleSelection = true
         outlineView.registerForDraggedTypes([Self.tagPasteboardType, Self.videoPasteboardType])
         outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
         let menu = NSMenu()
@@ -127,10 +128,13 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
-        guard outlineView.selectedRow >= 0 else { return }
-        let item = outlineView.item(atRow: outlineView.selectedRow)
-        if let filter = item as? SidebarFilterNode { onFilterChanged(filter.filter) }
-        if let tag = item as? TagNode { onFilterChanged(.tag(tag.tag.id)) }
+        let selectedItems = outlineView.selectedRowIndexes.map { outlineView.item(atRow: $0) }
+        let selectedTags = selectedItems.compactMap { ($0 as? TagNode)?.tag.id }
+        if selectedTags.count == 1, let tagID = selectedTags.first { onFilterChanged(.tag(tagID)); return }
+        if selectedTags.count > 1 { onFilterChanged(.tags(selectedTags)); return }
+        if let filter = selectedItems.compactMap({ ($0 as? SidebarFilterNode)?.filter }).first {
+            onFilterChanged(filter)
+        }
     }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {

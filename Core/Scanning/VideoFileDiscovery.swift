@@ -21,6 +21,7 @@ struct VideoFileDiscovery: VideoFileDiscovering {
             .contentModificationDateKey,
             .volumeIdentifierKey,
             .fileResourceIdentifierKey,
+            .tagNamesKey,
         ]
         let enumerationStatus = EnumerationStatus()
         guard let enumerator = FileManager.default.enumerator(
@@ -69,7 +70,8 @@ struct VideoFileDiscovery: VideoFileDiscovering {
                     creationDate: values.creationDate,
                     modificationDate: values.contentModificationDate,
                     volumeIdentifier: encodeIdentifier(values.volumeIdentifier),
-                    fileResourceIdentifier: encodeIdentifier(values.fileResourceIdentifier)
+                    fileResourceIdentifier: encodeIdentifier(values.fileResourceIdentifier),
+                    finderTags: (values.tagNames ?? []).filter { $0.isEmpty == false }
                 )
             )
         }

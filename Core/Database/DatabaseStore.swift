@@ -146,6 +146,101 @@ actor DatabaseStore {
         return records
     }
 
+    func fetchVideos(
+        libraryID: String,
+        filter: LibraryFilter,
+        searchText: String = "",
+        now: Date = Date()
+    ) throws -> [VideoRecord] {
+        try prepareIfNeeded()
+        var conditions = ["videos.library_id = ?"]
+        var bindings = [libraryID]
+        var commonTableExpression = ""
+
+        switch filter {
+        case .all:
+            conditions.append("videos.availability_status = 'available'")
+        case .untagged:
+            conditions.append("videos.availability_status = 'available'")
+            conditions.append("NOT EXISTS (SELECT 1 FROM video_tags WHERE video_tags.video_id = videos.id)")
+        case .recent:
+            conditions.append("videos.availability_status = 'available'")
+            conditions.append("videos.first_indexed_at >= ?")
+            bindings.append(String(now.addingTimeInterval(-30 * 24 * 60 * 60).timeIntervalSince1970))
+        case .missing:
+            conditions.append("videos.availability_status != 'available'")
+        case let .tag(tagID):
+            commonTableExpression = tagFilterCTE
+            conditions.append("videos.availability_status = 'available'")
+            conditions.append("videos.id IN (SELECT video_id FROM matching_videos)")
+            bindings.insert(tagID, at: 0)
+            bindings.insert("1", at: 1)
+        case let .tags(tagIDs):
+            guard tagIDs.isEmpty == false else {
+                return try fetchVideos(libraryID: libraryID, filter: .all, searchText: searchText, now: now)
+            }
+            commonTableExpression = tagFilterCTE
+            conditions.append("videos.availability_status = 'available'")
+            conditions.append("videos.id IN (SELECT video_id FROM matching_videos)")
+            bindings.insert(tagIDs.joined(separator: "\u{1F}"), at: 0)
+            bindings.insert(String(tagIDs.count), at: 1)
+        }
+
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedSearch.isEmpty == false {
+            conditions.append("instr(lower(videos.filename), lower(?)) > 0")
+            bindings.append(trimmedSearch)
+        }
+
+        let statement = try prepare(
+            """
+            \(commonTableExpression)
+            SELECT videos.id, videos.library_id, videos.relative_path, videos.filename,
+                   videos.file_extension, videos.file_size, videos.creation_date,
+                   videos.modification_date, videos.duration, videos.width, videos.height,
+                   videos.thumbnail_id, videos.metadata_status, videos.thumbnail_status,
+                   videos.first_indexed_at, videos.availability_status
+            FROM videos
+            WHERE \(conditions.joined(separator: " AND "))
+            ORDER BY videos.filename COLLATE NOCASE, videos.relative_path COLLATE NOCASE
+            """,
+            operation: "筛选视频索引"
+        )
+        defer { sqlite3_finalize(statement) }
+        for (offset, value) in bindings.enumerated() {
+            if (filter == .recent), offset == 1, let seconds = Double(value) {
+                sqlite3_bind_double(statement, Int32(offset + 1), seconds)
+            } else if case .tag = filter, offset == 1 {
+                sqlite3_bind_int(statement, Int32(offset + 1), Int32(value) ?? 1)
+            } else if case .tags = filter, offset == 1 {
+                sqlite3_bind_int(statement, Int32(offset + 1), Int32(value) ?? 1)
+            } else {
+                bindText(value, to: Int32(offset + 1), in: statement)
+            }
+        }
+        var records: [VideoRecord] = []
+        while sqlite3_step(statement) == SQLITE_ROW { records.append(try videoRecord(from: statement)) }
+        return records
+    }
+
+    private var tagFilterCTE: String {
+        """
+        WITH RECURSIVE requested_tags(id) AS (
+            SELECT value FROM json_each('["' || replace(?, char(31), '","') || '"]')
+        ), descendants(requested_id, id) AS (
+            SELECT id, id FROM requested_tags
+            UNION ALL
+            SELECT descendants.requested_id, tags.id
+            FROM tags JOIN descendants ON tags.parent_id = descendants.id
+        ), matching_videos(video_id) AS (
+            SELECT video_tags.video_id
+            FROM video_tags JOIN descendants ON descendants.id = video_tags.tag_id
+            GROUP BY video_tags.video_id
+            HAVING COUNT(DISTINCT descendants.requested_id) = ?
+        )
+        """
+    }
+
     func fetchVideo(id: String) throws -> VideoRecord? {
         try prepareIfNeeded()
         let statement = try prepare(
@@ -578,6 +673,13 @@ actor DatabaseStore {
                 )
             }
 
+            try importFinderTags(
+                libraryID: libraryID,
+                scanID: scanID,
+                discoveredVideos: discoveredVideos,
+                importedAt: completedAt
+            )
+
             let missingStatement = try prepare(
                 """
                 UPDATE videos
@@ -626,6 +728,142 @@ actor DatabaseStore {
         }
 
         return try fetchVideos(libraryID: libraryID)
+    }
+
+    private func importFinderTags(
+        libraryID: String,
+        scanID: String,
+        discoveredVideos: [DiscoveredVideo],
+        importedAt: Date
+    ) throws {
+        let rootID = try finderRootTagID(libraryID: libraryID)
+        let clearStatement = try prepare(
+            """
+            DELETE FROM video_tags
+            WHERE video_id IN (
+                SELECT id FROM videos WHERE library_id = ? AND last_seen_scan_id = ?
+            ) AND tag_id IN (
+                SELECT tag_id FROM finder_tag_import_mappings WHERE library_id = ?
+            )
+            """,
+            operation: "更新 Finder 标签"
+        )
+        bindText(libraryID, to: 1, in: clearStatement)
+        bindText(scanID, to: 2, in: clearStatement)
+        bindText(libraryID, to: 3, in: clearStatement)
+        guard sqlite3_step(clearStatement) == SQLITE_DONE else {
+            sqlite3_finalize(clearStatement)
+            throw DatabaseError.statementFailed("更新 Finder 标签")
+        }
+        sqlite3_finalize(clearStatement)
+
+        for video in discoveredVideos where video.finderTags.isEmpty == false {
+            guard let videoID = try videoID(libraryID: libraryID, relativePath: video.relativePath) else { continue }
+            for rawName in Set(video.finderTags) {
+                let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard name.isEmpty == false else { continue }
+                let externalKey = normalizedTagName(name)
+                let tagID = try finderTagID(
+                    libraryID: libraryID,
+                    rootID: rootID,
+                    externalKey: externalKey,
+                    displayName: name,
+                    importedAt: importedAt
+                )
+                let relation = try prepare(
+                    "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) VALUES (?, ?, ?)",
+                    operation: "导入 Finder 标签"
+                )
+                bindText(videoID, to: 1, in: relation)
+                bindText(tagID, to: 2, in: relation)
+                sqlite3_bind_double(relation, 3, importedAt.timeIntervalSince1970)
+                guard sqlite3_step(relation) == SQLITE_DONE else {
+                    sqlite3_finalize(relation)
+                    throw DatabaseError.statementFailed("导入 Finder 标签")
+                }
+                sqlite3_finalize(relation)
+            }
+        }
+    }
+
+    private func finderRootTagID(libraryID: String) throws -> String {
+        let lookup = try prepare(
+            "SELECT id FROM tags WHERE library_id = ? AND parent_id IS NULL AND normalized_name = ? LIMIT 1",
+            operation: "读取 Finder 标签"
+        )
+        bindText(libraryID, to: 1, in: lookup)
+        bindText(normalizedTagName("Finder 标签"), to: 2, in: lookup)
+        if sqlite3_step(lookup) == SQLITE_ROW, let id = text(at: 0, in: lookup) {
+            sqlite3_finalize(lookup)
+            return id
+        }
+        sqlite3_finalize(lookup)
+        return try createTag(libraryID: libraryID, name: "Finder 标签", parentID: nil, source: "finder-root")
+    }
+
+    private func finderTagID(
+        libraryID: String,
+        rootID: String,
+        externalKey: String,
+        displayName: String,
+        importedAt: Date
+    ) throws -> String {
+        let lookup = try prepare(
+            "SELECT tag_id FROM finder_tag_import_mappings WHERE library_id = ? AND external_key = ? LIMIT 1",
+            operation: "读取 Finder 标签映射"
+        )
+        bindText(libraryID, to: 1, in: lookup)
+        bindText(externalKey, to: 2, in: lookup)
+        if sqlite3_step(lookup) == SQLITE_ROW, let id = text(at: 0, in: lookup) {
+            sqlite3_finalize(lookup)
+            let update = try prepare(
+                "UPDATE finder_tag_import_mappings SET last_seen_at = ? WHERE library_id = ? AND external_key = ?",
+                operation: "更新 Finder 标签映射"
+            )
+            sqlite3_bind_double(update, 1, importedAt.timeIntervalSince1970)
+            bindText(libraryID, to: 2, in: update)
+            bindText(externalKey, to: 3, in: update)
+            guard sqlite3_step(update) == SQLITE_DONE else {
+                sqlite3_finalize(update)
+                throw DatabaseError.statementFailed("更新 Finder 标签映射")
+            }
+            sqlite3_finalize(update)
+            return id
+        }
+        sqlite3_finalize(lookup)
+
+        let tagID = try createTag(libraryID: libraryID, name: displayName, parentID: rootID, source: "finder")
+        let insert = try prepare(
+            """
+            INSERT INTO finder_tag_import_mappings
+                (library_id, external_key, tag_id, first_imported_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            operation: "保存 Finder 标签映射"
+        )
+        bindText(libraryID, to: 1, in: insert)
+        bindText(externalKey, to: 2, in: insert)
+        bindText(tagID, to: 3, in: insert)
+        sqlite3_bind_double(insert, 4, importedAt.timeIntervalSince1970)
+        sqlite3_bind_double(insert, 5, importedAt.timeIntervalSince1970)
+        guard sqlite3_step(insert) == SQLITE_DONE else {
+            sqlite3_finalize(insert)
+            throw DatabaseError.statementFailed("保存 Finder 标签映射")
+        }
+        sqlite3_finalize(insert)
+        return tagID
+    }
+
+    private func videoID(libraryID: String, relativePath: String) throws -> String? {
+        let statement = try prepare(
+            "SELECT id FROM videos WHERE library_id = ? AND relative_path = ? LIMIT 1",
+            operation: "读取 Finder 标签视频"
+        )
+        defer { sqlite3_finalize(statement) }
+        bindText(libraryID, to: 1, in: statement)
+        bindText(relativePath, to: 2, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return text(at: 0, in: statement)
     }
 
     private func migrateIfNeeded() throws {

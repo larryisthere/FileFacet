@@ -6,6 +6,7 @@ enum LibraryFilter: Equatable, Sendable {
     case recent
     case missing
     case tag(String)
+    case tags([String])
 }
 
 final class SidebarGroupNode {

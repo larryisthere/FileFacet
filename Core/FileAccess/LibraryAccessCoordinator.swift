@@ -20,7 +20,14 @@ final class LibraryAccessCoordinator {
     private var activeResource: SecurityScopedResource?
     private var scanTask: Task<Void, Never>?
     private var mediaTask: Task<Void, Never>?
+    private var queryTask: Task<Void, Never>?
+    private var fileEventTask: Task<Void, Never>?
     private var tags: [TagRecord] = []
+    private var currentFilter: LibraryFilter = .all
+    private var currentSearch = ""
+    private lazy var fileEventsWatcher = FSEventsWatcher { [weak self] in
+        Task { @MainActor [weak self] in self?.scheduleScanFromFileEvent() }
+    }
 
     var onLibraryChanged: ((LibrarySummary) -> Void)?
     var onVideosChanged: (([VideoRecord]) -> Void)?
@@ -71,7 +78,11 @@ final class LibraryAccessCoordinator {
                     )
                 }
 
-                let existingVideos = try await database.fetchVideos(libraryID: record.id)
+                let existingVideos = try await database.fetchVideos(
+                    libraryID: record.id,
+                    filter: currentFilter,
+                    searchText: currentSearch
+                )
                 try await refreshTags(libraryID: record.id)
                 onVideosChanged?(existingVideos)
                 startMediaProcessing(videos: existingVideos, rootURL: url)
@@ -125,7 +136,13 @@ final class LibraryAccessCoordinator {
     }
 
     func applyFilter(_ filter: LibraryFilter) {
-        // Filtering is applied by the query layer in stage 4.
+        currentFilter = filter
+        refreshVisibleVideos()
+    }
+
+    func applySearch(_ searchText: String) {
+        currentSearch = searchText
+        refreshVisibleVideos(debounceNanoseconds: 150_000_000)
     }
 
     func fileURL(for video: VideoRecord) -> URL? {
@@ -192,10 +209,12 @@ final class LibraryAccessCoordinator {
     }
 
     private func connect(url: URL) throws {
+        fileEventsWatcher.stop()
         guard let resource = SecurityScopedResource(url: url) else {
             throw CocoaError(.fileReadNoPermission)
         }
         activeResource = resource
+        fileEventsWatcher.start(watching: url)
     }
 
     private func makeBookmark(for url: URL) throws -> Data {
@@ -223,7 +242,13 @@ final class LibraryAccessCoordinator {
                     discoveredVideos: discovered
                 )
                 try Task.checkCancellation()
-                onVideosChanged?(videos)
+                try await refreshTags(libraryID: libraryID)
+                let visibleVideos = try await database.fetchVideos(
+                    libraryID: libraryID,
+                    filter: currentFilter,
+                    searchText: currentSearch
+                )
+                onVideosChanged?(visibleVideos)
                 onScanStateChanged?(.completed(videoCount: videos.count))
                 startMediaProcessing(videos: videos, rootURL: url)
                 AppLogger.library.notice("Library scan completed with \(videos.count, privacy: .public) videos")
@@ -232,6 +257,21 @@ final class LibraryAccessCoordinator {
             } catch {
                 AppLogger.library.error("Library scan failed with category: \(String(describing: type(of: error)), privacy: .public)")
                 onScanStateChanged?(.failed(message: "扫描未完成，仍显示上一次成功建立的索引。"))
+            }
+        }
+    }
+
+    private func scheduleScanFromFileEvent() {
+        fileEventTask?.cancel()
+        fileEventTask = Task {
+            do {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let url = activeResource?.url else { return }
+                startScan(url: url, libraryID: LibraryRecord.primaryID)
+            } catch is CancellationError {
+                return
+            } catch {
+                return
             }
         }
     }
@@ -279,6 +319,7 @@ final class LibraryAccessCoordinator {
                 let snapshot = try await database.captureTagState(libraryID: LibraryRecord.primaryID)
                 try await operation(database)
                 try await refreshTags(libraryID: LibraryRecord.primaryID)
+                try await refreshVisibleVideosNow()
                 onTagAssignmentsChanged?()
                 undoManager?.registerUndo(withTarget: self) { target in
                     target.restoreTagState(snapshot, actionName: actionName)
@@ -297,6 +338,7 @@ final class LibraryAccessCoordinator {
                 let redoSnapshot = try await database.captureTagState(libraryID: snapshot.libraryID)
                 try await database.restoreTagState(snapshot)
                 try await refreshTags(libraryID: snapshot.libraryID)
+                try await refreshVisibleVideosNow()
                 onTagAssignmentsChanged?()
                 undoManager?.registerUndo(withTarget: self) { target in
                     target.restoreTagState(redoSnapshot, actionName: actionName)
@@ -306,5 +348,38 @@ final class LibraryAccessCoordinator {
                 AppLogger.database.error("Tag undo failed with category: \(String(describing: type(of: error)), privacy: .public)")
             }
         }
+    }
+
+    private func refreshVisibleVideos(debounceNanoseconds: UInt64 = 0) {
+        queryTask?.cancel()
+        let database = self.database
+        let filter = currentFilter
+        let search = currentSearch
+        queryTask = Task {
+            do {
+                if debounceNanoseconds > 0 { try await Task.sleep(nanoseconds: debounceNanoseconds) }
+                let videos = try await database.fetchVideos(
+                    libraryID: LibraryRecord.primaryID,
+                    filter: filter,
+                    searchText: search
+                )
+                try Task.checkCancellation()
+                onVideosChanged?(videos)
+            } catch is CancellationError {
+                return
+            } catch {
+                AppLogger.database.error("Video query failed with category: \(String(describing: type(of: error)), privacy: .public)")
+                onError?("筛选视频时发生错误，请重试。")
+            }
+        }
+    }
+
+    private func refreshVisibleVideosNow() async throws {
+        let videos = try await database.fetchVideos(
+            libraryID: LibraryRecord.primaryID,
+            filter: currentFilter,
+            searchText: currentSearch
+        )
+        onVideosChanged?(videos)
     }
 }

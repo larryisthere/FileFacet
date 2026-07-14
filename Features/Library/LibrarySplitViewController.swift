@@ -14,6 +14,7 @@ final class LibrarySplitViewController: NSSplitViewController {
         onCopyPath: @escaping (VideoRecord) -> Void,
         thumbnailURL: @escaping (VideoRecord) -> URL?,
         onFilterChanged: @escaping (LibraryFilter) -> Void,
+        onSearchChanged: @escaping (String) -> Void,
         onCreateTag: @escaping (String, String?) -> Void,
         onRenameTag: @escaping (TagRecord, String) -> Void,
         onDeleteTag: @escaping (TagRecord) -> Void,
@@ -49,7 +50,8 @@ final class LibrarySplitViewController: NSSplitViewController {
             onOpenVideo: onOpenVideo,
             onSelectionChanged: { [weak inspector] videos in inspector?.setSelection(videos) },
             thumbnailURL: thumbnailURL,
-            onAssignTagID: onAssignTagID
+            onAssignTagID: onAssignTagID,
+            onSearchChanged: onSearchChanged
         )
         super.init(nibName: nil, bundle: nil)
     }

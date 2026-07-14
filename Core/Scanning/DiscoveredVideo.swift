@@ -9,4 +9,5 @@ struct DiscoveredVideo: Equatable, Sendable {
     let modificationDate: Date?
     let volumeIdentifier: Data?
     let fileResourceIdentifier: Data?
+    let finderTags: [String]
 }

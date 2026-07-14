@@ -11,6 +11,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     private let onSelectionChanged: ([VideoRecord]) -> Void
     private let thumbnailURL: (VideoRecord) -> URL?
     private let onAssignTagID: (String, [String]) -> Void
+    private let onSearchChanged: (String) -> Void
     private var videos: [VideoRecord] = []
     private var hasLibrary = false
 
@@ -40,6 +41,15 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         slider.toolTip = "调整网格大小"
         return slider
     }()
+    private lazy var searchField: NSSearchField = {
+        let field = NSSearchField()
+        field.placeholderString = "搜索文件名"
+        field.sendsSearchStringImmediately = true
+        field.target = self
+        field.action = #selector(searchChanged)
+        field.widthAnchor.constraint(equalToConstant: 190).isActive = true
+        return field
+    }()
 
     init(
         onChooseLibrary: @escaping () -> Void,
@@ -47,7 +57,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         onOpenVideo: @escaping (VideoRecord) -> Void,
         onSelectionChanged: @escaping ([VideoRecord]) -> Void,
         thumbnailURL: @escaping (VideoRecord) -> URL?,
-        onAssignTagID: @escaping (String, [String]) -> Void
+        onAssignTagID: @escaping (String, [String]) -> Void,
+        onSearchChanged: @escaping (String) -> Void
     ) {
         self.onChooseLibrary = onChooseLibrary
         self.onRescan = onRescan
@@ -55,6 +66,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         self.onSelectionChanged = onSelectionChanged
         self.thumbnailURL = thumbnailURL
         self.onAssignTagID = onAssignTagID
+        self.onSearchChanged = onSearchChanged
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -80,7 +92,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         let zoomIcon = NSImageView(
             image: NSImage(systemSymbolName: "rectangle.grid.3x2", accessibilityDescription: "网格大小") ?? NSImage()
         )
-        let header = NSStackView(views: [titleStack, NSView(), zoomIcon, zoomSlider, rescanButton, headerChooseButton])
+        let header = NSStackView(views: [titleStack, NSView(), searchField, zoomIcon, zoomSlider, rescanButton, headerChooseButton])
         header.translatesAutoresizingMaskIntoConstraints = false
         header.orientation = .horizontal
         header.alignment = .centerY
@@ -290,6 +302,10 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         let width = zoomSlider.doubleValue
         layout.itemSize = NSSize(width: width, height: width * 0.76)
         layout.invalidateLayout()
+    }
+
+    @objc private func searchChanged() {
+        onSearchChanged(searchField.stringValue)
     }
 
     private func notifySelectionChanged() {
