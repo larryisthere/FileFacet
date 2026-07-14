@@ -70,6 +70,25 @@ actor DatabaseStore {
         }
     }
 
+    func replaceLibrary(_ record: LibraryRecord) throws {
+        try prepareIfNeeded()
+        try execute("BEGIN IMMEDIATE")
+        do {
+            let statement = try prepare("DELETE FROM libraries WHERE id = ?", operation: "更换资料库")
+            bindText(record.id, to: 1, in: statement)
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                sqlite3_finalize(statement)
+                throw DatabaseError.statementFailed("更换资料库")
+            }
+            sqlite3_finalize(statement)
+            try saveLibrary(record)
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
     func fetchPrimaryLibrary() throws -> LibraryRecord? {
         try prepareIfNeeded()
         let statement = try prepare(
@@ -101,6 +120,159 @@ actor DatabaseStore {
             createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3)),
             lastScanAt: lastScanAt
         )
+    }
+
+    func fetchVideos(libraryID: String, includeMissing: Bool = false) throws -> [VideoRecord] {
+        try prepareIfNeeded()
+        let availabilityClause = includeMissing ? "" : "AND availability_status = 'available'"
+        let statement = try prepare(
+            """
+            SELECT id, library_id, relative_path, filename, file_extension, file_size,
+                   creation_date, modification_date, first_indexed_at, availability_status
+            FROM videos
+            WHERE library_id = ? \(availabilityClause)
+            ORDER BY filename COLLATE NOCASE, relative_path COLLATE NOCASE
+            """,
+            operation: "读取视频索引"
+        )
+        defer { sqlite3_finalize(statement) }
+        bindText(libraryID, to: 1, in: statement)
+
+        var records: [VideoRecord] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let id = text(at: 0, in: statement),
+                let storedLibraryID = text(at: 1, in: statement),
+                let relativePath = text(at: 2, in: statement),
+                let filename = text(at: 3, in: statement),
+                let fileExtension = text(at: 4, in: statement),
+                let availabilityText = text(at: 9, in: statement),
+                let availability = VideoRecord.Availability(rawValue: availabilityText)
+            else {
+                throw DatabaseError.statementFailed("读取视频索引")
+            }
+
+            records.append(
+                VideoRecord(
+                    id: id,
+                    libraryID: storedLibraryID,
+                    relativePath: relativePath,
+                    filename: filename,
+                    fileExtension: fileExtension,
+                    fileSize: sqlite3_column_int64(statement, 5),
+                    creationDate: date(at: 6, in: statement),
+                    modificationDate: date(at: 7, in: statement),
+                    firstIndexedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 8)),
+                    availability: availability
+                )
+            )
+        }
+        return records
+    }
+
+    func applyScan(
+        libraryID: String,
+        discoveredVideos: [DiscoveredVideo],
+        completedAt: Date = Date()
+    ) throws -> [VideoRecord] {
+        try prepareIfNeeded()
+        let scanID = UUID().uuidString
+        try execute("BEGIN IMMEDIATE")
+
+        do {
+            let scanStatement = try prepare(
+                "INSERT INTO scan_runs (id, library_id, started_at, status) VALUES (?, ?, ?, 'running')",
+                operation: "开始扫描"
+            )
+            bindText(scanID, to: 1, in: scanStatement)
+            bindText(libraryID, to: 2, in: scanStatement)
+            sqlite3_bind_double(scanStatement, 3, completedAt.timeIntervalSince1970)
+            guard sqlite3_step(scanStatement) == SQLITE_DONE else {
+                sqlite3_finalize(scanStatement)
+                throw DatabaseError.statementFailed("开始扫描")
+            }
+            sqlite3_finalize(scanStatement)
+
+            let upsertStatement = try prepare(
+                """
+                INSERT INTO videos (
+                    id, library_id, relative_path, volume_identifier, file_resource_identifier,
+                    filename, file_extension, file_size, creation_date, modification_date,
+                    first_indexed_at, updated_at, last_seen_scan_id, availability_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'available')
+                ON CONFLICT(library_id, relative_path) DO UPDATE SET
+                    volume_identifier = excluded.volume_identifier,
+                    file_resource_identifier = excluded.file_resource_identifier,
+                    filename = excluded.filename,
+                    file_extension = excluded.file_extension,
+                    file_size = excluded.file_size,
+                    creation_date = excluded.creation_date,
+                    modification_date = excluded.modification_date,
+                    updated_at = excluded.updated_at,
+                    last_seen_scan_id = excluded.last_seen_scan_id,
+                    availability_status = 'available'
+                """,
+                operation: "写入视频索引"
+            )
+            defer { sqlite3_finalize(upsertStatement) }
+            for video in discoveredVideos {
+                try upsert(
+                    video,
+                    libraryID: libraryID,
+                    scanID: scanID,
+                    indexedAt: completedAt,
+                    statement: upsertStatement
+                )
+            }
+
+            let missingStatement = try prepare(
+                """
+                UPDATE videos
+                SET availability_status = 'missing', updated_at = ?
+                WHERE library_id = ? AND (last_seen_scan_id IS NULL OR last_seen_scan_id != ?)
+                """,
+                operation: "更新失效视频"
+            )
+            sqlite3_bind_double(missingStatement, 1, completedAt.timeIntervalSince1970)
+            bindText(libraryID, to: 2, in: missingStatement)
+            bindText(scanID, to: 3, in: missingStatement)
+            guard sqlite3_step(missingStatement) == SQLITE_DONE else {
+                sqlite3_finalize(missingStatement)
+                throw DatabaseError.statementFailed("更新失效视频")
+            }
+            sqlite3_finalize(missingStatement)
+
+            let finishStatement = try prepare(
+                "UPDATE scan_runs SET completed_at = ?, status = 'completed' WHERE id = ?",
+                operation: "完成扫描"
+            )
+            sqlite3_bind_double(finishStatement, 1, completedAt.timeIntervalSince1970)
+            bindText(scanID, to: 2, in: finishStatement)
+            guard sqlite3_step(finishStatement) == SQLITE_DONE else {
+                sqlite3_finalize(finishStatement)
+                throw DatabaseError.statementFailed("完成扫描")
+            }
+            sqlite3_finalize(finishStatement)
+
+            let libraryStatement = try prepare(
+                "UPDATE libraries SET last_scan_at = ? WHERE id = ?",
+                operation: "更新扫描时间"
+            )
+            sqlite3_bind_double(libraryStatement, 1, completedAt.timeIntervalSince1970)
+            bindText(libraryID, to: 2, in: libraryStatement)
+            guard sqlite3_step(libraryStatement) == SQLITE_DONE else {
+                sqlite3_finalize(libraryStatement)
+                throw DatabaseError.statementFailed("更新扫描时间")
+            }
+            sqlite3_finalize(libraryStatement)
+
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+
+        return try fetchVideos(libraryID: libraryID)
     }
 
     private func migrateIfNeeded() throws {
@@ -257,6 +429,63 @@ actor DatabaseStore {
 
     private func bindText(_ value: String, to index: Int32, in statement: OpaquePointer) {
         sqlite3_bind_text(statement, index, value, -1, sqliteTransient)
+    }
+
+    private func bindData(_ value: Data?, to index: Int32, in statement: OpaquePointer) {
+        guard let value else {
+            sqlite3_bind_null(statement, index)
+            return
+        }
+        _ = value.withUnsafeBytes { bytes in
+            sqlite3_bind_blob(statement, index, bytes.baseAddress, Int32(bytes.count), sqliteTransient)
+        }
+    }
+
+    private func bindDate(_ value: Date?, to index: Int32, in statement: OpaquePointer) {
+        if let value {
+            sqlite3_bind_double(statement, index, value.timeIntervalSince1970)
+        } else {
+            sqlite3_bind_null(statement, index)
+        }
+    }
+
+    private func text(at index: Int32, in statement: OpaquePointer) -> String? {
+        guard let value = sqlite3_column_text(statement, index) else { return nil }
+        return String(cString: value)
+    }
+
+    private func date(at index: Int32, in statement: OpaquePointer) -> Date? {
+        guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
+        return Date(timeIntervalSince1970: sqlite3_column_double(statement, index))
+    }
+
+    private func upsert(
+        _ video: DiscoveredVideo,
+        libraryID: String,
+        scanID: String,
+        indexedAt: Date,
+        statement: OpaquePointer
+    ) throws {
+        sqlite3_reset(statement)
+        sqlite3_clear_bindings(statement)
+
+        bindText(UUID().uuidString, to: 1, in: statement)
+        bindText(libraryID, to: 2, in: statement)
+        bindText(video.relativePath, to: 3, in: statement)
+        bindData(video.volumeIdentifier, to: 4, in: statement)
+        bindData(video.fileResourceIdentifier, to: 5, in: statement)
+        bindText(video.filename, to: 6, in: statement)
+        bindText(video.fileExtension, to: 7, in: statement)
+        sqlite3_bind_int64(statement, 8, video.fileSize)
+        bindDate(video.creationDate, to: 9, in: statement)
+        bindDate(video.modificationDate, to: 10, in: statement)
+        sqlite3_bind_double(statement, 11, indexedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 12, indexedAt.timeIntervalSince1970)
+        bindText(scanID, to: 13, in: statement)
+
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw DatabaseError.statementFailed("写入视频索引")
+        }
     }
 }
 

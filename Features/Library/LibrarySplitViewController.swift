@@ -4,8 +4,11 @@ import AppKit
 final class LibrarySplitViewController: NSSplitViewController {
     private let videoGridViewController: VideoGridViewController
 
-    init(onChooseLibrary: @escaping () -> Void) {
-        videoGridViewController = VideoGridViewController(onChooseLibrary: onChooseLibrary)
+    init(onChooseLibrary: @escaping () -> Void, onRescan: @escaping () -> Void) {
+        videoGridViewController = VideoGridViewController(
+            onChooseLibrary: onChooseLibrary,
+            onRescan: onRescan
+        )
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -40,6 +43,14 @@ final class LibrarySplitViewController: NSSplitViewController {
 
     func setLibrary(_ summary: LibrarySummary) {
         videoGridViewController.setLibrary(summary)
+    }
+
+    func setVideos(_ videos: [VideoRecord]) {
+        videoGridViewController.setVideos(videos)
+    }
+
+    func setScanState(_ state: LibraryScanState) {
+        videoGridViewController.setScanState(state)
     }
 
     func setLibraryError(_ message: String) {

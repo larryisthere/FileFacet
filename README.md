@@ -23,6 +23,12 @@
 - 产品需求：`docs/product/mvp-requirements.md`
 - 架构决策：`docs/architecture/0001-appkit-first.md`
 
+## 当前实现进度
+
+阶段 1 已具备可运行链路：可选应用锁、资料库只读授权、Bookmark 恢复、已有索引即时展示、后台快速扫描和手动重扫。扫描支持 MP4、MOV、M4V、MKV、AVI、WebM，默认跳过隐藏目录、符号链接和 macOS Package；一次扫描只有在完整成功后才更新失效状态。
+
+下一阶段接入 AVFoundation 元数据、缩略图队列以及网格与 Inspector 的媒体交互。
+
 ## 修改正式显示名
 
 显示名集中在 Xcode build setting `APP_DISPLAY_NAME`。内部 Swift module、target、scheme、仓库目录和 Bundle Identifier 可以继续保持稳定。

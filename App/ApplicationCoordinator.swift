@@ -10,7 +10,8 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     private var privacyShield: NSView?
 
     private lazy var libraryViewController = LibrarySplitViewController(
-        onChooseLibrary: { [weak self] in self?.chooseLibrary() }
+        onChooseLibrary: { [weak self] in self?.chooseLibrary() },
+        onRescan: { [weak self] in self?.rescanLibrary() }
     )
 
     private lazy var libraryAccessCoordinator: LibraryAccessCoordinator? = {
@@ -50,6 +51,12 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
 
         libraryAccessCoordinator?.onLibraryChanged = { [weak self] summary in
             self?.libraryViewController.setLibrary(summary)
+        }
+        libraryAccessCoordinator?.onVideosChanged = { [weak self] videos in
+            self?.libraryViewController.setVideos(videos)
+        }
+        libraryAccessCoordinator?.onScanStateChanged = { [weak self] state in
+            self?.libraryViewController.setScanState(state)
         }
         libraryAccessCoordinator?.onError = { [weak self] message in
             self?.libraryViewController.setLibraryError(message)
@@ -130,9 +137,18 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         libraryAccessCoordinator.chooseLibrary()
     }
 
+    @objc private func rescanLibrary() {
+        guard lockCoordinator.state == .unlocked else { return }
+        libraryAccessCoordinator?.rescan()
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(chooseLibrary) {
             return lockCoordinator.state == .unlocked && databaseStore != nil
+        }
+        if menuItem.action == #selector(rescanLibrary) {
+            return lockCoordinator.state == .unlocked
+                && libraryAccessCoordinator?.hasActiveLibrary == true
         }
         return true
     }
@@ -179,6 +195,14 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         )
         chooseLibraryItem.target = self
         fileMenu.addItem(chooseLibraryItem)
+        let rescanItem = NSMenuItem(
+            title: "重新扫描资料库",
+            action: #selector(rescanLibrary),
+            keyEquivalent: "r"
+        )
+        rescanItem.keyEquivalentModifierMask = [.command, .shift]
+        rescanItem.target = self
+        fileMenu.addItem(rescanItem)
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
 
