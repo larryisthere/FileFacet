@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "045105C1154EA6239691B3AB"
+               BlueprintIdentifier = "8FB7A31C4176648CD912252B"
                BuildableName = "VideoTagManager.app"
                BlueprintName = "VideoTagManager"
                ReferencedContainer = "container:VideoTagManager.xcodeproj">
@@ -28,7 +28,7 @@
             buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "9763FE726ABAF046CF0EE008"
+               BlueprintIdentifier = "A9F60CE45945A4D1FCEE6808"
                BuildableName = "VideoTagManagerTests.xctest"
                BlueprintName = "VideoTagManagerTests"
                ReferencedContainer = "container:VideoTagManager.xcodeproj">
@@ -44,7 +44,7 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "045105C1154EA6239691B3AB"
+            BlueprintIdentifier = "8FB7A31C4176648CD912252B"
             BuildableName = "VideoTagManager.app"
             BlueprintName = "VideoTagManager"
             ReferencedContainer = "container:VideoTagManager.xcodeproj">
@@ -55,7 +55,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "9763FE726ABAF046CF0EE008"
+               BlueprintIdentifier = "A9F60CE45945A4D1FCEE6808"
                BuildableName = "VideoTagManagerTests.xctest"
                BlueprintName = "VideoTagManagerTests"
                ReferencedContainer = "container:VideoTagManager.xcodeproj">
@@ -77,7 +77,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "045105C1154EA6239691B3AB"
+            BlueprintIdentifier = "8FB7A31C4176648CD912252B"
             BuildableName = "VideoTagManager.app"
             BlueprintName = "VideoTagManager"
             ReferencedContainer = "container:VideoTagManager.xcodeproj">
@@ -94,7 +94,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "045105C1154EA6239691B3AB"
+            BlueprintIdentifier = "8FB7A31C4176648CD912252B"
             BuildableName = "VideoTagManager.app"
             BlueprintName = "VideoTagManager"
             ReferencedContainer = "container:VideoTagManager.xcodeproj">

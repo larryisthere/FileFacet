@@ -1,12 +1,15 @@
 import AppKit
 
 @MainActor
-final class VideoGridViewController: NSViewController, NSCollectionViewDataSource {
+final class VideoGridViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegate {
     private static let itemIdentifier = NSUserInterfaceItemIdentifier("VideoCollectionViewItem")
 
     private let collectionView = NSCollectionView()
     private let onChooseLibrary: () -> Void
     private let onRescan: () -> Void
+    private let onOpenVideo: (VideoRecord) -> Void
+    private let onSelectionChanged: ([VideoRecord]) -> Void
+    private let thumbnailURL: (VideoRecord) -> URL?
     private var videos: [VideoRecord] = []
     private var hasLibrary = false
 
@@ -30,10 +33,25 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         target: self,
         action: #selector(rescan)
     )
+    private lazy var zoomSlider: NSSlider = {
+        let slider = NSSlider(value: 180, minValue: 150, maxValue: 280, target: self, action: #selector(changeZoom))
+        slider.controlSize = .small
+        slider.toolTip = "调整网格大小"
+        return slider
+    }()
 
-    init(onChooseLibrary: @escaping () -> Void, onRescan: @escaping () -> Void) {
+    init(
+        onChooseLibrary: @escaping () -> Void,
+        onRescan: @escaping () -> Void,
+        onOpenVideo: @escaping (VideoRecord) -> Void,
+        onSelectionChanged: @escaping ([VideoRecord]) -> Void,
+        thumbnailURL: @escaping (VideoRecord) -> URL?
+    ) {
         self.onChooseLibrary = onChooseLibrary
         self.onRescan = onRescan
+        self.onOpenVideo = onOpenVideo
+        self.onSelectionChanged = onSelectionChanged
+        self.thumbnailURL = thumbnailURL
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -56,7 +74,10 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         titleStack.alignment = .leading
         titleStack.spacing = 2
 
-        let header = NSStackView(views: [titleStack, NSView(), rescanButton, headerChooseButton])
+        let zoomIcon = NSImageView(
+            image: NSImage(systemSymbolName: "rectangle.grid.3x2", accessibilityDescription: "网格大小") ?? NSImage()
+        )
+        let header = NSStackView(views: [titleStack, NSView(), zoomIcon, zoomSlider, rescanButton, headerChooseButton])
         header.translatesAutoresizingMaskIntoConstraints = false
         header.orientation = .horizontal
         header.alignment = .centerY
@@ -70,10 +91,14 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         layout.sectionInset = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
         collectionView.collectionViewLayout = layout
         collectionView.dataSource = self
+        collectionView.delegate = self
         collectionView.isSelectable = true
         collectionView.allowsMultipleSelection = true
         collectionView.backgroundColors = [.clear]
         collectionView.register(VideoCollectionViewItem.self, forItemWithIdentifier: Self.itemIdentifier)
+        let doubleClickRecognizer = NSClickGestureRecognizer(target: self, action: #selector(openSelectedVideo))
+        doubleClickRecognizer.numberOfClicksRequired = 2
+        collectionView.addGestureRecognizer(doubleClickRecognizer)
 
         let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -138,6 +163,13 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         updateEmptyState()
     }
 
+    func updateVideo(_ video: VideoRecord) {
+        guard let index = videos.firstIndex(where: { $0.id == video.id }) else { return }
+        videos[index] = video
+        collectionView.reloadItems(at: [IndexPath(item: index, section: 0)])
+        notifySelectionChanged()
+    }
+
     func setScanState(_ state: LibraryScanState) {
         loadViewIfNeeded()
         switch state {
@@ -186,8 +218,13 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         ) as? VideoCollectionViewItem else {
             return NSCollectionViewItem()
         }
-        item.configure(with: videos[indexPath.item])
+        let video = videos[indexPath.item]
+        item.configure(with: video, thumbnailURL: thumbnailURL(video))
         return item
+    }
+
+    func collectionViewSelectionDidChange(_ notification: Notification) {
+        notifySelectionChanged()
     }
 
     private func updateEmptyState() {
@@ -204,6 +241,25 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
 
     @objc private func rescan() {
         onRescan()
+    }
+
+    @objc private func openSelectedVideo() {
+        guard let indexPath = collectionView.selectionIndexPaths.sorted().first else { return }
+        onOpenVideo(videos[indexPath.item])
+    }
+
+    @objc private func changeZoom() {
+        guard let layout = collectionView.collectionViewLayout as? NSCollectionViewFlowLayout else { return }
+        let width = zoomSlider.doubleValue
+        layout.itemSize = NSSize(width: width, height: width * 0.76)
+        layout.invalidateLayout()
+    }
+
+    private func notifySelectionChanged() {
+        let selected = collectionView.selectionIndexPaths
+            .sorted()
+            .compactMap { indexPath in videos.indices.contains(indexPath.item) ? videos[indexPath.item] : nil }
+        onSelectionChanged(selected)
     }
 }
 
@@ -225,6 +281,7 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
         iconView.image = NSImage(systemSymbolName: "film", accessibilityDescription: "视频")
         iconView.symbolConfiguration = .init(pointSize: 34, weight: .light)
         iconView.contentTintColor = .secondaryLabelColor
+        iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
         filenameLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -242,9 +299,10 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
         container.addSubview(detailLabel)
         NSLayoutConstraint.activate([
             iconView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            iconView.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
-            iconView.widthAnchor.constraint(equalToConstant: 56),
-            iconView.heightAnchor.constraint(equalToConstant: 56),
+            iconView.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            iconView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            iconView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            iconView.heightAnchor.constraint(equalTo: container.widthAnchor, multiplier: 0.55),
             filenameLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             filenameLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
             filenameLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 14),
@@ -256,11 +314,19 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
         updateSelectionAppearance()
     }
 
-    func configure(with video: VideoRecord) {
+    func configure(with video: VideoRecord, thumbnailURL: URL?) {
         loadViewIfNeeded()
+        iconView.image = thumbnailURL.flatMap(NSImage.init(contentsOf:))
+            ?? NSImage(systemSymbolName: "film", accessibilityDescription: "视频")
         filenameLabel.stringValue = video.filename
-        detailLabel.stringValue = video.fileExtension.uppercased()
+        let duration = video.duration.map { formattedDuration($0) } ?? video.fileExtension.uppercased()
+        detailLabel.stringValue = duration
         view.toolTip = video.filename
+    }
+
+    private func formattedDuration(_ duration: Double) -> String {
+        let seconds = max(0, Int(duration.rounded()))
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
     private func updateSelectionAppearance() {

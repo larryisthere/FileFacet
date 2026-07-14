@@ -3,11 +3,28 @@ import AppKit
 @MainActor
 final class LibrarySplitViewController: NSSplitViewController {
     private let videoGridViewController: VideoGridViewController
+    private let inspectorViewController: InspectorViewController
 
-    init(onChooseLibrary: @escaping () -> Void, onRescan: @escaping () -> Void) {
+    init(
+        onChooseLibrary: @escaping () -> Void,
+        onRescan: @escaping () -> Void,
+        onOpenVideo: @escaping (VideoRecord) -> Void,
+        onRevealVideo: @escaping (VideoRecord) -> Void,
+        onCopyPath: @escaping (VideoRecord) -> Void,
+        thumbnailURL: @escaping (VideoRecord) -> URL?
+    ) {
+        let inspector = InspectorViewController(
+            onOpen: onOpenVideo,
+            onReveal: onRevealVideo,
+            onCopyPath: onCopyPath
+        )
+        inspectorViewController = inspector
         videoGridViewController = VideoGridViewController(
             onChooseLibrary: onChooseLibrary,
-            onRescan: onRescan
+            onRescan: onRescan,
+            onOpenVideo: onOpenVideo,
+            onSelectionChanged: { [weak inspector] videos in inspector?.setSelection(videos) },
+            thumbnailURL: thumbnailURL
         )
         super.init(nibName: nil, bundle: nil)
     }
@@ -27,7 +44,7 @@ final class LibrarySplitViewController: NSSplitViewController {
         let gridItem = NSSplitViewItem(viewController: videoGridViewController)
         gridItem.minimumThickness = 420
 
-        let inspectorItem = NSSplitViewItem(viewController: InspectorViewController())
+        let inspectorItem = NSSplitViewItem(viewController: inspectorViewController)
         inspectorItem.minimumThickness = 240
         inspectorItem.maximumThickness = 380
         inspectorItem.canCollapse = true
@@ -47,6 +64,11 @@ final class LibrarySplitViewController: NSSplitViewController {
 
     func setVideos(_ videos: [VideoRecord]) {
         videoGridViewController.setVideos(videos)
+        inspectorViewController.setSelection([])
+    }
+
+    func updateVideo(_ video: VideoRecord) {
+        videoGridViewController.updateVideo(video)
     }
 
     func setScanState(_ state: LibraryScanState) {

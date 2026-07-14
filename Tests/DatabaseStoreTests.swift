@@ -87,6 +87,37 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertTrue(records.isEmpty)
     }
 
+    func testMediaProcessingResultPersists() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        let records = try await store.applyScan(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: [makeDiscoveredVideo(path: "A.mp4", size: 10)]
+        )
+        let video = try XCTUnwrap(records.first)
+
+        let updated = try await store.updateMediaInfo(
+            videoID: video.id,
+            result: MediaProcessingResult(
+                duration: 12.5,
+                width: 1920,
+                height: 1080,
+                thumbnailID: video.id,
+                metadataStatus: .completed,
+                thumbnailStatus: .completed
+            )
+        )
+
+        XCTAssertEqual(updated?.duration, 12.5)
+        XCTAssertEqual(updated?.width, 1920)
+        XCTAssertEqual(updated?.height, 1080)
+        XCTAssertEqual(updated?.thumbnailID, video.id)
+        XCTAssertEqual(updated?.metadataStatus, .completed)
+        XCTAssertEqual(updated?.thumbnailStatus, .completed)
+    }
+
     private func makeLibraryRecord(name: String = "Videos") -> LibraryRecord {
         LibraryRecord(
             id: LibraryRecord.primaryID,

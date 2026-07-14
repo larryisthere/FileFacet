@@ -11,7 +11,11 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
 
     private lazy var libraryViewController = LibrarySplitViewController(
         onChooseLibrary: { [weak self] in self?.chooseLibrary() },
-        onRescan: { [weak self] in self?.rescanLibrary() }
+        onRescan: { [weak self] in self?.rescanLibrary() },
+        onOpenVideo: { [weak self] video in self?.openVideo(video) },
+        onRevealVideo: { [weak self] video in self?.revealVideo(video) },
+        onCopyPath: { [weak self] video in self?.copyPath(video) },
+        thumbnailURL: { [weak self] video in self?.libraryAccessCoordinator?.thumbnailURL(for: video) }
     )
 
     private lazy var libraryAccessCoordinator: LibraryAccessCoordinator? = {
@@ -54,6 +58,9 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         }
         libraryAccessCoordinator?.onVideosChanged = { [weak self] videos in
             self?.libraryViewController.setVideos(videos)
+        }
+        libraryAccessCoordinator?.onVideoChanged = { [weak self] video in
+            self?.libraryViewController.updateVideo(video)
         }
         libraryAccessCoordinator?.onScanStateChanged = { [weak self] state in
             self?.libraryViewController.setScanState(state)
@@ -140,6 +147,22 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     @objc private func rescanLibrary() {
         guard lockCoordinator.state == .unlocked else { return }
         libraryAccessCoordinator?.rescan()
+    }
+
+    private func openVideo(_ video: VideoRecord) {
+        guard let url = libraryAccessCoordinator?.fileURL(for: video) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func revealVideo(_ video: VideoRecord) {
+        guard let url = libraryAccessCoordinator?.fileURL(for: video) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func copyPath(_ video: VideoRecord) {
+        guard let path = libraryAccessCoordinator?.fileURL(for: video)?.path else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(path, forType: .string)
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {

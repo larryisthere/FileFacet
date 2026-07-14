@@ -128,7 +128,8 @@ actor DatabaseStore {
         let statement = try prepare(
             """
             SELECT id, library_id, relative_path, filename, file_extension, file_size,
-                   creation_date, modification_date, first_indexed_at, availability_status
+                   creation_date, modification_date, duration, width, height, thumbnail_id,
+                   metadata_status, thumbnail_status, first_indexed_at, availability_status
             FROM videos
             WHERE library_id = ? \(availabilityClause)
             ORDER BY filename COLLATE NOCASE, relative_path COLLATE NOCASE
@@ -140,34 +141,51 @@ actor DatabaseStore {
 
         var records: [VideoRecord] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            guard
-                let id = text(at: 0, in: statement),
-                let storedLibraryID = text(at: 1, in: statement),
-                let relativePath = text(at: 2, in: statement),
-                let filename = text(at: 3, in: statement),
-                let fileExtension = text(at: 4, in: statement),
-                let availabilityText = text(at: 9, in: statement),
-                let availability = VideoRecord.Availability(rawValue: availabilityText)
-            else {
-                throw DatabaseError.statementFailed("读取视频索引")
-            }
-
-            records.append(
-                VideoRecord(
-                    id: id,
-                    libraryID: storedLibraryID,
-                    relativePath: relativePath,
-                    filename: filename,
-                    fileExtension: fileExtension,
-                    fileSize: sqlite3_column_int64(statement, 5),
-                    creationDate: date(at: 6, in: statement),
-                    modificationDate: date(at: 7, in: statement),
-                    firstIndexedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 8)),
-                    availability: availability
-                )
-            )
+            records.append(try videoRecord(from: statement))
         }
         return records
+    }
+
+    func fetchVideo(id: String) throws -> VideoRecord? {
+        try prepareIfNeeded()
+        let statement = try prepare(
+            """
+            SELECT id, library_id, relative_path, filename, file_extension, file_size,
+                   creation_date, modification_date, duration, width, height, thumbnail_id,
+                   metadata_status, thumbnail_status, first_indexed_at, availability_status
+            FROM videos WHERE id = ? LIMIT 1
+            """,
+            operation: "读取视频索引"
+        )
+        defer { sqlite3_finalize(statement) }
+        bindText(id, to: 1, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return try videoRecord(from: statement)
+    }
+
+    func updateMediaInfo(videoID: String, result: MediaProcessingResult) throws -> VideoRecord? {
+        try prepareIfNeeded()
+        let statement = try prepare(
+            """
+            UPDATE videos SET duration = ?, width = ?, height = ?, thumbnail_id = ?,
+                metadata_status = ?, thumbnail_status = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            operation: "更新媒体信息"
+        )
+        defer { sqlite3_finalize(statement) }
+        bindDouble(result.duration, to: 1, in: statement)
+        bindInt(result.width, to: 2, in: statement)
+        bindInt(result.height, to: 3, in: statement)
+        bindOptionalText(result.thumbnailID, to: 4, in: statement)
+        bindText(result.metadataStatus.rawValue, to: 5, in: statement)
+        bindText(result.thumbnailStatus.rawValue, to: 6, in: statement)
+        sqlite3_bind_double(statement, 7, Date().timeIntervalSince1970)
+        bindText(videoID, to: 8, in: statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw DatabaseError.statementFailed("更新媒体信息")
+        }
+        return try fetchVideo(id: videoID)
     }
 
     func applyScan(
@@ -449,6 +467,21 @@ actor DatabaseStore {
         }
     }
 
+    private func bindDouble(_ value: Double?, to index: Int32, in statement: OpaquePointer) {
+        if let value { sqlite3_bind_double(statement, index, value) }
+        else { sqlite3_bind_null(statement, index) }
+    }
+
+    private func bindInt(_ value: Int?, to index: Int32, in statement: OpaquePointer) {
+        if let value { sqlite3_bind_int64(statement, index, Int64(value)) }
+        else { sqlite3_bind_null(statement, index) }
+    }
+
+    private func bindOptionalText(_ value: String?, to index: Int32, in statement: OpaquePointer) {
+        if let value { bindText(value, to: index, in: statement) }
+        else { sqlite3_bind_null(statement, index) }
+    }
+
     private func text(at index: Int32, in statement: OpaquePointer) -> String? {
         guard let value = sqlite3_column_text(statement, index) else { return nil }
         return String(cString: value)
@@ -457,6 +490,52 @@ actor DatabaseStore {
     private func date(at index: Int32, in statement: OpaquePointer) -> Date? {
         guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
         return Date(timeIntervalSince1970: sqlite3_column_double(statement, index))
+    }
+
+    private func optionalDouble(at index: Int32, in statement: OpaquePointer) -> Double? {
+        guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
+        return sqlite3_column_double(statement, index)
+    }
+
+    private func optionalInt(at index: Int32, in statement: OpaquePointer) -> Int? {
+        guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
+        return Int(sqlite3_column_int64(statement, index))
+    }
+
+    private func videoRecord(from statement: OpaquePointer) throws -> VideoRecord {
+        guard
+            let id = text(at: 0, in: statement),
+            let storedLibraryID = text(at: 1, in: statement),
+            let relativePath = text(at: 2, in: statement),
+            let filename = text(at: 3, in: statement),
+            let fileExtension = text(at: 4, in: statement),
+            let metadataText = text(at: 12, in: statement),
+            let metadataStatus = VideoRecord.ProcessingStatus(rawValue: metadataText),
+            let thumbnailText = text(at: 13, in: statement),
+            let thumbnailStatus = VideoRecord.ProcessingStatus(rawValue: thumbnailText),
+            let availabilityText = text(at: 15, in: statement),
+            let availability = VideoRecord.Availability(rawValue: availabilityText)
+        else {
+            throw DatabaseError.statementFailed("读取视频索引")
+        }
+        return VideoRecord(
+            id: id,
+            libraryID: storedLibraryID,
+            relativePath: relativePath,
+            filename: filename,
+            fileExtension: fileExtension,
+            fileSize: sqlite3_column_int64(statement, 5),
+            creationDate: date(at: 6, in: statement),
+            modificationDate: date(at: 7, in: statement),
+            duration: optionalDouble(at: 8, in: statement),
+            width: optionalInt(at: 9, in: statement),
+            height: optionalInt(at: 10, in: statement),
+            thumbnailID: text(at: 11, in: statement),
+            metadataStatus: metadataStatus,
+            thumbnailStatus: thumbnailStatus,
+            firstIndexedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 14)),
+            availability: availability
+        )
     }
 
     private func upsert(
