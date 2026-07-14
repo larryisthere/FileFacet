@@ -17,7 +17,19 @@ xcodebuild \
   -configuration Debug \
   -destination "platform=macOS,arch=arm64" \
   -derivedDataPath "$DERIVED_DATA" \
+  CODE_SIGNING_ALLOWED=NO \
   build
+
+# Cloud-backed local folders can add Finder metadata to the bundle while Xcode
+# writes it. Remove that metadata before applying a development-only ad-hoc
+# signature with the app's sandbox entitlements.
+/usr/bin/xattr -cr "$APP_BUNDLE"
+/usr/bin/codesign \
+  --force \
+  --deep \
+  --sign - \
+  --entitlements "$ROOT_DIR/Config/VideoTagManager.entitlements" \
+  "$APP_BUNDLE"
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"

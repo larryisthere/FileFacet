@@ -3,6 +3,24 @@ import AppKit
 @MainActor
 final class VideoGridViewController: NSViewController {
     private let collectionView = NSCollectionView()
+    private let onChooseLibrary: () -> Void
+    private let titleLabel = NSTextField(labelWithString: "尚未选择视频资料库")
+    private let detailLabel = NSTextField(wrappingLabelWithString: "选择一个本地目录，应用将建立只读索引。")
+    private lazy var chooseLibraryButton = NSButton(
+        title: "选择资料库…",
+        target: self,
+        action: #selector(chooseLibrary)
+    )
+
+    init(onChooseLibrary: @escaping () -> Void) {
+        self.onChooseLibrary = onChooseLibrary
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     override func loadView() {
         let container = NSView()
@@ -33,16 +51,14 @@ final class VideoGridViewController: NSViewController {
         icon.symbolConfiguration = .init(pointSize: 32, weight: .light)
         icon.contentTintColor = .secondaryLabelColor
 
-        let title = NSTextField(labelWithString: "尚未选择视频资料库")
-        title.font = .systemFont(ofSize: 17, weight: .semibold)
-
-        let detail = NSTextField(wrappingLabelWithString: "验证完成后，可以选择一个本地目录建立只读索引。")
-        detail.textColor = .secondaryLabelColor
-        detail.alignment = .center
+        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        detailLabel.textColor = .secondaryLabelColor
+        detailLabel.alignment = .center
 
         emptyState.addArrangedSubview(icon)
-        emptyState.addArrangedSubview(title)
-        emptyState.addArrangedSubview(detail)
+        emptyState.addArrangedSubview(titleLabel)
+        emptyState.addArrangedSubview(detailLabel)
+        emptyState.addArrangedSubview(chooseLibraryButton)
 
         container.addSubview(scrollView)
         container.addSubview(emptyState)
@@ -56,5 +72,23 @@ final class VideoGridViewController: NSViewController {
             emptyState.widthAnchor.constraint(lessThanOrEqualToConstant: 360),
         ])
         view = container
+    }
+
+    func setLibrary(_ summary: LibrarySummary) {
+        loadViewIfNeeded()
+        titleLabel.stringValue = summary.name
+        detailLabel.stringValue = "资料库访问权限已保存，下一步将扫描其中的视频。"
+        chooseLibraryButton.title = "更换资料库…"
+    }
+
+    func setError(_ message: String) {
+        loadViewIfNeeded()
+        titleLabel.stringValue = "资料库需要处理"
+        detailLabel.stringValue = message
+        chooseLibraryButton.title = "重新选择…"
+    }
+
+    @objc private func chooseLibrary() {
+        onChooseLibrary()
     }
 }

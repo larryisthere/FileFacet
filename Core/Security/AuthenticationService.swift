@@ -1,6 +1,10 @@
 import LocalAuthentication
 
-struct AuthenticationService {
+protocol Authenticating: Sendable {
+    func authenticate() async -> Bool
+}
+
+struct AuthenticationService: Authenticating {
     func authenticate() async -> Bool {
         let context = LAContext()
         context.localizedCancelTitle = "取消"
