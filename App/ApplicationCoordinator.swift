@@ -98,8 +98,8 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
 
         installMainMenu()
         render(lockState: lockCoordinator.state)
-        windowController.showWindow(nil)
         windowController.window?.center()
+        windowController.window?.makeKeyAndOrderFront(nil)
         libraryAccessCoordinator?.undoManager = windowController.window?.undoManager
         libraryAccessCoordinator?.restoreLibrary()
         AppLogger.lifecycle.notice("Application started")
