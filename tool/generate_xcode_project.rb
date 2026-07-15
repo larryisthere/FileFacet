@@ -26,6 +26,10 @@ config_group = main_group.new_group("Config", "Config")
 config_group.new_file("Info.plist")
 config_group.new_file("VideoTagManager.entitlements")
 
+resources_group = main_group.new_group("Resources", "Resources")
+asset_catalog = resources_group.new_file("Assets.xcassets")
+app_target.resources_build_phase.add_file_reference(asset_catalog)
+
 tests_group = main_group.new_group("Tests", "Tests")
 Dir.glob(File.join(root, "Tests", "**", "*.swift")).sort.each do |path|
   reference = tests_group.new_file(path.sub("#{root}/Tests/", ""))
@@ -49,11 +53,13 @@ app_target.build_configurations.each do |configuration|
   settings["CODE_SIGN_STYLE"] = "Automatic"
   settings["COMBINE_HIDPI_IMAGES"] = "YES"
   settings["CURRENT_PROJECT_VERSION"] = "1"
+  settings["ASSETCATALOG_COMPILER_APPICON_NAME"] = "AppIcon"
+  settings["ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME"] = "AccentColor"
   settings["ENABLE_APP_SANDBOX"] = "YES"
   settings["ENABLE_HARDENED_RUNTIME"] = "YES"
   settings["GENERATE_INFOPLIST_FILE"] = "NO"
   settings["INFOPLIST_FILE"] = "Config/Info.plist"
-  settings["MARKETING_VERSION"] = "0.1.0"
+  settings["MARKETING_VERSION"] = "1.0.0"
   settings["PRODUCT_BUNDLE_IDENTIFIER"] = "com.larryisthere.video-tag-manager"
   settings["PRODUCT_NAME"] = "VideoTagManager"
   settings["SDKROOT"] = "macosx"

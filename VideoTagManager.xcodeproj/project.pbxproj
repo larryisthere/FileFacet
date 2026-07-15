@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A11C0A000000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A11C0A000000000000000002 /* Assets.xcassets */; };
 		035724ABB602F506C8722631 /* AppConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69323B27400CD3637B980311 /* AppConfiguration.swift */; };
 		094938578441E9B6D1B51099 /* InspectorViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB2E252D426AB761A06F5F9F /* InspectorViewController.swift */; };
 		0C54A3A5BC0A2404DCA91C8D /* LibrarySplitViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ECC7AA422EA282386D5974C /* LibrarySplitViewController.swift */; };
@@ -56,6 +57,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		A11C0A000000000000000002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		00218ADF00AE850CA7FEA287 /* VideoTagManagerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VideoTagManagerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		01EE661DF4D0B2DE750D896A /* VideoTagManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VideoTagManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		11D83A96E7A2BC52803CC7D9 /* PreferencesStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PreferencesStore.swift; path = Preferences/PreferencesStore.swift; sourceTree = "<group>"; };
@@ -126,6 +128,7 @@
 				B1DD08412029924F82FDE85A /* Core */,
 				CF3FF8AE804B3C3253EED741 /* Features */,
 				9C994A993646487BC6F3B8E8 /* Config */,
+				A11C0A000000000000000003 /* Resources */,
 				9B068F066B3CFA2CA5351BD6 /* Tests */,
 			);
 			sourceTree = "<group>";
@@ -181,6 +184,15 @@
 			);
 			name = Config;
 			path = Config;
+			sourceTree = "<group>";
+		};
+		A11C0A000000000000000003 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A11C0A000000000000000002 /* Assets.xcassets */,
+			);
+			name = Resources;
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		B1DD08412029924F82FDE85A /* Core */ = {
@@ -304,6 +316,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A11C0A000000000000000001 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -465,7 +478,7 @@
 				INFOPLIST_FILE = Config/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.larryisthere.video-tag-manager";
 				PRODUCT_NAME = VideoTagManager;
 				SDKROOT = macosx;
@@ -508,7 +521,7 @@
 				INFOPLIST_FILE = Config/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.larryisthere.video-tag-manager";
 				PRODUCT_NAME = VideoTagManager;
 				SDKROOT = macosx;
