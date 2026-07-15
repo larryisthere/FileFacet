@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import VideoTagManager
 
 final class DatabaseStoreTests: XCTestCase {
@@ -11,6 +12,76 @@ final class DatabaseStoreTests: XCTestCase {
         let schemaVersion = try await store.schemaVersion()
 
         XCTAssertEqual(schemaVersion, DatabaseStore.currentSchemaVersion)
+    }
+
+    func testVersionTwoMigrationPreservesVideosAndTagRelations() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        try executeSQL(
+            at: fixture.databaseURL,
+            sql: """
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at REAL NOT NULL);
+            INSERT INTO schema_migrations VALUES (1, 1), (2, 2);
+            CREATE TABLE libraries (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, root_bookmark_data BLOB NOT NULL,
+                created_at REAL NOT NULL, last_scan_at REAL, last_fsevent_id INTEGER
+            );
+            CREATE TABLE scan_runs (
+                id TEXT PRIMARY KEY, library_id TEXT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+                started_at REAL NOT NULL, completed_at REAL, status TEXT NOT NULL
+            );
+            CREATE TABLE videos (
+                id TEXT PRIMARY KEY, library_id TEXT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+                relative_path TEXT NOT NULL, volume_identifier BLOB, file_resource_identifier BLOB,
+                filename TEXT NOT NULL, file_extension TEXT NOT NULL, file_size INTEGER NOT NULL,
+                creation_date REAL, modification_date REAL, duration REAL, width INTEGER, height INTEGER,
+                thumbnail_id TEXT, metadata_status TEXT NOT NULL DEFAULT 'pending',
+                thumbnail_status TEXT NOT NULL DEFAULT 'pending', availability_status TEXT NOT NULL DEFAULT 'available',
+                first_indexed_at REAL NOT NULL, updated_at REAL NOT NULL,
+                last_seen_scan_id TEXT REFERENCES scan_runs(id), UNIQUE(library_id, relative_path)
+            );
+            CREATE TABLE tags (
+                id TEXT PRIMARY KEY, library_id TEXT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+                name TEXT NOT NULL, normalized_name TEXT NOT NULL, parent_id TEXT REFERENCES tags(id) ON DELETE CASCADE,
+                color TEXT, sort_order INTEGER NOT NULL, source TEXT NOT NULL,
+                created_at REAL NOT NULL, updated_at REAL NOT NULL,
+                UNIQUE(library_id, parent_id, normalized_name)
+            );
+            CREATE TABLE video_tags (
+                video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+                tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                created_at REAL NOT NULL, PRIMARY KEY(video_id, tag_id)
+            );
+            CREATE TABLE finder_tag_import_mappings (
+                library_id TEXT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+                external_key TEXT NOT NULL, tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                first_imported_at REAL NOT NULL, last_seen_at REAL NOT NULL,
+                PRIMARY KEY(library_id, external_key)
+            );
+            INSERT INTO libraries VALUES ('primary', 'Videos', X'01', 1, NULL, NULL);
+            INSERT INTO videos (
+                id, library_id, relative_path, filename, file_extension, file_size,
+                metadata_status, thumbnail_status, availability_status, first_indexed_at, updated_at
+            ) VALUES ('video-1', 'primary', 'A.mp4', 'A.mp4', 'mp4', 10, 'completed', 'completed', 'available', 1, 1);
+            INSERT INTO tags VALUES ('tag-1', 'primary', '保留', '保留', NULL, NULL, 0, 'user', 1, 1);
+            INSERT INTO video_tags VALUES ('video-1', 'tag-1', 1);
+            """
+        )
+
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        let version = try await store.schemaVersion()
+        let videos = try await store.fetchVideos(libraryID: LibraryRecord.primaryID)
+        let sources = try await store.fetchSourceAuthorizations()
+        let locations = try await store.fetchVideoLocations()
+        let tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        let states = try await store.tagAssignmentStates(videoIDs: videos.map(\.id), tags: tags)
+
+        XCTAssertEqual(version, DatabaseStore.currentSchemaVersion)
+        XCTAssertEqual(videos.map(\.id), ["video-1"])
+        XCTAssertEqual(sources.count, 1)
+        XCTAssertEqual(locations.map(\.videoID), ["video-1"])
+        XCTAssertEqual(states["tag-1"], .on)
     }
 
     func testPrimaryLibraryRoundTrip() async throws {
@@ -32,59 +103,40 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertEqual(savedRecord, record)
     }
 
-    func testSuccessfulScanUpsertsVideosAndMarksMissingRecords() async throws {
+    func testRepeatedManualImportKeepsVideosOutsideCurrentSelection() async throws {
         let fixture = try DatabaseFixture()
         defer { fixture.remove() }
         let store = try DatabaseStore(databaseURL: fixture.databaseURL)
         try await store.saveLibrary(makeLibraryRecord())
-        let firstScanDate = Date(timeIntervalSince1970: 200)
+        let firstImportDate = Date(timeIntervalSince1970: 200)
 
-        let firstResult = try await store.applyScan(
+        let firstResult = try await store.importTestVideos(
             libraryID: LibraryRecord.primaryID,
             discoveredVideos: [
                 makeDiscoveredVideo(path: "A.mp4", size: 10),
                 makeDiscoveredVideo(path: "Folder/B.mov", size: 20),
             ],
-            completedAt: firstScanDate
+            completedAt: firstImportDate
         )
         let firstA = try XCTUnwrap(firstResult.first { $0.relativePath == "A.mp4" })
 
-        let secondResult = try await store.applyScan(
+        let secondResult = try await store.importTestVideos(
             libraryID: LibraryRecord.primaryID,
             discoveredVideos: [makeDiscoveredVideo(path: "A.mp4", size: 30)],
             completedAt: Date(timeIntervalSince1970: 300)
         )
-        let secondA = try XCTUnwrap(secondResult.first)
+        let secondA = try XCTUnwrap(secondResult.first { $0.relativePath == "A.mp4" })
         let allRecords = try await store.fetchVideos(
             libraryID: LibraryRecord.primaryID,
             includeMissing: true
         )
-        let missingB = try XCTUnwrap(allRecords.first { $0.relativePath == "Folder/B.mov" })
+        let preservedB = try XCTUnwrap(allRecords.first { $0.relativePath == "Folder/B.mov" })
 
-        XCTAssertEqual(secondResult.count, 1)
+        XCTAssertEqual(secondResult.count, 2)
         XCTAssertEqual(secondA.id, firstA.id)
-        XCTAssertEqual(secondA.firstIndexedAt, firstScanDate)
+        XCTAssertEqual(secondA.firstIndexedAt, firstImportDate)
         XCTAssertEqual(secondA.fileSize, 30)
-        XCTAssertEqual(missingB.availability, .missing)
-    }
-
-    func testReplacingLibraryClearsPreviousIndex() async throws {
-        let fixture = try DatabaseFixture()
-        defer { fixture.remove() }
-        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
-        try await store.saveLibrary(makeLibraryRecord(name: "First"))
-        _ = try await store.applyScan(
-            libraryID: LibraryRecord.primaryID,
-            discoveredVideos: [makeDiscoveredVideo(path: "A.mp4", size: 10)]
-        )
-
-        try await store.replaceLibrary(makeLibraryRecord(name: "Second"))
-
-        let records = try await store.fetchVideos(
-            libraryID: LibraryRecord.primaryID,
-            includeMissing: true
-        )
-        XCTAssertTrue(records.isEmpty)
+        XCTAssertEqual(preservedB.availability, .available)
     }
 
     func testMediaProcessingResultPersists() async throws {
@@ -92,7 +144,7 @@ final class DatabaseStoreTests: XCTestCase {
         defer { fixture.remove() }
         let store = try DatabaseStore(databaseURL: fixture.databaseURL)
         try await store.saveLibrary(makeLibraryRecord())
-        let records = try await store.applyScan(
+        let records = try await store.importTestVideos(
             libraryID: LibraryRecord.primaryID,
             discoveredVideos: [makeDiscoveredVideo(path: "A.mp4", size: 10)]
         )
@@ -123,7 +175,7 @@ final class DatabaseStoreTests: XCTestCase {
         defer { fixture.remove() }
         let store = try DatabaseStore(databaseURL: fixture.databaseURL)
         try await store.saveLibrary(makeLibraryRecord())
-        let videos = try await store.applyScan(
+        let videos = try await store.importTestVideos(
             libraryID: LibraryRecord.primaryID,
             discoveredVideos: [makeDiscoveredVideo(path: "A.mp4", size: 10)]
         )
@@ -150,7 +202,7 @@ final class DatabaseStoreTests: XCTestCase {
         defer { fixture.remove() }
         let store = try DatabaseStore(databaseURL: fixture.databaseURL)
         try await store.saveLibrary(makeLibraryRecord())
-        let videos = try await store.applyScan(
+        let videos = try await store.importTestVideos(
             libraryID: LibraryRecord.primaryID,
             discoveredVideos: [
                 makeDiscoveredVideo(path: "A.mp4", size: 10),
@@ -201,7 +253,7 @@ final class DatabaseStoreTests: XCTestCase {
         defer { fixture.remove() }
         let store = try DatabaseStore(databaseURL: fixture.databaseURL)
         try await store.saveLibrary(makeLibraryRecord())
-        let videos = try await store.applyScan(
+        let videos = try await store.importTestVideos(
             libraryID: LibraryRecord.primaryID,
             discoveredVideos: [makeDiscoveredVideo(path: "A.mp4", size: 10)]
         )
@@ -220,13 +272,13 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertEqual(restored.relations, snapshot.relations)
     }
 
-    func testVideoFiltersSupportSearchRecencyUntaggedMissingAndTagIntersection() async throws {
+    func testVideoFiltersSupportSearchRecencyUntaggedAndTagIntersection() async throws {
         let fixture = try DatabaseFixture()
         defer { fixture.remove() }
         let store = try DatabaseStore(databaseURL: fixture.databaseURL)
         try await store.saveLibrary(makeLibraryRecord())
         let oldDate = Date(timeIntervalSince1970: 1_000)
-        _ = try await store.applyScan(
+        _ = try await store.importTestVideos(
             libraryID: LibraryRecord.primaryID,
             discoveredVideos: [
                 makeDiscoveredVideo(path: "Alpha.mp4", size: 10),
@@ -235,7 +287,7 @@ final class DatabaseStoreTests: XCTestCase {
             completedAt: oldDate
         )
         let now = Date(timeIntervalSince1970: 4_000_000)
-        let current = try await store.applyScan(
+        let current = try await store.importTestVideos(
             libraryID: LibraryRecord.primaryID,
             discoveredVideos: [
                 makeDiscoveredVideo(path: "Alpha.mp4", size: 10),
@@ -254,42 +306,157 @@ final class DatabaseStoreTests: XCTestCase {
         let searched = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, filter: .all, searchText: "ALPHA", now: now)
         let recent = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, filter: .recent, now: now)
         let untagged = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, filter: .untagged, now: now)
-        let missing = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, filter: .missing, now: now)
         let inherited = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, filter: .tag(parentID), now: now)
         let intersection = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, filter: .tags([parentID, secondID]), now: now)
 
         XCTAssertEqual(searched.map(\.filename), ["Alpha.mp4"])
         XCTAssertEqual(recent.map(\.filename), ["Gamma.mkv"])
-        XCTAssertTrue(untagged.isEmpty)
-        XCTAssertEqual(missing.map(\.filename), ["Beta.mov"])
+        XCTAssertEqual(untagged.map(\.filename), ["Beta.mov"])
         XCTAssertEqual(Set(inherited.map(\.filename)), Set(["Alpha.mp4", "Gamma.mkv"]))
         XCTAssertEqual(intersection.map(\.filename), ["Gamma.mkv"])
     }
 
-    func testFinderTagImportIsIdempotentAndRefreshesAssignments() async throws {
+    func testFinderTagImportRunsOncePerVideoAndKeepsExistingAssignments() async throws {
         let fixture = try DatabaseFixture()
         defer { fixture.remove() }
         let store = try DatabaseStore(databaseURL: fixture.databaseURL)
         try await store.saveLibrary(makeLibraryRecord())
         var video = makeDiscoveredVideo(path: "A.mp4", size: 10, finderTags: ["红色"])
-        let firstVideos = try await store.applyScan(
+        let firstVideos = try await store.importTestVideos(
             libraryID: LibraryRecord.primaryID,
             discoveredVideos: [video]
         )
-        _ = try await store.applyScan(libraryID: LibraryRecord.primaryID, discoveredVideos: [video])
+        _ = try await store.importTestVideos(libraryID: LibraryRecord.primaryID, discoveredVideos: [video])
         var tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
-        let finderRoot = try XCTUnwrap(tags.first(where: { $0.source == "finder-root" }))
         let imported = try XCTUnwrap(tags.first(where: { $0.source == "finder" }))
-        XCTAssertEqual(imported.parentID, finderRoot.id)
+        XCTAssertNil(imported.parentID)
+        XCTAssertFalse(tags.contains(where: { $0.source == "finder-root" }))
         XCTAssertEqual(tags.filter { $0.source == "finder" }.count, 1)
         var states = try await store.tagAssignmentStates(videoIDs: firstVideos.map(\.id), tags: tags)
         XCTAssertEqual(states[imported.id], .on)
 
         video = makeDiscoveredVideo(path: "A.mp4", size: 10, finderTags: [])
-        _ = try await store.applyScan(libraryID: LibraryRecord.primaryID, discoveredVideos: [video])
+        _ = try await store.importTestVideos(libraryID: LibraryRecord.primaryID, discoveredVideos: [video])
         tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
         states = try await store.tagAssignmentStates(videoIDs: firstVideos.map(\.id), tags: tags)
-        XCTAssertEqual(states[imported.id], .off)
+        XCTAssertEqual(states[imported.id], .on)
+    }
+
+    func testRestoredTagSnapshotKeepsFinderMappingForNewVideos() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        _ = try await store.importTestVideos(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: [makeDiscoveredVideo(path: "A.mp4", size: 10, finderTags: ["红色"])]
+        )
+        let snapshot = try await store.captureTagState(libraryID: LibraryRecord.primaryID)
+        let finderTag = try XCTUnwrap(snapshot.tags.first(where: { $0.source == "finder" }))
+        try await store.deleteTag(id: finderTag.id)
+
+        try await store.restoreTagState(snapshot)
+        let videos = try await store.importTestVideos(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: [
+                makeDiscoveredVideo(path: "A.mp4", size: 10),
+                makeDiscoveredVideo(path: "B.mp4", size: 20, finderTags: ["红色"]),
+            ]
+        )
+
+        let tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        let importedTags = tags.filter { $0.source == "finder" }
+        let newVideo = try XCTUnwrap(videos.first(where: { $0.filename == "B.mp4" }))
+        let states = try await store.tagAssignmentStates(videoIDs: [newVideo.id], tags: tags)
+        XCTAssertEqual(importedTags.count, 1)
+        XCTAssertEqual(states[importedTags[0].id], .on)
+    }
+
+    func testSamePathWithDifferentFileIdentityCreatesNewVideo() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        let volume = Data("volume".utf8)
+        let original = try await store.importTestVideos(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: [makeDiscoveredVideo(
+                path: "A.mp4",
+                size: 10,
+                volumeIdentifier: volume,
+                fileResourceIdentifier: Data("old".utf8)
+            )]
+        )
+        let originalVideo = try XCTUnwrap(original.first)
+        let tagID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "旧视频标签", parentID: nil)
+        try await store.setTagAssignment(tagID: tagID, videoIDs: [originalVideo.id], enabled: true)
+
+        let replacement = try await store.importTestVideos(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: [makeDiscoveredVideo(
+                path: "A.mp4",
+                size: 20,
+                volumeIdentifier: volume,
+                fileResourceIdentifier: Data("new".utf8)
+            )]
+        )
+
+        let replacementVideo = try XCTUnwrap(replacement.first)
+        let allVideos = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, includeMissing: true)
+        let tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        let replacementStates = try await store.tagAssignmentStates(videoIDs: [replacementVideo.id], tags: tags)
+        XCTAssertNotEqual(replacementVideo.id, originalVideo.id)
+        XCTAssertNil(allVideos.first(where: { $0.id == originalVideo.id }))
+        XCTAssertEqual(replacementStates[tagID], .off)
+    }
+
+    func testModifiedVideoResetsMediaInformationForRegeneration() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        let identity = Data("identity".utf8)
+        let volume = Data("volume".utf8)
+        let original = try await store.importTestVideos(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: [makeDiscoveredVideo(
+                path: "A.mp4",
+                size: 10,
+                modificationDate: Date(timeIntervalSince1970: 100),
+                volumeIdentifier: volume,
+                fileResourceIdentifier: identity
+            )]
+        )
+        let video = try XCTUnwrap(original.first)
+        _ = try await store.updateMediaInfo(
+            videoID: video.id,
+            result: MediaProcessingResult(
+                duration: 12,
+                width: 1920,
+                height: 1080,
+                thumbnailID: video.id,
+                metadataStatus: .completed,
+                thumbnailStatus: .completed
+            )
+        )
+
+        let reimported = try await store.importTestVideos(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: [makeDiscoveredVideo(
+                path: "A.mp4",
+                size: 11,
+                modificationDate: Date(timeIntervalSince1970: 200),
+                volumeIdentifier: volume,
+                fileResourceIdentifier: identity
+            )]
+        )
+
+        let updated = try XCTUnwrap(reimported.first)
+        XCTAssertEqual(updated.id, video.id)
+        XCTAssertNil(updated.duration)
+        XCTAssertNil(updated.thumbnailID)
+        XCTAssertEqual(updated.metadataStatus, .pending)
+        XCTAssertEqual(updated.thumbnailStatus, .pending)
     }
 
     func testRenameByFileIdentityPreservesVideoIDAndTags() async throws {
@@ -299,14 +466,14 @@ final class DatabaseStoreTests: XCTestCase {
         try await store.saveLibrary(makeLibraryRecord())
         let identity = Data("file-id".utf8)
         let volume = Data("volume-id".utf8)
-        let original = try await store.applyScan(
+        let original = try await store.importTestVideos(
             libraryID: LibraryRecord.primaryID,
             discoveredVideos: [makeDiscoveredVideo(path: "Old.mp4", size: 10, volumeIdentifier: volume, fileResourceIdentifier: identity)]
         )
         let tagID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "保留", parentID: nil)
         try await store.setTagAssignment(tagID: tagID, videoIDs: original.map(\.id), enabled: true)
 
-        let moved = try await store.applyScan(
+        let moved = try await store.importTestVideos(
             libraryID: LibraryRecord.primaryID,
             discoveredVideos: [makeDiscoveredVideo(path: "Folder/New.mp4", size: 11, volumeIdentifier: volume, fileResourceIdentifier: identity)]
         )
@@ -318,6 +485,90 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertEqual(states[tagID], .on)
     }
 
+    func testManualImportsAcrossSourcesAreGloballyIdempotent() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "source-a", name: "A"))
+        try await store.saveSourceAuthorization(makeSource(id: "source-b", name: "B"))
+        let volume = Data("volume".utf8)
+        let identity = Data("same-file".utf8)
+
+        let first = try await store.importVideos(
+            sourceID: "source-a",
+            discoveredVideos: [makeDiscoveredVideo(
+                path: "Original.mp4",
+                size: 10,
+                finderTags: ["旅行"],
+                volumeIdentifier: volume,
+                fileResourceIdentifier: identity
+            )]
+        )
+        let second = try await store.importVideos(
+            sourceID: "source-b",
+            discoveredVideos: [makeDiscoveredVideo(
+                path: "Nested/Original.mp4",
+                size: 10,
+                finderTags: ["工作"],
+                volumeIdentifier: volume,
+                fileResourceIdentifier: identity
+            )]
+        )
+
+        let videos = try await store.fetchVideos(libraryID: LibraryRecord.primaryID)
+        let locations = try await store.fetchVideoLocations()
+        let tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        XCTAssertEqual(first.addedCount, 1)
+        XCTAssertEqual(second.existingCount, 1)
+        XCTAssertEqual(videos.count, 1)
+        XCTAssertEqual(locations.count, 2)
+        XCTAssertEqual(tags.filter { $0.source == "finder" }.map(\.name), ["旅行"])
+    }
+
+    func testSilentMaintenanceUpdatesMovedVideoAndRemovesConfirmedDeletion() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "source-a", name: "A"))
+        let volume = Data("volume".utf8)
+        let identity = Data("moving-file".utf8)
+        let imported = try await store.importVideos(
+            sourceID: "source-a",
+            discoveredVideos: [makeDiscoveredVideo(
+                path: "Old.mp4",
+                size: 10,
+                volumeIdentifier: volume,
+                fileResourceIdentifier: identity
+            )]
+        )
+        let video = try XCTUnwrap(imported.importedVideos.first)
+        let tagID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "保留", parentID: nil)
+        try await store.setTagAssignment(tagID: tagID, videoIDs: [video.id], enabled: true)
+
+        _ = try await store.reconcileSource(
+            sourceID: "source-a",
+            discoveredVideos: [makeDiscoveredVideo(
+                path: "Moved/New.mp4",
+                size: 10,
+                volumeIdentifier: volume,
+                fileResourceIdentifier: identity
+            )]
+        )
+        let movedVideos = try await store.fetchVideos(libraryID: LibraryRecord.primaryID)
+        let moved = try XCTUnwrap(movedVideos.first)
+        let tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        let states = try await store.tagAssignmentStates(videoIDs: [moved.id], tags: tags)
+        XCTAssertEqual(moved.id, video.id)
+        XCTAssertEqual(moved.relativePath, "Moved/New.mp4")
+        XCTAssertEqual(states[tagID], .on)
+
+        _ = try await store.reconcileSource(sourceID: "source-a", discoveredVideos: [])
+        let afterDeletion = try await store.fetchVideos(libraryID: LibraryRecord.primaryID)
+        XCTAssertTrue(afterDeletion.isEmpty)
+    }
+
     func testTenThousandVideoIndexAndTagFilterMeetMVPBudgets() async throws {
         let fixture = try DatabaseFixture()
         defer { fixture.remove() }
@@ -326,12 +577,12 @@ final class DatabaseStoreTests: XCTestCase {
         let discovered = (0..<10_000).map {
             makeDiscoveredVideo(path: String(format: "Folder/Video-%05d.mp4", $0), size: Int64($0 + 1))
         }
-        let scanStarted = Date()
-        let videos = try await store.applyScan(
+        let importStarted = Date()
+        let videos = try await store.importTestVideos(
             libraryID: LibraryRecord.primaryID,
             discoveredVideos: discovered
         )
-        let scanDuration = Date().timeIntervalSince(scanStarted)
+        let importDuration = Date().timeIntervalSince(importStarted)
         let tagID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "性能", parentID: nil)
         try await store.setTagAssignment(tagID: tagID, videoIDs: videos.enumerated().compactMap { $0.offset.isMultiple(of: 2) ? $0.element.id : nil }, enabled: true)
 
@@ -341,26 +592,26 @@ final class DatabaseStoreTests: XCTestCase {
 
         XCTAssertEqual(videos.count, 10_000)
         XCTAssertEqual(filtered.count, 5_000)
-        XCTAssertLessThan(scanDuration, 10, "10,000 条首次索引应在测试机上于 10 秒内完成")
+        XCTAssertLessThan(importDuration, 10, "10,000 条首次导入应在测试机上于 10 秒内完成")
         XCTAssertLessThan(filterDuration, 0.2, "10,000 条标签筛选目标为 200 毫秒")
     }
 
-    func testCancelledScanLeavesPreviousAvailabilityUntouched() async throws {
+    func testCancelledImportLeavesExistingVideosAvailable() async throws {
         let fixture = try DatabaseFixture()
         defer { fixture.remove() }
         let store = try DatabaseStore(databaseURL: fixture.databaseURL)
         try await store.saveLibrary(makeLibraryRecord())
-        _ = try await store.applyScan(
+        _ = try await store.importTestVideos(
             libraryID: LibraryRecord.primaryID,
             discoveredVideos: [makeDiscoveredVideo(path: "Keep.mp4", size: 10)]
         )
 
-        let scan = Task {
+        let importTask = Task {
             try await Task.sleep(nanoseconds: 100_000_000)
-            return try await store.applyScan(libraryID: LibraryRecord.primaryID, discoveredVideos: [])
+            return try await store.importTestVideos(libraryID: LibraryRecord.primaryID, discoveredVideos: [])
         }
-        scan.cancel()
-        do { _ = try await scan.value } catch {}
+        importTask.cancel()
+        do { _ = try await importTask.value } catch {}
 
         let records = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, includeMissing: true)
         XCTAssertEqual(records.first?.availability, .available)
@@ -376,10 +627,21 @@ final class DatabaseStoreTests: XCTestCase {
         )
     }
 
+    private func makeSource(id: String, name: String) -> SourceAuthorizationRecord {
+        SourceAuthorizationRecord(
+            id: id,
+            libraryID: LibraryRecord.primaryID,
+            displayName: name,
+            rootBookmarkData: Data([0x02]),
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+    }
+
     private func makeDiscoveredVideo(
         path: String,
         size: Int64,
         finderTags: [String] = [],
+        modificationDate: Date? = nil,
         volumeIdentifier: Data? = nil,
         fileResourceIdentifier: Data? = nil
     ) -> DiscoveredVideo {
@@ -389,11 +651,45 @@ final class DatabaseStoreTests: XCTestCase {
             fileExtension: URL(fileURLWithPath: path).pathExtension.lowercased(),
             fileSize: size,
             creationDate: nil,
-            modificationDate: nil,
+            modificationDate: modificationDate,
             volumeIdentifier: volumeIdentifier,
             fileResourceIdentifier: fileResourceIdentifier,
             finderTags: finderTags
         )
+    }
+}
+
+private extension DatabaseStore {
+    func importTestVideos(
+        libraryID: String,
+        discoveredVideos: [DiscoveredVideo],
+        completedAt: Date = Date()
+    ) async throws -> [VideoRecord] {
+        let sourceID = "test-source-\(libraryID)"
+        try saveSourceAuthorization(SourceAuthorizationRecord(
+            id: sourceID,
+            libraryID: libraryID,
+            displayName: "Test Source",
+            rootBookmarkData: Data([0x02]),
+            createdAt: Date(timeIntervalSince1970: 100)
+        ))
+        _ = try await importVideos(
+            sourceID: sourceID,
+            discoveredVideos: discoveredVideos,
+            importedAt: completedAt
+        )
+        return try fetchVideos(libraryID: libraryID)
+    }
+}
+
+private func executeSQL(at databaseURL: URL, sql: String) throws {
+    var database: OpaquePointer?
+    guard sqlite3_open(databaseURL.path, &database) == SQLITE_OK, let database else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    defer { sqlite3_close(database) }
+    guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+        throw CocoaError(.fileWriteUnknown)
     }
 }
 

@@ -4,9 +4,9 @@ import AppKit
 struct LibraryPicker {
     func chooseDirectory() -> URL? {
         let panel = NSOpenPanel()
-        panel.title = "选择视频资料库"
-        panel.message = "应用将以只读方式扫描这个目录及其子目录。"
-        panel.prompt = "选择资料库"
+        panel.title = "选择包含视频的文件夹"
+        panel.message = "将递归导入所选文件夹及子文件夹中的视频。"
+        panel.prompt = "导入"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false

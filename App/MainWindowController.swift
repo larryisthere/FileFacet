@@ -2,6 +2,8 @@ import AppKit
 
 @MainActor
 final class MainWindowController: NSWindowController {
+    private static let minimumWindowSize = NSSize(width: 920, height: 560)
+
     init() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
@@ -10,10 +12,14 @@ final class MainWindowController: NSWindowController {
             defer: false
         )
         window.title = AppConfiguration.displayName
+        window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        window.minSize = NSSize(width: 840, height: 560)
+        window.titlebarSeparatorStyle = .none
+        window.toolbarStyle = .unified
+        window.minSize = Self.minimumWindowSize
         window.tabbingMode = .preferred
         window.isReleasedWhenClosed = false
+        window.isRestorable = false
         super.init(window: window)
     }
 
@@ -23,6 +29,23 @@ final class MainWindowController: NSWindowController {
     }
 
     func setRootViewController(_ viewController: NSViewController) {
+        guard contentViewController !== viewController else { return }
+        guard let window else {
+            contentViewController = viewController
+            return
+        }
+        let preservedFrame = window.frame
         contentViewController = viewController
+        if let libraryViewController = viewController as? LibrarySplitViewController {
+            window.toolbar = libraryViewController.makeToolbar()
+            window.titleVisibility = .hidden
+        } else {
+            window.toolbar = nil
+            window.title = AppConfiguration.displayName
+            window.subtitle = ""
+            window.titleVisibility = .hidden
+        }
+        window.minSize = Self.minimumWindowSize
+        window.setFrame(preservedFrame, display: window.isVisible, animate: false)
     }
 }

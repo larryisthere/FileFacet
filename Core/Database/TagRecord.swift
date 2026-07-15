@@ -11,6 +11,12 @@ struct TagRecord: Equatable, Identifiable, Sendable {
     let videoCount: Int
 }
 
+struct TagCreationDraft: Equatable, Identifiable, Sendable {
+    let id: String
+    let name: String
+    let parentID: String?
+}
+
 enum TagAssignmentState: Equatable, Sendable {
     case off
     case mixed
@@ -22,8 +28,16 @@ struct VideoTagRelation: Equatable, Sendable {
     let tagID: String
 }
 
+struct FinderTagMapping: Equatable, Sendable {
+    let externalKey: String
+    let tagID: String
+    let firstImportedAt: Date
+    let lastSeenAt: Date
+}
+
 struct TagStateSnapshot: Equatable, Sendable {
     let libraryID: String
     let tags: [TagRecord]
     let relations: [VideoTagRelation]
+    let finderMappings: [FinderTagMapping]
 }

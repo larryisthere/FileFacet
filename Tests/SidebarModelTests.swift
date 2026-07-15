@@ -6,7 +6,6 @@ final class SidebarModelTests: XCTestCase {
         XCTAssertEqual(LibraryFilter.all, .all)
         XCTAssertEqual(LibraryFilter.untagged, .untagged)
         XCTAssertEqual(LibraryFilter.recent, .recent)
-        XCTAssertEqual(LibraryFilter.missing, .missing)
         XCTAssertEqual(LibraryFilter.tag("tag-id"), .tag("tag-id"))
         XCTAssertEqual(LibraryFilter.tags(["one", "two"]), .tags(["one", "two"]))
     }

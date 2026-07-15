@@ -1,7 +1,18 @@
 import Foundation
 
 protocol VideoFileDiscovering: Sendable {
-    func discoverVideos(at rootURL: URL) throws -> [DiscoveredVideo]
+    func discoverVideoResult(at rootURL: URL) throws -> VideoDiscoveryResult
+}
+
+extension VideoFileDiscovering {
+    func discoverVideos(at rootURL: URL) throws -> [DiscoveredVideo] {
+        try discoverVideoResult(at: rootURL).videos
+    }
+}
+
+struct VideoDiscoveryResult: Equatable, Sendable {
+    let videos: [DiscoveredVideo]
+    let failedCount: Int
 }
 
 struct VideoFileDiscovery: VideoFileDiscovering {
@@ -9,7 +20,7 @@ struct VideoFileDiscovery: VideoFileDiscovering {
         "avi", "m4v", "mkv", "mov", "mp4", "webm",
     ]
 
-    func discoverVideos(at rootURL: URL) throws -> [DiscoveredVideo] {
+    func discoverVideoResult(at rootURL: URL) throws -> VideoDiscoveryResult {
         let keys: [URLResourceKey] = [
             .isRegularFileKey,
             .isDirectoryKey,
@@ -29,8 +40,8 @@ struct VideoFileDiscovery: VideoFileDiscovering {
             includingPropertiesForKeys: keys,
             options: [.skipsHiddenFiles, .skipsPackageDescendants],
             errorHandler: { _, _ in
-                enumerationStatus.didFail = true
-                return false
+                enumerationStatus.recordFailure()
+                return true
             }
         ) else {
             throw CocoaError(.fileReadUnknown)
@@ -41,7 +52,13 @@ struct VideoFileDiscovery: VideoFileDiscovering {
 
         for case let fileURL as URL in enumerator {
             try Task.checkCancellation()
-            let values = try fileURL.resourceValues(forKeys: Set(keys))
+            let values: URLResourceValues
+            do {
+                values = try fileURL.resourceValues(forKeys: Set(keys))
+            } catch {
+                enumerationStatus.recordFailure()
+                continue
+            }
 
             if values.isSymbolicLink == true {
                 if values.isDirectory == true { enumerator.skipDescendants() }
@@ -71,18 +88,18 @@ struct VideoFileDiscovery: VideoFileDiscovering {
                     modificationDate: values.contentModificationDate,
                     volumeIdentifier: encodeIdentifier(values.volumeIdentifier),
                     fileResourceIdentifier: encodeIdentifier(values.fileResourceIdentifier),
-                    finderTags: (values.tagNames ?? []).filter { $0.isEmpty == false }
+                    finderTags: (values.tagNames ?? []).filter { $0.isEmpty == false },
+                    fallbackPathKey: fallbackPathKey(for: fileURL)
                 )
             )
         }
 
-        guard enumerationStatus.didFail == false else {
-            throw CocoaError(.fileReadUnknown)
-        }
-
-        return discovered.sorted {
-            $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending
-        }
+        return VideoDiscoveryResult(
+            videos: discovered.sorted {
+                $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending
+            },
+            failedCount: enumerationStatus.failedCount
+        )
     }
 
     private func encodeIdentifier(_ value: Any?) -> Data? {
@@ -92,8 +109,18 @@ struct VideoFileDiscovery: VideoFileDiscovering {
         if let number = value as? NSNumber { return Data(number.stringValue.utf8) }
         return nil
     }
+
 }
 
 private final class EnumerationStatus: @unchecked Sendable {
-    var didFail = false
+    private let lock = NSLock()
+    private var failures = 0
+
+    var failedCount: Int {
+        lock.withLock { failures }
+    }
+
+    func recordFailure() {
+        lock.withLock { failures += 1 }
+    }
 }

@@ -10,10 +10,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let delegate = AppDelegate()
         application.delegate = delegate
         application.setActivationPolicy(.regular)
-        application.run()
+        application.finishLaunching()
+        withExtendedLifetime(delegate) {
+            application.run()
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return
+        }
         let coordinator = ApplicationCoordinator()
         applicationCoordinator = coordinator
         coordinator.start()
@@ -23,5 +29,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func applicationShouldSaveApplicationState(_ app: NSApplication) -> Bool {
+        false
+    }
+
+    func applicationShouldRestoreApplicationState(_ app: NSApplication) -> Bool {
+        false
     }
 }

@@ -1,23 +1,40 @@
 import AppKit
 import CoreGraphics
+import QuickLook
+import QuickLookUI
 import SwiftUI
 
 @MainActor
 final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
+    private static let userActivityEventTypes: [CGEventType] = [
+        .keyDown,
+        .flagsChanged,
+        .leftMouseDown,
+        .rightMouseDown,
+        .otherMouseDown,
+        .mouseMoved,
+        .leftMouseDragged,
+        .rightMouseDragged,
+        .otherMouseDragged,
+        .scrollWheel,
+    ]
+
     private let preferencesStore: PreferencesStore
     private let lockCoordinator: LockCoordinator
     private let databaseStore: DatabaseStore?
     private let windowController = MainWindowController()
+    private let quickLookCoordinator = QuickLookPreviewCoordinator()
     private var privacyShield: NSView?
     private var idleTimer: Timer?
 
     private lazy var libraryViewController = LibrarySplitViewController(
-        onChooseLibrary: { [weak self] in self?.chooseLibrary() },
-        onRescan: { [weak self] in self?.rescanLibrary() },
+        onCancelImport: { [weak self] in self?.libraryAccessCoordinator?.cancelImport() },
         onOpenVideo: { [weak self] video in self?.openVideo(video) },
         onRevealVideo: { [weak self] video in self?.revealVideo(video) },
         onCopyPath: { [weak self] video in self?.copyPath(video) },
+        onPreviewVideos: { [weak self] videos in self?.previewVideos(videos) },
         thumbnailURL: { [weak self] video in self?.libraryAccessCoordinator?.thumbnailURL(for: video) },
+        filePath: { [weak self] video in self?.libraryAccessCoordinator?.fileURL(for: video)?.path },
         onFilterChanged: { [weak self] filter in self?.applyFilter(filter) },
         onSearchChanged: { [weak self] text in self?.libraryAccessCoordinator?.applySearch(text) },
         onCreateTag: { [weak self] name, parentID in self?.libraryAccessCoordinator?.createTag(name: name, parentID: parentID) },
@@ -28,7 +45,18 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         onMergeTag: { [weak self] source, target in self?.libraryAccessCoordinator?.mergeTag(source, into: target) },
         onAssignVideos: { [weak self] tag, videoIDs in self?.libraryAccessCoordinator?.setTagAssignment(tag, videoIDs: videoIDs, enabled: true) },
         onAssignTagID: { [weak self] tagID, videoIDs in self?.libraryAccessCoordinator?.setTagAssignment(tagID: tagID, videoIDs: videoIDs, enabled: true) },
-        onSetTagAssignment: { [weak self] tag, videoIDs, enabled in self?.libraryAccessCoordinator?.setTagAssignment(tag, videoIDs: videoIDs, enabled: enabled) },
+        onApplyTagDraft: { [weak self] creations, assignments, videoIDs, completion in
+            guard let coordinator = self?.libraryAccessCoordinator else {
+                completion(false)
+                return
+            }
+            coordinator.applyTagDraft(
+                creations: creations,
+                assignments: assignments,
+                videoIDs: videoIDs,
+                completion: completion
+            )
+        },
         loadTagStates: { [weak self] videoIDs, completion in self?.libraryAccessCoordinator?.tagAssignmentStates(videoIDs: videoIDs, completion: completion) }
     )
 
@@ -74,17 +102,17 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
             self?.render(lockState: state)
         }
 
-        libraryAccessCoordinator?.onLibraryChanged = { [weak self] summary in
-            self?.libraryViewController.setLibrary(summary)
-        }
         libraryAccessCoordinator?.onVideosChanged = { [weak self] videos in
             self?.libraryViewController.setVideos(videos)
+        }
+        libraryAccessCoordinator?.onSidebarFilterCountsChanged = { [weak self] counts in
+            self?.libraryViewController.setSidebarFilterCounts(counts)
         }
         libraryAccessCoordinator?.onVideoChanged = { [weak self] video in
             self?.libraryViewController.updateVideo(video)
         }
-        libraryAccessCoordinator?.onScanStateChanged = { [weak self] state in
-            self?.libraryViewController.setScanState(state)
+        libraryAccessCoordinator?.onImportStateChanged = { [weak self] state in
+            self?.libraryViewController.setImportState(state)
         }
         libraryAccessCoordinator?.onTagsChanged = { [weak self] tags in
             self?.libraryViewController.setTags(tags)
@@ -95,12 +123,14 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         libraryAccessCoordinator?.onError = { [weak self] message in
             self?.libraryViewController.setLibraryError(message)
         }
+        libraryAccessCoordinator?.onOperationError = { [weak self] message in
+            self?.libraryViewController.setOperationError(message)
+        }
 
         installMainMenu()
         render(lockState: lockCoordinator.state)
         windowController.window?.center()
         windowController.window?.makeKeyAndOrderFront(nil)
-        libraryAccessCoordinator?.undoManager = windowController.window?.undoManager
         libraryAccessCoordinator?.restoreLibrary()
         AppLogger.lifecycle.notice("Application started")
     }
@@ -110,6 +140,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         case .unlocked:
             windowController.setRootViewController(libraryViewController)
         case .locked, .authenticating, .failed:
+            quickLookCoordinator.close()
             let view = LockView(
                 state: lockState,
                 unlock: { [weak self] in self?.lockCoordinator.unlock() }
@@ -146,9 +177,10 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     }
 
     @objc private func applicationWillResignActive() {
+        guard lockCoordinator.isAuthenticationEnabled else { return }
         installPrivacyShield()
-        if lockCoordinator.isAuthenticationEnabled,
-           preferencesStore.idleLockInterval == .immediately {
+        if preferencesStore.idleLockInterval == .immediately,
+           lockCoordinator.state == .unlocked {
             lockCoordinator.lock()
         }
     }
@@ -159,37 +191,53 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     }
 
     @objc private func workspaceRequiresLock() {
+        guard lockCoordinator.isAuthenticationEnabled else { return }
         installPrivacyShield()
         lockCoordinator.lock()
     }
 
     @objc private func checkIdleLock() {
-        guard lockCoordinator.isAuthenticationEnabled else { return }
+        guard lockCoordinator.isAuthenticationEnabled,
+              lockCoordinator.state == .unlocked else { return }
         let interval = preferencesStore.idleLockInterval
         guard interval != .never, interval != .immediately else { return }
-        let idleSeconds = CGEventSource.secondsSinceLastEventType(
-            .combinedSessionState,
-            eventType: .null
-        )
+        guard let idleSeconds = systemIdleSeconds() else { return }
         if idleSeconds >= Double(interval.rawValue) { lockCoordinator.lock() }
+    }
+
+    private func systemIdleSeconds() -> TimeInterval? {
+        Self.userActivityEventTypes.lazy
+            .map {
+                CGEventSource.secondsSinceLastEventType(
+                    .combinedSessionState,
+                    eventType: $0
+                )
+            }
+            .filter { $0.isFinite && $0 >= 0 }
+            .min()
     }
 
     @objc private func showSettings() {
         settingsWindowController.present()
     }
 
-    @objc private func chooseLibrary() {
+    @objc private func importVideos() {
         guard lockCoordinator.state == .unlocked else { return }
         guard let libraryAccessCoordinator else {
             libraryViewController.setLibraryError("应用数据库暂时不可用，请重新启动应用。")
             return
         }
-        libraryAccessCoordinator.chooseLibrary()
+        libraryAccessCoordinator.importVideos()
     }
 
-    @objc private func rescanLibrary() {
+    @objc private func undoLastTagMutation() {
         guard lockCoordinator.state == .unlocked else { return }
-        libraryAccessCoordinator?.rescan()
+        libraryAccessCoordinator?.undoLastTagMutation()
+    }
+
+    @objc private func createRootTag() {
+        guard lockCoordinator.state == .unlocked else { return }
+        libraryViewController.beginCreatingRootTag()
     }
 
     private func openVideo(_ video: VideoRecord) {
@@ -208,17 +256,27 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         NSPasteboard.general.setString(path, forType: .string)
     }
 
+    private func previewVideos(_ videos: [VideoRecord]) {
+        let urls = videos.compactMap { libraryAccessCoordinator?.fileURL(for: $0) }
+        quickLookCoordinator.toggle(urls: urls)
+    }
+
     private func applyFilter(_ filter: LibraryFilter) {
         libraryAccessCoordinator?.applyFilter(filter)
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        if menuItem.action == #selector(chooseLibrary) {
+        if menuItem.action == #selector(importVideos) {
             return lockCoordinator.state == .unlocked && databaseStore != nil
         }
-        if menuItem.action == #selector(rescanLibrary) {
+        if menuItem.action == #selector(undoLastTagMutation) {
             return lockCoordinator.state == .unlocked
-                && libraryAccessCoordinator?.hasActiveLibrary == true
+                && libraryAccessCoordinator?.canUndoLastTagMutation == true
+        }
+        if menuItem.action == #selector(createRootTag) {
+            return lockCoordinator.state == .unlocked
+                && databaseStore != nil
+                && libraryViewController.canBeginCreatingRootTag
         }
         return true
     }
@@ -258,23 +316,36 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
 
         let fileMenuItem = NSMenuItem()
         let fileMenu = NSMenu(title: "文件")
-        let chooseLibraryItem = NSMenuItem(
-            title: "选择视频资料库…",
-            action: #selector(chooseLibrary),
-            keyEquivalent: "o"
+        let importItem = NSMenuItem(
+            title: "导入视频…",
+            action: #selector(importVideos),
+            keyEquivalent: "i"
         )
-        chooseLibraryItem.target = self
-        fileMenu.addItem(chooseLibraryItem)
-        let rescanItem = NSMenuItem(
-            title: "重新扫描资料库",
-            action: #selector(rescanLibrary),
-            keyEquivalent: "r"
+        importItem.keyEquivalentModifierMask = [.command, .shift]
+        importItem.target = self
+        fileMenu.addItem(importItem)
+        let createTagItem = NSMenuItem(
+            title: "新建标签…",
+            action: #selector(createRootTag),
+            keyEquivalent: "n"
         )
-        rescanItem.keyEquivalentModifierMask = [.command, .shift]
-        rescanItem.target = self
-        fileMenu.addItem(rescanItem)
+        createTagItem.keyEquivalentModifierMask = [.command, .shift]
+        createTagItem.target = self
+        fileMenu.addItem(createTagItem)
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
+
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "编辑")
+        let undoItem = NSMenuItem(
+            title: "撤销上一次标签操作",
+            action: #selector(undoLastTagMutation),
+            keyEquivalent: "z"
+        )
+        undoItem.target = self
+        editMenu.addItem(undoItem)
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
 
         let windowMenuItem = NSMenuItem()
         let windowMenu = NSMenu(title: "窗口")
@@ -291,9 +362,11 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     }
 
     private func installPrivacyShield() {
-        guard privacyShield == nil, let contentView = windowController.window?.contentView else { return }
+        guard privacyShield == nil,
+              let contentView = windowController.window?.contentView,
+              let containerView = contentView.superview else { return }
 
-        let shield = NSVisualEffectView(frame: contentView.bounds)
+        let shield = NSVisualEffectView(frame: contentView.convert(contentView.bounds, to: containerView))
         shield.autoresizingMask = [.width, .height]
         shield.material = .windowBackground
         shield.blendingMode = .withinWindow
@@ -309,12 +382,48 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
             label.centerYAnchor.constraint(equalTo: shield.centerYAnchor),
         ])
 
-        contentView.addSubview(shield, positioned: .above, relativeTo: nil)
+        containerView.addSubview(shield, positioned: .above, relativeTo: contentView)
         privacyShield = shield
     }
 
     private func removePrivacyShield() {
         privacyShield?.removeFromSuperview()
         privacyShield = nil
+    }
+}
+
+@MainActor
+private final class QuickLookPreviewCoordinator: NSObject, @preconcurrency QLPreviewPanelDataSource {
+    private var previewURLs: [URL] = []
+    private weak var activePanel: QLPreviewPanel?
+
+    func toggle(urls: [URL]) {
+        guard urls.isEmpty == false, let panel = QLPreviewPanel.shared() else { return }
+        if panel.isVisible {
+            panel.orderOut(nil)
+            return
+        }
+
+        previewURLs = urls
+        activePanel = panel
+        panel.dataSource = self
+        panel.currentPreviewItemIndex = 0
+        panel.reloadData()
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    func close() {
+        activePanel?.orderOut(nil)
+        activePanel = nil
+        previewURLs = []
+    }
+
+    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+        previewURLs.count
+    }
+
+    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
+        guard previewURLs.indices.contains(index) else { return nil }
+        return previewURLs[index] as NSURL
     }
 }

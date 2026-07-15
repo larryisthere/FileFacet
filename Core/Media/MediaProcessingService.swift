@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import ImageIO
+import QuickLookThumbnailing
 import UniformTypeIdentifiers
 
 struct MediaProcessingResult: Sendable {
@@ -63,12 +64,32 @@ actor MediaProcessingService {
             try Task.checkCancellation()
             let thumbnailID = video.id
             let destinationURL = thumbnailURL(for: thumbnailID)
-            if FileManager.default.fileExists(atPath: destinationURL.path) == false {
-                let generator = AVAssetImageGenerator(asset: asset)
-                generator.appliesPreferredTrackTransform = true
-                generator.maximumSize = CGSize(width: 640, height: 360)
-                let requestedTime = CMTime(seconds: min(max(duration ?? 0, 0), 1), preferredTimescale: 600)
-                let (image, _) = try await generator.image(at: requestedTime)
+            let thumbnailExists = FileManager.default.fileExists(atPath: destinationURL.path)
+            if video.thumbnailStatus != .completed || thumbnailExists == false {
+                let image: CGImage
+                do {
+                    let generator = AVAssetImageGenerator(asset: asset)
+                    generator.appliesPreferredTrackTransform = true
+                    generator.maximumSize = CGSize(width: 640, height: 360)
+                    let requestedTime = CMTime(
+                        seconds: min(max(duration ?? 0, 0), 1),
+                        preferredTimescale: 600
+                    )
+                    (image, _) = try await generator.image(at: requestedTime)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    logThumbnailFailure(stage: "avfoundation", error: error)
+                    do {
+                        image = try await generateQuickLookThumbnail(fileURL: fileURL)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        logThumbnailFailure(stage: "quicklook", error: error)
+                        throw error
+                    }
+                }
+                if thumbnailExists { try FileManager.default.removeItem(at: destinationURL) }
                 try writeJPEG(image, to: destinationURL)
                 try Self.prune(
                     directory: thumbnailDirectory,
@@ -96,6 +117,24 @@ actor MediaProcessingService {
         }
     }
 
+    private func generateQuickLookThumbnail(fileURL: URL) async throws -> CGImage {
+        let request = QLThumbnailGenerator.Request(
+            fileAt: fileURL,
+            size: CGSize(width: 640, height: 360),
+            scale: 1,
+            representationTypes: .thumbnail
+        )
+        let representation = try await QLThumbnailGenerator.shared.generateBestRepresentation(for: request)
+        return representation.cgImage
+    }
+
+    private func logThumbnailFailure(stage: String, error: Error) {
+        let error = error as NSError
+        AppLogger.library.error(
+            "Thumbnail generation failed at \(stage, privacy: .public), domain: \(error.domain, privacy: .public), code: \(error.code, privacy: .public)"
+        )
+    }
+
     nonisolated func thumbnailURL(for identifier: String) -> URL {
         thumbnailDirectory.appendingPathComponent(identifier).appendingPathExtension("jpg")
     }
@@ -106,6 +145,15 @@ actor MediaProcessingService {
             maximumBytes: maximumCacheBytes,
             fileManager: fileManager
         )
+    }
+
+    func removeThumbnails(identifiers: [String], fileManager: FileManager = .default) throws {
+        for identifier in Set(identifiers) {
+            let url = thumbnailURL(for: identifier)
+            if fileManager.fileExists(atPath: url.path) {
+                try fileManager.removeItem(at: url)
+            }
+        }
     }
 
     private static func prune(directory: URL, maximumBytes: Int64, fileManager: FileManager) throws {

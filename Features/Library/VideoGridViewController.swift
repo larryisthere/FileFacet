@@ -3,70 +3,44 @@ import AppKit
 @MainActor
 final class VideoGridViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegate {
     private static let itemIdentifier = NSUserInterfaceItemIdentifier("VideoCollectionViewItem")
+    private static let gridItemWidthDefaultsKey = "VideoGridItemWidth"
+    static let defaultGridItemWidth = 180.0
+    static let minimumGridItemWidth = 150.0
+    static let maximumGridItemWidth = 280.0
+    private static let thumbnailHeightRatio = 0.55
+    private static let gridItemChromeHeight = 64.0
 
-    private let collectionView = NSCollectionView()
-    private let onChooseLibrary: () -> Void
-    private let onRescan: () -> Void
+    private let collectionView = VideoCollectionView()
+    private let scrollView = NSScrollView()
     private let onOpenVideo: (VideoRecord) -> Void
-    private let onSelectionChanged: ([VideoRecord]) -> Void
+    private let onRevealVideo: (VideoRecord) -> Void
+    private let onCopyPath: (VideoRecord) -> Void
+    private let onPreviewVideos: ([VideoRecord]) -> Void
+    var onSelectionChanged: ([VideoRecord]) -> Void
     private let thumbnailURL: (VideoRecord) -> URL?
     private let onAssignTagID: (String, [String]) -> Void
-    private let onSearchChanged: (String) -> Void
     private var videos: [VideoRecord] = []
-    private var hasLibrary = false
+    private var selectionAnchorVideoID: String?
 
-    private let libraryTitleLabel = NSTextField(labelWithString: "视频资料库")
-    private let statusLabel = NSTextField(labelWithString: "尚未选择资料库")
     private let emptyState = NSStackView()
-    private let emptyTitleLabel = NSTextField(labelWithString: "尚未选择视频资料库")
-    private let emptyDetailLabel = NSTextField(wrappingLabelWithString: "选择一个本地目录，应用将建立只读索引。")
-    private lazy var chooseLibraryButton = NSButton(
-        title: "选择资料库…",
-        target: self,
-        action: #selector(chooseLibrary)
-    )
-    private lazy var headerChooseButton = NSButton(
-        title: "更换资料库…",
-        target: self,
-        action: #selector(chooseLibrary)
-    )
-    private lazy var rescanButton = NSButton(
-        title: "重新扫描",
-        target: self,
-        action: #selector(rescan)
-    )
-    private lazy var zoomSlider: NSSlider = {
-        let slider = NSSlider(value: 180, minValue: 150, maxValue: 280, target: self, action: #selector(changeZoom))
-        slider.controlSize = .small
-        slider.toolTip = "调整网格大小"
-        return slider
-    }()
-    private lazy var searchField: NSSearchField = {
-        let field = NSSearchField()
-        field.placeholderString = "搜索文件名"
-        field.sendsSearchStringImmediately = true
-        field.target = self
-        field.action = #selector(searchChanged)
-        field.widthAnchor.constraint(equalToConstant: 190).isActive = true
-        return field
-    }()
-
+    private let emptyTitleLabel = NSTextField(labelWithString: "从菜单栏导入视频")
+    private let emptyDetailLabel = NSTextField(wrappingLabelWithString: "选择“文件 > 导入视频…”或使用 ⇧⌘I，可继续从任意文件夹添加视频。")
     init(
-        onChooseLibrary: @escaping () -> Void,
-        onRescan: @escaping () -> Void,
         onOpenVideo: @escaping (VideoRecord) -> Void,
+        onRevealVideo: @escaping (VideoRecord) -> Void,
+        onCopyPath: @escaping (VideoRecord) -> Void,
+        onPreviewVideos: @escaping ([VideoRecord]) -> Void,
         onSelectionChanged: @escaping ([VideoRecord]) -> Void,
         thumbnailURL: @escaping (VideoRecord) -> URL?,
-        onAssignTagID: @escaping (String, [String]) -> Void,
-        onSearchChanged: @escaping (String) -> Void
+        onAssignTagID: @escaping (String, [String]) -> Void
     ) {
-        self.onChooseLibrary = onChooseLibrary
-        self.onRescan = onRescan
         self.onOpenVideo = onOpenVideo
+        self.onRevealVideo = onRevealVideo
+        self.onCopyPath = onCopyPath
+        self.onPreviewVideos = onPreviewVideos
         self.onSelectionChanged = onSelectionChanged
         self.thumbnailURL = thumbnailURL
         self.onAssignTagID = onAssignTagID
-        self.onSearchChanged = onSearchChanged
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -78,29 +52,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     override func loadView() {
         let container = NSView()
 
-        libraryTitleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
-        statusLabel.textColor = .secondaryLabelColor
-        statusLabel.lineBreakMode = .byTruncatingTail
-        rescanButton.isEnabled = false
-        headerChooseButton.isHidden = true
-
-        let titleStack = NSStackView(views: [libraryTitleLabel, statusLabel])
-        titleStack.orientation = .vertical
-        titleStack.alignment = .leading
-        titleStack.spacing = 2
-
-        let zoomIcon = NSImageView(
-            image: NSImage(systemSymbolName: "rectangle.grid.3x2", accessibilityDescription: "网格大小") ?? NSImage()
-        )
-        let header = NSStackView(views: [titleStack, NSView(), searchField, zoomIcon, zoomSlider, rescanButton, headerChooseButton])
-        header.translatesAutoresizingMaskIntoConstraints = false
-        header.orientation = .horizontal
-        header.alignment = .centerY
-        header.spacing = 8
-        header.edgeInsets = NSEdgeInsets(top: 10, left: 16, bottom: 10, right: 16)
-
         let layout = NSCollectionViewFlowLayout()
-        layout.itemSize = NSSize(width: 180, height: 150)
+        layout.itemSize = gridItemSize(for: Self.persistedGridItemWidth())
         layout.minimumInteritemSpacing = 16
         layout.minimumLineSpacing = 20
         layout.sectionInset = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
@@ -112,13 +65,22 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         collectionView.backgroundColors = [.clear]
         collectionView.register(VideoCollectionViewItem.self, forItemWithIdentifier: Self.itemIdentifier)
         collectionView.registerForDraggedTypes([SidebarViewController.tagPasteboardType])
-        let doubleClickRecognizer = NSClickGestureRecognizer(target: self, action: #selector(openSelectedVideo))
-        doubleClickRecognizer.numberOfClicksRequired = 2
-        collectionView.addGestureRecognizer(doubleClickRecognizer)
+        collectionView.onDoubleClickItem = { [weak self] indexPath in
+            self?.openVideo(at: indexPath)
+        }
+        collectionView.onContextMenuItem = { [weak self] indexPath in
+            self?.contextMenu(for: indexPath)
+        }
+        collectionView.onPreviewSelection = { [weak self] in
+            self?.previewSelection()
+        }
+        collectionView.onSelectionGesture = { [weak self] indexPath, modifiers in
+            self?.handleSelectionGesture(at: indexPath, modifiers: modifiers) ?? false
+        }
 
-        let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.hasVerticalScroller = true
+        scrollView.hasVerticalScroller = false
+        scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
         scrollView.documentView = collectionView
 
@@ -140,43 +102,43 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         emptyState.addArrangedSubview(icon)
         emptyState.addArrangedSubview(emptyTitleLabel)
         emptyState.addArrangedSubview(emptyDetailLabel)
-        emptyState.addArrangedSubview(chooseLibraryButton)
 
-        container.addSubview(header)
         container.addSubview(scrollView)
         container.addSubview(emptyState)
         NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            header.topAnchor.constraint(equalTo: container.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
+            scrollView.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             emptyState.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
-            emptyState.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+            emptyState.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor, constant: -24),
             emptyState.widthAnchor.constraint(lessThanOrEqualToConstant: 380),
         ])
         view = container
         updateEmptyState()
     }
 
-    func setLibrary(_ summary: LibrarySummary) {
-        loadViewIfNeeded()
-        hasLibrary = true
-        libraryTitleLabel.stringValue = summary.name
-        statusLabel.stringValue = "正在读取已有索引…"
-        chooseLibraryButton.title = "更换资料库…"
-        headerChooseButton.isHidden = false
-        rescanButton.isEnabled = true
-        updateEmptyState()
-    }
-
     func setVideos(_ videos: [VideoRecord]) {
         loadViewIfNeeded()
+        let selectedVideoIDs = Set(
+            collectionView.selectionIndexPaths.compactMap { indexPath in
+                self.videos.indices.contains(indexPath.item) ? self.videos[indexPath.item].id : nil
+            }
+        )
         self.videos = videos
+        if let selectionAnchorVideoID,
+           videos.contains(where: { $0.id == selectionAnchorVideoID }) == false {
+            self.selectionAnchorVideoID = nil
+        }
         collectionView.reloadData()
+        collectionView.selectionIndexPaths = Set(
+            videos.indices.compactMap { index in
+                selectedVideoIDs.contains(videos[index].id) ? IndexPath(item: index, section: 0) : nil
+            }
+        )
+        scrollView.hasVerticalScroller = videos.isEmpty == false
         updateEmptyState()
+        notifySelectionChanged()
     }
 
     func updateVideo(_ video: VideoRecord) {
@@ -186,38 +148,21 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         notifySelectionChanged()
     }
 
-    func setScanState(_ state: LibraryScanState) {
-        loadViewIfNeeded()
-        switch state {
-        case .idle:
-            statusLabel.stringValue = hasLibrary ? "等待扫描" : "尚未选择资料库"
-            rescanButton.isEnabled = hasLibrary
-        case .scanning:
-            statusLabel.stringValue = videos.isEmpty ? "正在扫描视频…" : "正在后台更新索引…"
-            rescanButton.isEnabled = false
-        case let .completed(videoCount):
-            statusLabel.stringValue = "共 \(videoCount) 个视频"
-            rescanButton.isEnabled = true
-        case let .failed(message):
-            statusLabel.stringValue = message
-            rescanButton.isEnabled = true
-        }
-        updateEmptyState()
+    func selectedVideos() -> [VideoRecord] {
+        collectionView.selectionIndexPaths
+            .sorted()
+            .compactMap { indexPath in videos.indices.contains(indexPath.item) ? videos[indexPath.item] : nil }
     }
 
-    func setError(_ message: String) {
+    func setSelectedVideoIDs(_ videoIDs: [String], notify: Bool = true) {
         loadViewIfNeeded()
-        hasLibrary = false
-        videos = []
-        collectionView.reloadData()
-        libraryTitleLabel.stringValue = "资料库需要处理"
-        statusLabel.stringValue = message
-        emptyTitleLabel.stringValue = "无法访问视频资料库"
-        emptyDetailLabel.stringValue = message
-        chooseLibraryButton.title = "重新选择…"
-        headerChooseButton.isHidden = true
-        rescanButton.isEnabled = false
-        updateEmptyState()
+        let identifiers = Set(videoIDs)
+        collectionView.selectionIndexPaths = Set(
+            videos.indices.compactMap { index in
+                identifiers.contains(videos[index].id) ? IndexPath(item: index, section: 0) : nil
+            }
+        )
+        if notify { notifySelectionChanged() }
     }
 
     func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
@@ -239,7 +184,17 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         return item
     }
 
-    func collectionViewSelectionDidChange(_ notification: Notification) {
+    func collectionView(
+        _ collectionView: NSCollectionView,
+        didSelectItemsAt indexPaths: Set<IndexPath>
+    ) {
+        notifySelectionChanged()
+    }
+
+    func collectionView(
+        _ collectionView: NSCollectionView,
+        didDeselectItemsAt indexPaths: Set<IndexPath>
+    ) {
         notifySelectionChanged()
     }
 
@@ -278,34 +233,137 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
 
     private func updateEmptyState() {
         emptyState.isHidden = videos.isEmpty == false
-        if hasLibrary, videos.isEmpty {
-            emptyTitleLabel.stringValue = "资料库中暂无视频"
-            emptyDetailLabel.stringValue = "扫描会识别常见的本地视频格式。你可以随时重新扫描。"
-        }
+        emptyTitleLabel.stringValue = "从菜单栏导入视频"
+        emptyDetailLabel.stringValue = "选择“文件 > 导入视频…”或使用 ⇧⌘I，可继续从任意文件夹添加视频。"
     }
 
-    @objc private func chooseLibrary() {
-        onChooseLibrary()
-    }
-
-    @objc private func rescan() {
-        onRescan()
-    }
-
-    @objc private func openSelectedVideo() {
-        guard let indexPath = collectionView.selectionIndexPaths.sorted().first else { return }
+    private func openVideo(at indexPath: IndexPath) {
+        guard videos.indices.contains(indexPath.item) else { return }
         onOpenVideo(videos[indexPath.item])
     }
 
-    @objc private func changeZoom() {
-        guard let layout = collectionView.collectionViewLayout as? NSCollectionViewFlowLayout else { return }
-        let width = zoomSlider.doubleValue
-        layout.itemSize = NSSize(width: width, height: width * 0.76)
-        layout.invalidateLayout()
+    private func previewSelection() {
+        let selectedVideos: [VideoRecord] = collectionView.selectionIndexPaths
+            .sorted()
+            .compactMap { indexPath -> VideoRecord? in
+                guard videos.indices.contains(indexPath.item) else { return nil }
+                let video = videos[indexPath.item]
+                return video.availability == .available ? video : nil
+            }
+        guard selectedVideos.isEmpty == false else { return }
+        onPreviewVideos(selectedVideos)
     }
 
-    @objc private func searchChanged() {
-        onSearchChanged(searchField.stringValue)
+    private func contextMenu(for indexPath: IndexPath) -> NSMenu? {
+        guard videos.indices.contains(indexPath.item) else { return nil }
+        selectionAnchorVideoID = videos[indexPath.item].id
+        if collectionView.selectionIndexPaths.contains(indexPath) == false {
+            collectionView.selectionIndexPaths = [indexPath]
+            notifySelectionChanged()
+        }
+
+        let video = videos[indexPath.item]
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.addItem(makeContextMenuItem(
+            title: "使用默认播放器打开",
+            action: #selector(openVideoFromContextMenu(_:)),
+            video: video
+        ))
+        menu.addItem(makeContextMenuItem(
+            title: "在 Finder 中显示",
+            action: #selector(revealVideoFromContextMenu(_:)),
+            video: video
+        ))
+        menu.addItem(makeContextMenuItem(
+            title: "复制完整路径",
+            action: #selector(copyPathFromContextMenu(_:)),
+            video: video
+        ))
+        return menu
+    }
+
+    private func handleSelectionGesture(
+        at indexPath: IndexPath?,
+        modifiers: NSEvent.ModifierFlags
+    ) -> Bool {
+        let modifiers = modifiers.intersection(.deviceIndependentFlagsMask)
+        guard let indexPath, videos.indices.contains(indexPath.item) else {
+            if modifiers.contains(.shift) == false {
+                selectionAnchorVideoID = nil
+            }
+            return false
+        }
+
+        guard modifiers.contains(.shift) else {
+            selectionAnchorVideoID = videos[indexPath.item].id
+            return false
+        }
+
+        let anchorIndex = selectionAnchorVideoID.flatMap { anchorID in
+            videos.firstIndex(where: { $0.id == anchorID })
+        } ?? indexPath.item
+        selectionAnchorVideoID = videos[anchorIndex].id
+
+        let lowerBound = min(anchorIndex, indexPath.item)
+        let upperBound = max(anchorIndex, indexPath.item)
+        let rangeSelection = Set(
+            (lowerBound...upperBound).map { IndexPath(item: $0, section: 0) }
+        )
+        if modifiers.contains(.command) {
+            collectionView.selectionIndexPaths.formUnion(rangeSelection)
+        } else {
+            collectionView.selectionIndexPaths = rangeSelection
+        }
+        notifySelectionChanged()
+        return true
+    }
+
+    private func makeContextMenuItem(title: String, action: Selector, video: VideoRecord) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.representedObject = video.id
+        item.isEnabled = video.availability == .available
+        return item
+    }
+
+    private func video(from menuItem: NSMenuItem) -> VideoRecord? {
+        guard let videoID = menuItem.representedObject as? String else { return nil }
+        return videos.first { $0.id == videoID }
+    }
+
+    @objc private func openVideoFromContextMenu(_ sender: NSMenuItem) {
+        if let video = video(from: sender) { onOpenVideo(video) }
+    }
+
+    @objc private func revealVideoFromContextMenu(_ sender: NSMenuItem) {
+        if let video = video(from: sender) { onRevealVideo(video) }
+    }
+
+    @objc private func copyPathFromContextMenu(_ sender: NSMenuItem) {
+        if let video = video(from: sender) { onCopyPath(video) }
+    }
+
+    func setGridItemWidth(_ width: Double) {
+        guard let layout = collectionView.collectionViewLayout as? NSCollectionViewFlowLayout else { return }
+        let clampedWidth = min(Self.maximumGridItemWidth, max(Self.minimumGridItemWidth, width))
+        layout.itemSize = gridItemSize(for: clampedWidth)
+        layout.invalidateLayout()
+        UserDefaults.standard.set(clampedWidth, forKey: Self.gridItemWidthDefaultsKey)
+    }
+
+    static func persistedGridItemWidth(defaults: UserDefaults = .standard) -> Double {
+        guard let storedWidth = defaults.object(forKey: gridItemWidthDefaultsKey) as? NSNumber else {
+            return defaultGridItemWidth
+        }
+        return min(maximumGridItemWidth, max(minimumGridItemWidth, storedWidth.doubleValue))
+    }
+
+    private func gridItemSize(for width: Double) -> NSSize {
+        NSSize(
+            width: width,
+            height: ceil(width * Self.thumbnailHeightRatio + Self.gridItemChromeHeight)
+        )
     }
 
     private func notifySelectionChanged() {
@@ -317,25 +375,64 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
 }
 
 @MainActor
+private final class VideoCollectionView: NSCollectionView {
+    var onDoubleClickItem: ((IndexPath) -> Void)?
+    var onContextMenuItem: ((IndexPath) -> NSMenu?)?
+    var onPreviewSelection: (() -> Void)?
+    var onSelectionGesture: ((IndexPath?, NSEvent.ModifierFlags) -> Bool)?
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let indexPath = indexPathForItem(at: point)
+        if onSelectionGesture?(indexPath, event.modifierFlags) == true {
+            window?.makeFirstResponder(self)
+            return
+        }
+        super.mouseDown(with: event)
+        guard event.clickCount == 2 else { return }
+        guard let indexPath else { return }
+        onDoubleClickItem?(indexPath)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let indexPath = indexPathForItem(at: point) else { return nil }
+        return onContextMenuItem?(indexPath)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let disallowedModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        if event.charactersIgnoringModifiers == " ",
+           event.modifierFlags.intersection(disallowedModifiers).isEmpty {
+            onPreviewSelection?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
+@MainActor
 private final class VideoCollectionViewItem: NSCollectionViewItem {
-    private let iconView = NSImageView()
+    private let thumbnailView = VideoThumbnailView()
     private let filenameLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
+    private var isHovered = false
 
     override var isSelected: Bool {
         didSet { updateSelectionAppearance() }
     }
 
     override func loadView() {
-        let container = NSView()
+        let container = VideoCollectionItemView()
         container.wantsLayer = true
         container.layer?.cornerRadius = 8
+        container.onHoverChanged = { [weak self] isHovered in
+            guard let self else { return }
+            self.isHovered = isHovered
+            self.updateSelectionAppearance()
+        }
 
-        iconView.image = NSImage(systemSymbolName: "film", accessibilityDescription: "视频")
-        iconView.symbolConfiguration = .init(pointSize: 34, weight: .light)
-        iconView.contentTintColor = .secondaryLabelColor
-        iconView.imageScaling = .scaleProportionallyUpOrDown
-        iconView.translatesAutoresizingMaskIntoConstraints = false
+        thumbnailView.translatesAutoresizingMaskIntoConstraints = false
 
         filenameLabel.translatesAutoresizingMaskIntoConstraints = false
         filenameLabel.lineBreakMode = .byTruncatingMiddle
@@ -347,21 +444,22 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
         detailLabel.alignment = .center
         detailLabel.font = .systemFont(ofSize: 11)
 
-        container.addSubview(iconView)
+        container.addSubview(thumbnailView)
         container.addSubview(filenameLabel)
         container.addSubview(detailLabel)
         NSLayoutConstraint.activate([
-            iconView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            iconView.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
-            iconView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            iconView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-            iconView.heightAnchor.constraint(equalTo: container.widthAnchor, multiplier: 0.55),
+            thumbnailView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            thumbnailView.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            thumbnailView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            thumbnailView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            thumbnailView.heightAnchor.constraint(equalTo: container.widthAnchor, multiplier: 0.55),
             filenameLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             filenameLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-            filenameLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 14),
+            filenameLabel.topAnchor.constraint(equalTo: thumbnailView.bottomAnchor, constant: 14),
             detailLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             detailLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
             detailLabel.topAnchor.constraint(equalTo: filenameLabel.bottomAnchor, constant: 4),
+            detailLabel.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -8),
         ])
         view = container
         updateSelectionAppearance()
@@ -369,8 +467,7 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
 
     func configure(with video: VideoRecord, thumbnailURL: URL?) {
         loadViewIfNeeded()
-        iconView.image = thumbnailURL.flatMap(NSImage.init(contentsOf:))
-            ?? NSImage(systemSymbolName: "film", accessibilityDescription: "视频")
+        thumbnailView.image = thumbnailURL.flatMap(NSImage.init(contentsOf:))
         filenameLabel.stringValue = video.filename
         let duration = video.duration.map { formattedDuration($0) } ?? video.fileExtension.uppercased()
         detailLabel.stringValue = duration
@@ -383,8 +480,103 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
     }
 
     private func updateSelectionAppearance() {
-        view.layer?.backgroundColor = isSelected
-            ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.18).cgColor
-            : NSColor.controlBackgroundColor.withAlphaComponent(0.55).cgColor
+        let backgroundColor: NSColor
+        if isSelected {
+            backgroundColor = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.18)
+        } else if isHovered {
+            backgroundColor = NSColor.secondaryLabelColor.withAlphaComponent(0.12)
+        } else {
+            backgroundColor = .clear
+        }
+        view.layer?.backgroundColor = backgroundColor.cgColor
+    }
+}
+
+@MainActor
+private final class VideoThumbnailView: NSView {
+    private let placeholderView = NSImageView()
+
+    var image: NSImage? {
+        didSet {
+            placeholderView.isHidden = image != nil
+            updateImageLayer()
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.masksToBounds = true
+        layer?.contentsGravity = .resizeAspectFill
+
+        placeholderView.translatesAutoresizingMaskIntoConstraints = false
+        placeholderView.image = NSImage(systemSymbolName: "film", accessibilityDescription: "视频")
+        placeholderView.symbolConfiguration = .init(pointSize: 34, weight: .light)
+        placeholderView.contentTintColor = .secondaryLabelColor
+        placeholderView.imageScaling = .scaleProportionallyUpOrDown
+        addSubview(placeholderView)
+        NSLayoutConstraint.activate([
+            placeholderView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            placeholderView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            placeholderView.widthAnchor.constraint(equalToConstant: 42),
+            placeholderView.heightAnchor.constraint(equalToConstant: 42),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        layer?.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    }
+
+    private func updateImageLayer() {
+        guard let image else {
+            layer?.contents = nil
+            return
+        }
+        var proposedRect = NSRect(origin: .zero, size: image.size)
+        layer?.contents = image.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil)
+        layer?.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    }
+}
+
+@MainActor
+private final class VideoCollectionItemView: NSView {
+    var onHoverChanged: ((Bool) -> Void)?
+    private var hoverTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        hoverTrackingArea = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHoverChanged?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHoverChanged?(false)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            onHoverChanged?(false)
+        }
     }
 }
