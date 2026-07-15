@@ -14,9 +14,14 @@ struct MediaProcessingResult: Sendable {
 
 actor MediaProcessingService {
     private let thumbnailDirectory: URL
+    private let maximumCacheBytes: Int64
 
-    init(fileManager: FileManager = .default) throws {
-        let cacheDirectory = try fileManager.url(
+    init(
+        fileManager: FileManager = .default,
+        cacheDirectory: URL? = nil,
+        maximumCacheBytes: Int64 = 2 * 1_024 * 1_024 * 1_024
+    ) throws {
+        let cacheDirectory = try cacheDirectory ?? fileManager.url(
             for: .cachesDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
@@ -25,7 +30,9 @@ actor MediaProcessingService {
         thumbnailDirectory = cacheDirectory
             .appendingPathComponent(AppConfiguration.bundleIdentifier, isDirectory: true)
             .appendingPathComponent("Thumbnails", isDirectory: true)
+        self.maximumCacheBytes = maximumCacheBytes
         try fileManager.createDirectory(at: thumbnailDirectory, withIntermediateDirectories: true)
+        try Self.prune(directory: thumbnailDirectory, maximumBytes: maximumCacheBytes, fileManager: fileManager)
     }
 
     func process(video: VideoRecord, fileURL: URL) async -> MediaProcessingResult {
@@ -63,6 +70,11 @@ actor MediaProcessingService {
                 let requestedTime = CMTime(seconds: min(max(duration ?? 0, 0), 1), preferredTimescale: 600)
                 let (image, _) = try await generator.image(at: requestedTime)
                 try writeJPEG(image, to: destinationURL)
+                try Self.prune(
+                    directory: thumbnailDirectory,
+                    maximumBytes: maximumCacheBytes,
+                    fileManager: .default
+                )
             }
             return MediaProcessingResult(
                 duration: duration,
@@ -86,6 +98,33 @@ actor MediaProcessingService {
 
     nonisolated func thumbnailURL(for identifier: String) -> URL {
         thumbnailDirectory.appendingPathComponent(identifier).appendingPathExtension("jpg")
+    }
+
+    func pruneCache(fileManager: FileManager = .default) throws {
+        try Self.prune(
+            directory: thumbnailDirectory,
+            maximumBytes: maximumCacheBytes,
+            fileManager: fileManager
+        )
+    }
+
+    private static func prune(directory: URL, maximumBytes: Int64, fileManager: FileManager) throws {
+        let urls = try fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        )
+        var entries = try urls.map { url -> (url: URL, size: Int64, date: Date) in
+            let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            return (url, Int64(values.fileSize ?? 0), values.contentModificationDate ?? .distantPast)
+        }
+        var totalBytes = entries.reduce(Int64(0)) { $0 + $1.size }
+        guard totalBytes > maximumBytes else { return }
+        entries.sort { $0.date < $1.date }
+        for entry in entries where totalBytes > maximumBytes {
+            try fileManager.removeItem(at: entry.url)
+            totalBytes -= entry.size
+        }
     }
 
     private func writeJPEG(_ image: CGImage, to url: URL) throws {

@@ -8,6 +8,7 @@ final class PreferencesStoreTests: XCTestCase {
         let store = PreferencesStore(defaults: defaults)
 
         XCTAssertFalse(store.authenticationEnabled)
+        XCTAssertEqual(store.idleLockInterval, .never)
     }
 
     func testAuthenticationPreferencePersists() {
@@ -17,6 +18,14 @@ final class PreferencesStoreTests: XCTestCase {
         store.setAuthenticationEnabled(true)
 
         XCTAssertTrue(PreferencesStore(defaults: defaults).authenticationEnabled)
+    }
+
+    func testIdleLockIntervalPersists() {
+        let defaults = makeDefaults()
+        let store = PreferencesStore(defaults: defaults)
+        store.idleLockInterval = .fiveMinutes
+
+        XCTAssertEqual(PreferencesStore(defaults: defaults).idleLockInterval, .fiveMinutes)
     }
 
     private func makeDefaults() -> UserDefaults {

@@ -2,7 +2,7 @@ import Foundation
 import SQLite3
 
 actor DatabaseStore {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     private let connection: SQLiteConnection
     private var isPrepared = false
@@ -434,16 +434,102 @@ actor DatabaseStore {
             sqlite3_finalize(cycle)
             guard createsCycle == false else { throw DatabaseError.statementFailed("移动标签") }
         }
+        let lookup = try prepare("SELECT library_id, parent_id, sort_order FROM tags WHERE id = ?", operation: "移动标签")
+        bindText(id, to: 1, in: lookup)
+        guard sqlite3_step(lookup) == SQLITE_ROW, let libraryID = text(at: 0, in: lookup) else {
+            sqlite3_finalize(lookup)
+            throw DatabaseError.statementFailed("移动标签")
+        }
+        let oldParentID = text(at: 1, in: lookup)
+        let oldSortOrder = Int(sqlite3_column_int(lookup, 2))
+        sqlite3_finalize(lookup)
+        let targetOrder = max(0, sortOrder)
+
+        try execute("BEGIN IMMEDIATE")
+        do {
+            if oldParentID == parentID {
+                if targetOrder > oldSortOrder {
+                    try shiftTagOrders(
+                        libraryID: libraryID,
+                        parentID: parentID,
+                        condition: "sort_order > ? AND sort_order <= ?",
+                        values: [oldSortOrder, targetOrder],
+                        delta: -1,
+                        excludingID: id
+                    )
+                } else if targetOrder < oldSortOrder {
+                    try shiftTagOrders(
+                        libraryID: libraryID,
+                        parentID: parentID,
+                        condition: "sort_order >= ? AND sort_order < ?",
+                        values: [targetOrder, oldSortOrder],
+                        delta: 1,
+                        excludingID: id
+                    )
+                }
+            } else {
+                try shiftTagOrders(
+                    libraryID: libraryID,
+                    parentID: oldParentID,
+                    condition: "sort_order > ?",
+                    values: [oldSortOrder],
+                    delta: -1,
+                    excludingID: id
+                )
+                try shiftTagOrders(
+                    libraryID: libraryID,
+                    parentID: parentID,
+                    condition: "sort_order >= ?",
+                    values: [targetOrder],
+                    delta: 1,
+                    excludingID: id
+                )
+            }
+
+            let statement = try prepare(
+                "UPDATE tags SET parent_id = ?, sort_order = ?, updated_at = ? WHERE id = ?",
+                operation: "移动标签"
+            )
+            bindOptionalText(parentID, to: 1, in: statement)
+            sqlite3_bind_int64(statement, 2, Int64(targetOrder))
+            sqlite3_bind_double(statement, 3, Date().timeIntervalSince1970)
+            bindText(id, to: 4, in: statement)
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                sqlite3_finalize(statement)
+                throw DatabaseError.statementFailed("移动标签")
+            }
+            sqlite3_finalize(statement)
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    private func shiftTagOrders(
+        libraryID: String,
+        parentID: String?,
+        condition: String,
+        values: [Int],
+        delta: Int,
+        excludingID: String
+    ) throws {
         let statement = try prepare(
-            "UPDATE tags SET parent_id = ?, sort_order = ?, updated_at = ? WHERE id = ?",
-            operation: "移动标签"
+            """
+            UPDATE tags SET sort_order = sort_order + ?
+            WHERE library_id = ? AND parent_id IS ? AND id != ? AND \(condition)
+            """,
+            operation: "调整标签顺序"
         )
         defer { sqlite3_finalize(statement) }
-        bindOptionalText(parentID, to: 1, in: statement)
-        sqlite3_bind_int64(statement, 2, Int64(sortOrder))
-        sqlite3_bind_double(statement, 3, Date().timeIntervalSince1970)
-        bindText(id, to: 4, in: statement)
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("移动标签") }
+        sqlite3_bind_int(statement, 1, Int32(delta))
+        bindText(libraryID, to: 2, in: statement)
+        bindOptionalText(parentID, to: 3, in: statement)
+        bindText(excludingID, to: 4, in: statement)
+        for (index, value) in values.enumerated() {
+            sqlite3_bind_int(statement, Int32(index + 5), Int32(value))
+        }
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("调整标签顺序") }
     }
 
     func mergeTag(sourceID: String, targetID: String) throws {
@@ -624,6 +710,7 @@ actor DatabaseStore {
         completedAt: Date = Date()
     ) throws -> [VideoRecord] {
         try prepareIfNeeded()
+        try Task.checkCancellation()
         let scanID = UUID().uuidString
         try execute("BEGIN IMMEDIATE")
 
@@ -664,6 +751,8 @@ actor DatabaseStore {
             )
             defer { sqlite3_finalize(upsertStatement) }
             for video in discoveredVideos {
+                try Task.checkCancellation()
+                try relinkVideoByIdentity(video, libraryID: libraryID)
                 try upsert(
                     video,
                     libraryID: libraryID,
@@ -679,6 +768,7 @@ actor DatabaseStore {
                 discoveredVideos: discoveredVideos,
                 importedAt: completedAt
             )
+            try Task.checkCancellation()
 
             let missingStatement = try prepare(
                 """
@@ -910,6 +1000,10 @@ actor DatabaseStore {
     }
 
     private func applyMigration(_ version: Int) throws {
+        if version == 2 {
+            try execute("CREATE INDEX IF NOT EXISTS video_tags_tag_idx ON video_tags(tag_id, video_id)")
+            return
+        }
         guard version == 1 else { throw DatabaseError.migrationFailed(version) }
 
         try execute("""
@@ -1185,6 +1279,40 @@ actor DatabaseStore {
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw DatabaseError.statementFailed("写入视频索引")
         }
+    }
+
+    private func relinkVideoByIdentity(_ video: DiscoveredVideo, libraryID: String) throws {
+        guard let volumeIdentifier = video.volumeIdentifier,
+              let fileResourceIdentifier = video.fileResourceIdentifier else { return }
+        let lookup = try prepare(
+            """
+            SELECT id, relative_path FROM videos
+            WHERE library_id = ? AND volume_identifier = ? AND file_resource_identifier = ?
+            LIMIT 1
+            """,
+            operation: "关联移动视频"
+        )
+        bindText(libraryID, to: 1, in: lookup)
+        bindData(volumeIdentifier, to: 2, in: lookup)
+        bindData(fileResourceIdentifier, to: 3, in: lookup)
+        guard sqlite3_step(lookup) == SQLITE_ROW,
+              let videoID = text(at: 0, in: lookup),
+              let oldPath = text(at: 1, in: lookup),
+              oldPath != video.relativePath else {
+            sqlite3_finalize(lookup)
+            return
+        }
+        sqlite3_finalize(lookup)
+        let update = try prepare(
+            "UPDATE videos SET relative_path = ?, filename = ?, file_extension = ? WHERE id = ?",
+            operation: "关联移动视频"
+        )
+        defer { sqlite3_finalize(update) }
+        bindText(video.relativePath, to: 1, in: update)
+        bindText(video.filename, to: 2, in: update)
+        bindText(video.fileExtension, to: 3, in: update)
+        bindText(videoID, to: 4, in: update)
+        guard sqlite3_step(update) == SQLITE_DONE else { throw DatabaseError.statementFailed("关联移动视频") }
     }
 }
 

@@ -15,6 +15,13 @@ struct SettingsView: View {
                     )
                 )
 
+                Picker("闲置后锁定", selection: $preferences.idleLockInterval) {
+                    ForEach(IdleLockInterval.allCases) { interval in
+                        Text(interval.title).tag(interval)
+                    }
+                }
+                .disabled(preferences.authenticationEnabled == false)
+
                 Text("开启时使用 Touch ID 或 Mac 登录密码验证。应用切换时始终隐藏窗口中的视频与标签信息。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -22,7 +29,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 220)
+        .frame(width: 460, height: 270)
         .scenePadding()
     }
 }

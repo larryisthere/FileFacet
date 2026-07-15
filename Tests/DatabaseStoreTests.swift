@@ -180,6 +180,22 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertEqual(states[targetID], .on)
     }
 
+    func testMovingTagKeepsSiblingOrderContiguous() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        let first = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "一", parentID: nil)
+        let second = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "二", parentID: nil)
+        let third = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "三", parentID: nil)
+
+        try await store.moveTag(id: third, parentID: nil, sortOrder: 0)
+
+        let userTags = try await store.fetchTags(libraryID: LibraryRecord.primaryID).filter { $0.source == "user" }
+        XCTAssertEqual(userTags.map(\.id), [third, first, second])
+        XCTAssertEqual(userTags.map(\.sortOrder), [0, 1, 2])
+    }
+
     func testDeletingParentRemovesSubtreeAndSnapshotRestoresTagState() async throws {
         let fixture = try DatabaseFixture()
         defer { fixture.remove() }
@@ -276,6 +292,80 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertEqual(states[imported.id], .off)
     }
 
+    func testRenameByFileIdentityPreservesVideoIDAndTags() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        let identity = Data("file-id".utf8)
+        let volume = Data("volume-id".utf8)
+        let original = try await store.applyScan(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: [makeDiscoveredVideo(path: "Old.mp4", size: 10, volumeIdentifier: volume, fileResourceIdentifier: identity)]
+        )
+        let tagID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "保留", parentID: nil)
+        try await store.setTagAssignment(tagID: tagID, videoIDs: original.map(\.id), enabled: true)
+
+        let moved = try await store.applyScan(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: [makeDiscoveredVideo(path: "Folder/New.mp4", size: 11, volumeIdentifier: volume, fileResourceIdentifier: identity)]
+        )
+        let tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        let states = try await store.tagAssignmentStates(videoIDs: moved.map(\.id), tags: tags)
+
+        XCTAssertEqual(moved.first?.id, original.first?.id)
+        XCTAssertEqual(moved.first?.relativePath, "Folder/New.mp4")
+        XCTAssertEqual(states[tagID], .on)
+    }
+
+    func testTenThousandVideoIndexAndTagFilterMeetMVPBudgets() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        let discovered = (0..<10_000).map {
+            makeDiscoveredVideo(path: String(format: "Folder/Video-%05d.mp4", $0), size: Int64($0 + 1))
+        }
+        let scanStarted = Date()
+        let videos = try await store.applyScan(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: discovered
+        )
+        let scanDuration = Date().timeIntervalSince(scanStarted)
+        let tagID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "性能", parentID: nil)
+        try await store.setTagAssignment(tagID: tagID, videoIDs: videos.enumerated().compactMap { $0.offset.isMultiple(of: 2) ? $0.element.id : nil }, enabled: true)
+
+        let filterStarted = Date()
+        let filtered = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, filter: .tag(tagID))
+        let filterDuration = Date().timeIntervalSince(filterStarted)
+
+        XCTAssertEqual(videos.count, 10_000)
+        XCTAssertEqual(filtered.count, 5_000)
+        XCTAssertLessThan(scanDuration, 10, "10,000 条首次索引应在测试机上于 10 秒内完成")
+        XCTAssertLessThan(filterDuration, 0.2, "10,000 条标签筛选目标为 200 毫秒")
+    }
+
+    func testCancelledScanLeavesPreviousAvailabilityUntouched() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        _ = try await store.applyScan(
+            libraryID: LibraryRecord.primaryID,
+            discoveredVideos: [makeDiscoveredVideo(path: "Keep.mp4", size: 10)]
+        )
+
+        let scan = Task {
+            try await Task.sleep(nanoseconds: 100_000_000)
+            return try await store.applyScan(libraryID: LibraryRecord.primaryID, discoveredVideos: [])
+        }
+        scan.cancel()
+        do { _ = try await scan.value } catch {}
+
+        let records = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, includeMissing: true)
+        XCTAssertEqual(records.first?.availability, .available)
+    }
+
     private func makeLibraryRecord(name: String = "Videos") -> LibraryRecord {
         LibraryRecord(
             id: LibraryRecord.primaryID,
@@ -286,7 +376,13 @@ final class DatabaseStoreTests: XCTestCase {
         )
     }
 
-    private func makeDiscoveredVideo(path: String, size: Int64, finderTags: [String] = []) -> DiscoveredVideo {
+    private func makeDiscoveredVideo(
+        path: String,
+        size: Int64,
+        finderTags: [String] = [],
+        volumeIdentifier: Data? = nil,
+        fileResourceIdentifier: Data? = nil
+    ) -> DiscoveredVideo {
         DiscoveredVideo(
             relativePath: path,
             filename: URL(fileURLWithPath: path).lastPathComponent,
@@ -294,8 +390,8 @@ final class DatabaseStoreTests: XCTestCase {
             fileSize: size,
             creationDate: nil,
             modificationDate: nil,
-            volumeIdentifier: nil,
-            fileResourceIdentifier: nil,
+            volumeIdentifier: volumeIdentifier,
+            fileResourceIdentifier: fileResourceIdentifier,
             finderTags: finderTags
         )
     }

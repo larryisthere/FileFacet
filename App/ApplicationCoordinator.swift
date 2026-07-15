@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import SwiftUI
 
 @MainActor
@@ -8,6 +9,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     private let databaseStore: DatabaseStore?
     private let windowController = MainWindowController()
     private var privacyShield: NSView?
+    private var idleTimer: Timer?
 
     private lazy var libraryViewController = LibrarySplitViewController(
         onChooseLibrary: { [weak self] in self?.chooseLibrary() },
@@ -58,6 +60,13 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
 
         super.init()
         registerForPrivacyEvents()
+        idleTimer = Timer.scheduledTimer(
+            timeInterval: 5,
+            target: self,
+            selector: #selector(checkIdleLock),
+            userInfo: nil,
+            repeats: true
+        )
     }
 
     func start() {
@@ -138,6 +147,10 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
 
     @objc private func applicationWillResignActive() {
         installPrivacyShield()
+        if lockCoordinator.isAuthenticationEnabled,
+           preferencesStore.idleLockInterval == .immediately {
+            lockCoordinator.lock()
+        }
     }
 
     @objc private func applicationDidBecomeActive() {
@@ -148,6 +161,17 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     @objc private func workspaceRequiresLock() {
         installPrivacyShield()
         lockCoordinator.lock()
+    }
+
+    @objc private func checkIdleLock() {
+        guard lockCoordinator.isAuthenticationEnabled else { return }
+        let interval = preferencesStore.idleLockInterval
+        guard interval != .never, interval != .immediately else { return }
+        let idleSeconds = CGEventSource.secondsSinceLastEventType(
+            .combinedSessionState,
+            eventType: .null
+        )
+        if idleSeconds >= Double(interval.rawValue) { lockCoordinator.lock() }
     }
 
     @objc private func showSettings() {

@@ -25,6 +25,27 @@ final class VideoFileDiscoveryTests: XCTestCase {
         )
         XCTAssertEqual(videos.first?.fileExtension, "mp4")
     }
+
+    func testLargeDirectoryDiscoveryCompletesWithoutDroppingVideos() throws {
+        let fixture = try DiscoveryFixture()
+        defer { fixture.remove() }
+        for index in 0..<1_000 {
+            try fixture.createFile(at: String(format: "Batch/%04d.mp4", index))
+        }
+
+        let started = Date()
+        let videos = try VideoFileDiscovery().discoverVideos(at: fixture.rootURL)
+
+        XCTAssertEqual(videos.count, 1_000)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5)
+    }
+
+    func testUnreadableOrMissingRootFailsWithoutReturningPartialSuccess() throws {
+        let missingRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MissingVideoRoot-\(UUID().uuidString)")
+
+        XCTAssertThrowsError(try VideoFileDiscovery().discoverVideos(at: missingRoot))
+    }
 }
 
 private struct DiscoveryFixture {

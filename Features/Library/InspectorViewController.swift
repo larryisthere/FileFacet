@@ -12,6 +12,7 @@ final class InspectorViewController: NSViewController {
     private var selectedVideos: [VideoRecord] = []
     private var tags: [TagRecord] = []
     private var tagStates: [String: TagAssignmentState] = [:]
+    private var tagSearchText = ""
 
     init(
         onOpen: @escaping (VideoRecord) -> Void,
@@ -106,7 +107,14 @@ final class InspectorViewController: NSViewController {
             "媒体信息不可用"
         }
         addField(title: "分辨率", value: resolution)
+        addField(title: "创建时间", value: formattedDate(video.creationDate))
+        addField(title: "修改时间", value: formattedDate(video.modificationDate))
         addField(title: "相对路径", value: video.relativePath)
+
+        let finderTagNames = tags.filter {
+            $0.source == "finder" && tagStates[$0.id] == .on
+        }.map(\.name)
+        addField(title: "Finder 标签", value: finderTagNames.isEmpty ? "无" : finderTagNames.joined(separator: "、"))
 
         let buttons = NSStackView()
         buttons.orientation = .vertical
@@ -162,6 +170,11 @@ final class InspectorViewController: NSViewController {
             : String(format: "%d:%02d", minutes, seconds)
     }
 
+    private func formattedDate(_ date: Date?) -> String {
+        guard let date else { return "未知" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
     private func addTagControls() {
         guard tags.isEmpty == false, selectedVideos.isEmpty == false else { return }
         let separator = NSBox(); separator.boxType = .separator
@@ -170,7 +183,19 @@ final class InspectorViewController: NSViewController {
         let heading = NSTextField(labelWithString: "应用标签")
         heading.font = .systemFont(ofSize: 12, weight: .semibold)
         stack.addArrangedSubview(heading)
-        for tag in tags {
+        let searchField = NSSearchField()
+        searchField.placeholderString = "搜索标签"
+        searchField.stringValue = tagSearchText
+        searchField.target = self
+        searchField.action = #selector(searchTags(_:))
+        searchField.sendsSearchStringImmediately = false
+        searchField.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        stack.addArrangedSubview(searchField)
+        let visibleTags = tags.filter {
+            $0.source != "finder-root"
+                && (tagSearchText.isEmpty || $0.name.localizedCaseInsensitiveContains(tagSearchText))
+        }
+        for tag in visibleTags {
             let button = TagCheckbox(tag: tag, target: self, action: #selector(toggleTag(_:)))
             button.title = tag.name
             button.setButtonType(.switch)
@@ -200,6 +225,11 @@ final class InspectorViewController: NSViewController {
         let videoIDs = selectedVideos.map(\.id)
         let enabled = sender.state == .on
         onSetTagAssignment(sender.tagRecord, videoIDs, enabled)
+    }
+
+    @objc private func searchTags(_ sender: NSSearchField) {
+        tagSearchText = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        renderSelection()
     }
 }
 
