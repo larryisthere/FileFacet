@@ -6,6 +6,7 @@ project = Xcodeproj::Project.new(project_path)
 
 project.root_object.attributes["LastSwiftUpdateCheck"] = "2650"
 project.root_object.attributes["LastUpgradeCheck"] = "2650"
+project.root_object.attributes["BuildIndependentTargetsInParallel"] = "YES"
 
 app_target = project.new_target(:application, "VideoTagManager", :osx, "14.0")
 test_target = project.new_target(:unit_test_bundle, "VideoTagManagerTests", :osx, "14.0")
@@ -40,10 +41,19 @@ end
   target.build_configurations.each do |configuration|
     settings = configuration.build_settings
     settings["CLANG_ENABLE_MODULES"] = "YES"
+    settings["DEAD_CODE_STRIPPING"] = "YES"
     settings["MACOSX_DEPLOYMENT_TARGET"] = "14.0"
     settings["SWIFT_VERSION"] = "6.0"
     settings["SWIFT_STRICT_CONCURRENCY"] = "complete"
   end
+end
+
+project.build_configurations.each do |configuration|
+  settings = configuration.build_settings
+  settings["ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS"] = "YES"
+  settings["DEAD_CODE_STRIPPING"] = "YES"
+  settings["ENABLE_USER_SCRIPT_SANDBOXING"] = "YES"
+  settings["STRING_CATALOG_GENERATE_SYMBOLS"] = "YES"
 end
 
 app_target.build_configurations.each do |configuration|
