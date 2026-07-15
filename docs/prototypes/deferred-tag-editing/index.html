@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tag Manager · 标签草稿操作原型</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --desktop: #dfe3e8;
+      --window: rgba(247, 247, 248, .96);
+      --sidebar: rgba(232, 234, 237, .92);
+      --canvas: #fff;
+      --inspector: #f6f7f8;
+      --line: rgba(60, 60, 67, .18);
+      --text: #202124;
+      --secondary: #6e6e73;
+      --tertiary: #929297;
+      --accent: #087ff5;
+      --selection: rgba(8, 127, 245, .16);
+      --button: rgba(118, 118, 128, .12);
+      --shadow: 0 24px 74px rgba(24, 29, 36, .28), 0 2px 8px rgba(24, 29, 36, .12);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --desktop: #16181c;
+        --window: rgba(43, 43, 45, .97);
+        --sidebar: rgba(37, 37, 39, .96);
+        --canvas: #1f1f21;
+        --inspector: #262628;
+        --line: rgba(235, 235, 245, .14);
+        --text: #f2f2f7;
+        --secondary: #aeaeb2;
+        --tertiary: #85858a;
+        --selection: rgba(8, 127, 245, .28);
+        --button: rgba(235, 235, 245, .1);
+        --shadow: 0 28px 80px rgba(0, 0, 0, .56), 0 2px 8px rgba(0, 0, 0, .32);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { color: var(--text); background: var(--desktop); font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+    button, input, select { font: inherit; }
+    button { color: inherit; cursor: default; }
+
+    .desktop {
+      height: 100%;
+      padding: 38px 24px 58px;
+      background:
+        radial-gradient(circle at 18% 10%, rgba(255,255,255,.6), transparent 34%),
+        linear-gradient(145deg, rgba(187, 205, 224, .56), rgba(226, 228, 232, .24));
+    }
+
+    .window {
+      position: relative;
+      display: grid;
+      grid-template-columns: 214px minmax(480px, 1fr) 290px;
+      grid-template-rows: 52px minmax(0, 1fr);
+      width: 100%; height: 100%; min-width: 940px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.52);
+      border-radius: 14px;
+      background: var(--window);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(28px) saturate(1.35);
+    }
+
+    .titlebar {
+      grid-column: 1 / 4;
+      display: grid;
+      grid-template-columns: 214px minmax(480px, 1fr) 290px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .title-section { display: flex; min-width: 0; align-items: center; padding: 0 12px; }
+    .title-section + .title-section { border-left: 1px solid var(--line); }
+    .traffic { display: flex; gap: 8px; margin-right: 18px; }
+    .traffic i { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.15); }
+    .traffic i:nth-child(1) { background: #ff5f57; }
+    .traffic i:nth-child(2) { background: #febc2e; }
+    .traffic i:nth-child(3) { background: #28c840; }
+    .icon-button { display: grid; width: 30px; height: 28px; padding: 0; place-items: center; border: 0; border-radius: 6px; background: transparent; }
+    .icon-button:hover { background: var(--button); }
+    .icon-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .title-copy { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
+    .title-copy strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .title-copy span { color: var(--secondary); font-size: 11px; white-space: nowrap; }
+
+    .sidebar { display: flex; min-height: 0; flex-direction: column; border-right: 1px solid var(--line); background: var(--sidebar); }
+    .sidebar-scroll { flex: 1; overflow: auto; padding: 10px 8px; }
+    .section-label { padding: 12px 9px 5px; color: var(--secondary); font-size: 11px; font-weight: 600; }
+    .sidebar-section-header { display: flex; height: 30px; align-items: center; margin-top: 7px; padding: 0 9px; color: var(--secondary); }
+    .section-toggle { display: flex; min-width: 0; height: 100%; flex: 1; align-items: center; gap: 4px; padding: 0; border: 0; background: transparent; color: inherit; font-size: 11px; font-weight: 600; text-align: left; }
+    .section-toggle svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .14s ease; }
+    .section-toggle[aria-expanded="false"] svg { transform: rotate(-90deg); }
+    .section-action { display: grid; width: 26px; height: 24px; padding: 0; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--secondary); }
+    .section-action:hover { background: var(--button); color: var(--text); }
+    .section-action svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+    .sidebar-tag-tree { display: block; }
+    .nav-row { display: flex; height: 29px; align-items: center; gap: 8px; padding: 0 9px; border-radius: 6px; }
+    .nav-row.selected { background: var(--selection); }
+    .nav-row svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+    .nav-row .name { flex: 1; }
+    .nav-row .count { width: 26px; color: var(--secondary); font-size: 11px; text-align: center; }
+    .nav-row.indent { padding-left: 27px; }
+    .inline-tag-row { background: var(--button); }
+    .inline-tag-row input { min-width: 0; height: 21px; flex: 1; padding: 0 4px; border: 1px solid var(--accent); border-radius: 4px; outline: 0; background: var(--canvas); color: var(--text); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #ff9f0a; }
+    .dot.blue { background: #0a84ff; }
+    .dot.green { background: #30d158; }
+
+    .content { min-width: 0; min-height: 0; overflow: auto; padding: 18px; background: var(--canvas); }
+    .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 20px 14px; align-content: start; }
+    .video-card { min-width: 0; padding: 4px; border-radius: 8px; transition: opacity .22s ease, transform .22s ease, background .12s ease; }
+    .video-card:hover { background: var(--button); }
+    .video-card.selected { background: var(--selection); }
+    .video-card.removing { opacity: 0; transform: scale(.96); }
+    .thumb { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 6px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.09); }
+    .thumb::before { content: ""; position: absolute; }
+    .thumb.coast { background: linear-gradient(165deg, #86c4d3 0 48%, #d7c08e 49% 65%, #5c744d 66%); }
+    .thumb.coast::before { width: 54%; height: 50%; left: -5%; bottom: -18%; border-radius: 50%; background: #365f51; transform: rotate(-7deg); }
+    .thumb.city { background: linear-gradient(170deg, #cab18d 0 54%, #6b727b 55%); }
+    .thumb.city::before { width: 20%; height: 58%; left: 18%; bottom: 20%; background: #414a52; box-shadow: 34px 13px 0 #565d63, 68px -8px 0 #303a43, 102px 18px 0 #747878; }
+    .thumb.forest { background: linear-gradient(175deg, #b8c6a3 0 45%, #53694a 46%); }
+    .thumb.forest::before { inset: 15% 4% 0; background: repeating-linear-gradient(76deg, transparent 0 18px, #344a35 19px 24px); }
+    .thumb.night { background: linear-gradient(168deg, #183746 0 60%, #18232a 61%); }
+    .thumb.night::before { width: 5px; height: 5px; left: 18%; top: 30%; border-radius: 50%; background: #ffd60a; box-shadow: 26px 11px 0 #ff9f0a, 59px -4px 0 #ffd60a, 91px 16px 0 #ff9f0a; }
+    .duration { position: absolute; right: 6px; bottom: 5px; padding: 2px 5px; border-radius: 4px; color: #fff; background: rgba(0,0,0,.66); font-size: 10px; }
+    .filename { margin-top: 7px; overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+    .meta { margin-top: 2px; color: var(--secondary); font-size: 10px; }
+    .empty { margin: 24vh auto 0; color: var(--secondary); text-align: center; }
+    .empty strong { display: block; margin-bottom: 5px; color: var(--text); font-size: 16px; }
+
+    .inspector { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-left: 1px solid var(--line); background: var(--inspector); }
+    .segmented { display: grid; grid-template-columns: 1fr 1fr; margin: 16px 16px 12px; padding: 2px; border-radius: 7px; background: rgba(118,118,128,.16); }
+    .segment { height: 28px; border: 0; border-radius: 6px; background: transparent; font-weight: 550; }
+    .segment.selected { background: var(--canvas); box-shadow: 0 1px 3px rgba(0,0,0,.16); }
+    .tag-search-header { position: relative; z-index: 5; padding: 0 16px 10px; }
+    .inspector-scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 16px 14px; }
+    .search { display: flex; height: 28px; align-items: center; gap: 6px; padding: 0 8px; border-radius: 7px; background: color-mix(in srgb, var(--inspector) 78%, var(--text) 9%); color: var(--secondary); }
+    .search svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+    .search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--text); background: transparent; }
+    .tag-row { display: flex; min-height: 30px; align-items: center; gap: 8px; padding: 2px 3px; border-radius: 5px; }
+    .tag-row:hover { background: var(--button); }
+    .tag-row input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+    .tag-name { flex: 1; }
+    .tag-path { color: var(--tertiary); font-size: 10px; }
+    .create-row { width: 100%; min-height: 34px; justify-content: flex-start; border: 0; background: transparent; text-align: left; }
+    .create-row svg { width: 15px; height: 15px; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; }
+    .create-row .tag-name { color: var(--accent); }
+    .pending-badge { padding: 2px 5px; border-radius: 4px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-size: 9px; font-weight: 600; }
+    .remove-pending { display: grid; width: 22px; height: 22px; padding: 0; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--secondary); }
+    .remove-pending:hover { background: var(--button); color: var(--text); }
+    .remove-pending svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+    .create-popover { position: absolute; z-index: 12; top: 36px; right: 16px; left: 16px; padding: 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--window); box-shadow: 0 14px 36px rgba(0,0,0,.24), 0 2px 6px rgba(0,0,0,.12); }
+    .popover-title { margin-bottom: 11px; font-size: 12px; font-weight: 600; }
+    .form-row { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 8px; margin: 8px 0; color: var(--secondary); font-size: 11px; }
+    .form-row input, .form-row select { width: 100%; min-width: 0; height: 26px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; outline: 0; background: var(--canvas); color: var(--text); }
+    .form-row input:focus, .form-row select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent); }
+    .popover-note { margin: 9px 0 11px; color: var(--secondary); font-size: 10px; line-height: 1.45; }
+    .popover-actions { display: flex; justify-content: flex-end; gap: 7px; }
+    .details { padding-top: 2px; }
+    .detail-group { margin-bottom: 18px; }
+    .detail-title { margin-bottom: 7px; color: var(--secondary); font-size: 11px; font-weight: 600; }
+    .detail-row { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 8px; margin: 7px 0; font-size: 11px; }
+    .detail-row span:first-child { color: var(--secondary); }
+    .detail-row span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .action-area { padding: 11px 16px 14px; border-top: 1px solid var(--line); background: var(--inspector); }
+    .draft-status { min-height: 17px; margin-bottom: 8px; color: var(--secondary); font-size: 11px; }
+    .draft-status.dirty { color: var(--text); }
+    .action-row { display: flex; justify-content: flex-end; gap: 8px; }
+    .button { min-width: 64px; height: 28px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--button); box-shadow: 0 1px 1px rgba(0,0,0,.04); }
+    .button.primary { color: #fff; border-color: var(--accent); background: var(--accent); }
+    .button:disabled { opacity: .42; }
+
+    .toast { position: absolute; z-index: 30; left: 50%; bottom: 18px; padding: 8px 13px; transform: translate(-50%, 10px); border-radius: 8px; background: rgba(35,35,37,.9); color: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.24); opacity: 0; pointer-events: none; transition: opacity .18s ease, transform .18s ease; }
+    .toast.visible { opacity: 1; transform: translate(-50%, 0); }
+    .backdrop { position: absolute; z-index: 40; inset: 0; display: grid; place-items: center; background: rgba(20,20,22,.26); backdrop-filter: blur(2px); }
+    .sheet { width: 420px; max-width: 80%; padding: 20px; border: 1px solid rgba(255,255,255,.42); border-radius: 12px; background: var(--window); box-shadow: 0 22px 56px rgba(0,0,0,.34); text-align: center; }
+    .sheet h2 { margin: 0; font-size: 15px; }
+    .sheet p { margin: 7px 0 18px; color: var(--secondary); font-size: 12px; }
+    .sheet-actions { display: flex; justify-content: center; gap: 8px; }
+
+    .demo-bar { position: fixed; z-index: 60; left: 50%; bottom: 12px; display: flex; height: 36px; align-items: center; gap: 6px; padding: 5px 7px; transform: translateX(-50%); border-radius: 9px; background: rgba(42,42,44,.9); color: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.22); }
+    .demo-bar span { padding: 0 6px; color: rgba(255,255,255,.66); font-size: 10px; }
+    .demo-bar button { height: 25px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: #fff; font-size: 11px; }
+    .demo-bar button:hover { background: rgba(255,255,255,.14); }
+  </style>
+</head>
+<body>
+  <main class="desktop">
+    <section class="window" aria-label="标签草稿操作原型">
+      <header class="titlebar">
+        <div class="title-section">
+          <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+          <button class="icon-button" title="隐藏侧边栏" aria-label="隐藏侧边栏">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M8 4v16"></path></svg>
+          </button>
+        </div>
+        <div class="title-section"><div class="title-copy"><strong>未打标签</strong><span id="titleCount">4 个视频</span></div></div>
+        <div class="title-section" style="justify-content:flex-end">
+          <button class="icon-button" title="隐藏详情" aria-label="隐藏详情">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M16 4v16"></path></svg>
+          </button>
+        </div>
+      </header>
+
+      <aside class="sidebar">
+        <div class="sidebar-scroll">
+          <div class="section-label">资料库</div>
+          <div class="nav-row"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect></svg><span class="name">全部视频</span><span class="count">24</span></div>
+          <div class="nav-row"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg><span class="name">最近添加</span><span class="count">8</span></div>
+          <div class="nav-row selected"><svg viewBox="0 0 24 24"><path d="M20 13 13 20 4 11V4h7z"></path><circle cx="8.5" cy="8.5" r="1"></circle></svg><span class="name">未打标签</span><span class="count" id="untaggedCount">4</span></div>
+          <div class="sidebar-section-header">
+            <button class="section-toggle" id="tagSectionToggle" type="button" aria-expanded="true" aria-controls="sidebarTagTree">
+              <span>标签</span>
+              <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2.5 4 3.5 3.5L9.5 4"></path></svg>
+            </button>
+            <button class="section-action" id="sidebarAddTag" type="button" title="新建标签" aria-label="新建标签">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+            </button>
+          </div>
+          <div class="sidebar-tag-tree" id="sidebarTagTree">
+            <div class="nav-row"><span class="dot"></span><span class="name">人物</span><span class="count">9</span></div>
+            <div class="nav-row indent"><span class="dot"></span><span class="name">家人</span><span class="count">5</span></div>
+            <div class="nav-row indent"><span class="dot green"></span><span class="name">朋友</span><span class="count">4</span></div>
+            <div class="nav-row"><span class="dot blue"></span><span class="name">用途</span><span class="count">13</span></div>
+            <div class="nav-row indent"><span class="dot blue"></span><span class="name">工作素材</span><span class="count">7</span></div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="content">
+        <div class="video-grid" id="videoGrid"></div>
+        <div class="empty" id="emptyState" hidden><strong>所有视频都已有标签</strong>“未打标签”中暂时没有视频。</div>
+      </section>
+
+      <aside class="inspector">
+        <div class="segmented" role="tablist">
+          <button class="segment selected" data-tab="tags" role="tab">标签</button>
+          <button class="segment" data-tab="details" role="tab">详情</button>
+        </div>
+        <div class="tag-search-header" id="tagSearchHeader">
+          <label class="search">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m16.5 16.5 4 4"></path></svg>
+            <input id="tagSearch" type="search" placeholder="搜索或新建标签" aria-label="搜索或新建标签">
+          </label>
+          <div class="create-popover" id="createPopover" hidden>
+            <div class="popover-title">新建标签</div>
+            <label class="form-row"><span>名称</span><input id="newTagName" maxlength="40"></label>
+            <label class="form-row"><span>父标签</span><select id="newTagParent"><option value="顶级">顶级（无父标签）</option><option value="人物">人物</option><option value="用途">用途</option><option value="状态">状态</option></select></label>
+            <div class="popover-note">新标签将加入当前草稿。点击“应用”后创建标签并添加到当前视频。</div>
+            <div class="popover-actions"><button class="button" id="cancelCreateTag">取消</button><button class="button primary" id="stageCreateTag">加入草稿</button></div>
+          </div>
+        </div>
+        <div class="inspector-scroll">
+          <div id="tagsPanel">
+            <div id="tagList"></div>
+          </div>
+          <div class="details" id="detailsPanel" hidden>
+            <div class="detail-group"><div class="detail-title">文件</div><div class="detail-row"><span>文件名</span><span id="detailName"></span></div><div class="detail-row"><span>格式</span><span>MP4</span></div><div class="detail-row"><span>大小</span><span>186.2 MB</span></div></div>
+            <div class="detail-group"><div class="detail-title">视频</div><div class="detail-row"><span>时长</span><span id="detailDuration"></span></div><div class="detail-row"><span>分辨率</span><span>1920 × 1080</span></div></div>
+          </div>
+        </div>
+        <footer class="action-area" id="actionArea">
+          <div class="draft-status" id="draftStatus">勾选标签后，点击“应用”保存更改。</div>
+          <div class="action-row"><button class="button" id="discardButton" disabled>取消</button><button class="button primary" id="applyButton" disabled>应用</button></div>
+        </footer>
+      </aside>
+
+      <div class="toast" id="toast" role="status"></div>
+      <div class="backdrop" id="switchSheet" hidden>
+        <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+          <h2 id="sheetTitle">应用标签更改？</h2>
+          <p>当前视频的标签还有未应用的修改。</p>
+          <div class="sheet-actions"><button class="button" id="sheetDiscard">放弃更改</button><button class="button" id="sheetCancel">取消</button><button class="button primary" id="sheetApply">应用</button></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="demo-bar" aria-label="原型演示控制"><span>原型操作</span><button id="makeDraft">模拟勾选</button><button id="tryNewTag">演示新建</button><button id="resetDemo">重置</button></nav>
+
+  <script>
+    const initialVideos = [
+      { id: 1, name: "海边日落.mp4", duration: "00:42", place: "旅行", style: "coast" },
+      { id: 2, name: "城市街景.mp4", duration: "01:18", place: "项目", style: "city" },
+      { id: 3, name: "森林步道.mp4", duration: "02:06", place: "旅行", style: "forest" },
+      { id: 4, name: "夜间延时.mp4", duration: "00:58", place: "个人", style: "night" }
+    ];
+    const initialTags = [
+      { id: "family", name: "家人", path: "人物" },
+      { id: "friends", name: "朋友", path: "人物" },
+      { id: "work", name: "工作素材", path: "用途" },
+      { id: "archive", name: "待归档", path: "用途" },
+      { id: "favorite", name: "精选", path: "状态" },
+      { id: "review", name: "待审核", path: "状态" }
+    ];
+
+    let videos = initialVideos.map(video => ({ ...video }));
+    let tags = initialTags.map(tag => ({ ...tag }));
+    let selectedID = 1;
+    let savedTags = new Set();
+    let draftTags = new Set();
+    let draftNewTags = [];
+    let nextNewTagID = 1;
+    let nextGlobalTagIDStart = 1;
+    let nextGlobalTagID = { value: nextGlobalTagIDStart };
+    let pendingSelectionID = null;
+
+    const grid = document.getElementById("videoGrid");
+    const tagList = document.getElementById("tagList");
+    const tagSearch = document.getElementById("tagSearch");
+    const applyButton = document.getElementById("applyButton");
+    const discardButton = document.getElementById("discardButton");
+    const draftStatus = document.getElementById("draftStatus");
+    const switchSheet = document.getElementById("switchSheet");
+    const toast = document.getElementById("toast");
+    const tagSearchHeader = document.getElementById("tagSearchHeader");
+    const createPopover = document.getElementById("createPopover");
+    const newTagName = document.getElementById("newTagName");
+    const newTagParent = document.getElementById("newTagParent");
+    const tagSectionToggle = document.getElementById("tagSectionToggle");
+    const sidebarTagTree = document.getElementById("sidebarTagTree");
+    const sidebarAddTag = document.getElementById("sidebarAddTag");
+    const sidebarTagTreeInitialHTML = sidebarTagTree.innerHTML;
+
+    function isDirty() {
+      return draftNewTags.length > 0 || savedTags.size !== draftTags.size || [...savedTags].some(id => !draftTags.has(id));
+    }
+
+    function escapeHTML(value) {
+      return value.replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;" })[character]);
+    }
+
+    function renderVideos() {
+      grid.innerHTML = "";
+      videos.forEach(video => {
+        const card = document.createElement("article");
+        card.className = `video-card${video.id === selectedID ? " selected" : ""}`;
+        card.dataset.id = video.id;
+        card.innerHTML = `<div class="thumb ${video.style}"><span class="duration">${video.duration}</span></div><div class="filename">${video.name}</div><div class="meta">${video.place}</div>`;
+        card.addEventListener("click", () => requestSelection(video.id));
+        grid.appendChild(card);
+      });
+      document.getElementById("emptyState").hidden = videos.length > 0;
+      document.getElementById("titleCount").textContent = `${videos.length} 个视频`;
+      document.getElementById("untaggedCount").textContent = String(videos.length);
+      const selected = videos.find(video => video.id === selectedID);
+      if (selected) {
+        document.getElementById("detailName").textContent = selected.name;
+        document.getElementById("detailDuration").textContent = selected.duration;
+      }
+    }
+
+    function renderTags() {
+      const query = tagSearch.value.trim().toLocaleLowerCase();
+      tagList.innerHTML = "";
+      const allTags = [...draftNewTags, ...tags];
+      const exactMatch = allTags.some(tag => tag.name.toLocaleLowerCase() === query);
+      if (query && !exactMatch) {
+        const createRow = document.createElement("button");
+        createRow.className = "tag-row create-row";
+        createRow.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg><span class="tag-name">新建“${escapeHTML(tagSearch.value.trim())}”</span>`;
+        createRow.addEventListener("click", () => openCreatePopover(tagSearch.value.trim()));
+        tagList.appendChild(createRow);
+      }
+      allTags.filter(tag => tag.name.toLocaleLowerCase().includes(query)).forEach(tag => {
+        const isPending = draftNewTags.some(item => item.id === tag.id);
+        const row = document.createElement(isPending ? "div" : "label");
+        row.className = "tag-row";
+        row.innerHTML = `<input type="checkbox" ${draftTags.has(tag.id) ? "checked" : ""} ${isPending ? "disabled" : ""}><span class="tag-name">${escapeHTML(tag.name)}</span><span class="tag-path">${escapeHTML(tag.path)}</span>${isPending ? '<span class="pending-badge">待新建</span><button class="remove-pending" type="button" title="移除待新建标签" aria-label="移除待新建标签"><svg viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"></path></svg></button>' : ""}`;
+        if (isPending) {
+          row.querySelector(".remove-pending").addEventListener("click", event => {
+            event.preventDefault();
+            removePendingTag(tag.id);
+          });
+        } else {
+          row.querySelector("input").addEventListener("change", event => {
+            event.target.checked ? draftTags.add(tag.id) : draftTags.delete(tag.id);
+            updateDraftState();
+          });
+        }
+        tagList.appendChild(row);
+      });
+    }
+
+    function openCreatePopover(suggestedName = "") {
+      newTagName.value = suggestedName;
+      newTagParent.value = "顶级";
+      createPopover.hidden = false;
+      requestAnimationFrame(() => newTagName.select());
+    }
+
+    function closeCreatePopover() {
+      createPopover.hidden = true;
+    }
+
+    function stageNewTag() {
+      const name = newTagName.value.trim();
+      if (!name) {
+        newTagName.focus();
+        return;
+      }
+      const parent = newTagParent.value;
+      const duplicate = [...tags, ...draftNewTags].some(tag =>
+        tag.path === parent && tag.name.toLocaleLowerCase() === name.toLocaleLowerCase()
+      );
+      if (duplicate) {
+        showToast(`“${name}”已经存在`);
+        newTagName.select();
+        return;
+      }
+      const tag = { id: `draft-new-${nextNewTagID++}`, name, path: parent };
+      draftNewTags.push(tag);
+      draftTags.add(tag.id);
+      tagSearch.value = "";
+      closeCreatePopover();
+      renderTags();
+      updateDraftState();
+    }
+
+    function removePendingTag(id) {
+      draftNewTags = draftNewTags.filter(tag => tag.id !== id);
+      draftTags.delete(id);
+      renderTags();
+      updateDraftState();
+    }
+
+    function updateDraftState() {
+      const dirty = isDirty();
+      applyButton.disabled = !dirty;
+      discardButton.disabled = !dirty;
+      draftStatus.classList.toggle("dirty", dirty);
+      if (!dirty) {
+        draftStatus.textContent = "勾选标签后，点击“应用”保存更改。";
+        return;
+      }
+      const created = draftNewTags.length;
+      const added = [...draftTags].filter(id => !savedTags.has(id)).length;
+      const removed = [...savedTags].filter(id => !draftTags.has(id)).length;
+      const parts = [];
+      if (created) parts.push(`新建 ${created} 个标签`);
+      if (added) parts.push(`添加 ${added} 个标签`);
+      if (removed) parts.push(`移除 ${removed} 个标签`);
+      draftStatus.textContent = `${parts.join("，")}，尚未应用。`;
+    }
+
+    function discardDraft() {
+      draftNewTags = [];
+      draftTags = new Set(savedTags);
+      closeCreatePopover();
+      renderTags();
+      updateDraftState();
+    }
+
+    function applyDraft(afterApply) {
+      if (!isDirty()) { afterApply?.(); return; }
+      const selected = videos.find(video => video.id === selectedID);
+      tags.push(...draftNewTags.map(tag => ({ ...tag })));
+      draftNewTags = [];
+      savedTags = new Set(draftTags);
+      renderTags();
+      updateDraftState();
+      if (savedTags.size > 0 && selected) {
+        const card = grid.querySelector(`[data-id="${selectedID}"]`);
+        card?.classList.add("removing");
+        setTimeout(() => {
+          videos = videos.filter(video => video.id !== selectedID);
+          selectedID = videos[0]?.id ?? null;
+          savedTags = new Set();
+          draftTags = new Set();
+          draftNewTags = [];
+          renderVideos();
+          renderTags();
+          updateDraftState();
+          showToast(`已应用标签，“${selected.name}”已移出“未打标签”`);
+          afterApply?.();
+        }, 260);
+      } else {
+        showToast("标签更改已应用");
+        afterApply?.();
+      }
+    }
+
+    function requestSelection(id) {
+      if (id === selectedID) return;
+      if (isDirty()) {
+        pendingSelectionID = id;
+        switchSheet.hidden = false;
+        return;
+      }
+      selectVideo(id);
+    }
+
+    function selectVideo(id) {
+      selectedID = id;
+      savedTags = new Set();
+      draftTags = new Set();
+      draftNewTags = [];
+      closeCreatePopover();
+      renderVideos();
+      renderTags();
+      updateDraftState();
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add("visible");
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => toast.classList.remove("visible"), 2600);
+    }
+
+    function setTagSectionExpanded(expanded) {
+      tagSectionToggle.setAttribute("aria-expanded", String(expanded));
+      sidebarTagTree.hidden = !expanded;
+    }
+
+    function cancelSidebarTagCreation() {
+      sidebarTagTree.querySelector(".inline-tag-row")?.remove();
+    }
+
+    function commitSidebarTagCreation() {
+      const row = sidebarTagTree.querySelector(".inline-tag-row");
+      const input = row?.querySelector("input");
+      const name = input?.value.trim() ?? "";
+      if (!row || !input) return;
+      if (!name) {
+        row.remove();
+        return;
+      }
+
+      const normalizedName = name.toLocaleLowerCase();
+      const existingTopLevelNames = Array.from(sidebarTagTree.children)
+        .filter(item => item !== row && item.classList.contains("nav-row") && !item.classList.contains("indent"))
+        .map(item => item.querySelector(".name")?.textContent.trim().toLocaleLowerCase());
+      const duplicate = existingTopLevelNames.includes(normalizedName)
+        || tags.some(tag => tag.path === "顶级" && tag.name.toLocaleLowerCase() === normalizedName);
+      if (duplicate) {
+        showToast(`“${name}”已经存在`);
+        requestAnimationFrame(() => input.select());
+        return;
+      }
+
+      const tag = { id: `global-${nextGlobalTagID.value++}`, name, path: "顶级" };
+      tags.push(tag);
+      row.className = "nav-row";
+      row.innerHTML = `<span class="dot blue"></span><span class="name">${escapeHTML(name)}</span><span class="count">0</span>`;
+      renderTags();
+      showToast(`已新建标签“${name}”`);
+    }
+
+    function beginSidebarTagCreation() {
+      setTagSectionExpanded(true);
+      closeCreatePopover();
+      const existingInput = sidebarTagTree.querySelector(".inline-tag-row input");
+      if (existingInput) {
+        existingInput.focus();
+        existingInput.select();
+        return;
+      }
+
+      const row = document.createElement("div");
+      row.className = "nav-row inline-tag-row";
+      row.innerHTML = '<span class="dot blue"></span><input type="text" aria-label="新标签名称" placeholder="新标签">';
+      sidebarTagTree.prepend(row);
+      const input = row.querySelector("input");
+      input.addEventListener("keydown", event => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commitSidebarTagCreation();
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          cancelSidebarTagCreation();
+        }
+      });
+      input.addEventListener("blur", commitSidebarTagCreation);
+      input.focus();
+    }
+
+    document.querySelectorAll(".segment").forEach(button => button.addEventListener("click", () => {
+      document.querySelectorAll(".segment").forEach(item => item.classList.toggle("selected", item === button));
+      const tagsSelected = button.dataset.tab === "tags";
+      tagSearchHeader.hidden = !tagsSelected;
+      if (!tagsSelected) closeCreatePopover();
+      document.getElementById("tagsPanel").hidden = !tagsSelected;
+      document.getElementById("detailsPanel").hidden = tagsSelected;
+      document.getElementById("actionArea").hidden = !tagsSelected;
+    }));
+
+    tagSectionToggle.addEventListener("click", () => {
+      setTagSectionExpanded(tagSectionToggle.getAttribute("aria-expanded") !== "true");
+    });
+    sidebarAddTag.addEventListener("click", beginSidebarTagCreation);
+
+    tagSearch.addEventListener("input", renderTags);
+    document.getElementById("cancelCreateTag").addEventListener("click", closeCreatePopover);
+    document.getElementById("stageCreateTag").addEventListener("click", stageNewTag);
+    newTagName.addEventListener("keydown", event => {
+      if (event.key === "Enter") stageNewTag();
+      if (event.key === "Escape") closeCreatePopover();
+    });
+    applyButton.addEventListener("click", () => applyDraft());
+    discardButton.addEventListener("click", discardDraft);
+    document.getElementById("sheetCancel").addEventListener("click", () => { pendingSelectionID = null; switchSheet.hidden = true; });
+    document.getElementById("sheetDiscard").addEventListener("click", () => { const id = pendingSelectionID; switchSheet.hidden = true; pendingSelectionID = null; discardDraft(); if (id) selectVideo(id); });
+    document.getElementById("sheetApply").addEventListener("click", () => { const id = pendingSelectionID; switchSheet.hidden = true; pendingSelectionID = null; applyDraft(() => { if (id && videos.some(video => video.id === id)) selectVideo(id); }); });
+    document.getElementById("makeDraft").addEventListener("click", () => { draftTags.add("work"); renderTags(); updateDraftState(); });
+    document.getElementById("tryNewTag").addEventListener("click", () => { tagSearch.value = "客户案例"; renderTags(); tagSearch.focus(); });
+    document.getElementById("resetDemo").addEventListener("click", () => { videos = initialVideos.map(video => ({ ...video })); tags = initialTags.map(tag => ({ ...tag })); selectedID = 1; savedTags = new Set(); draftTags = new Set(); draftNewTags = []; nextNewTagID = 1; nextGlobalTagID.value = nextGlobalTagIDStart; tagSearch.value = ""; switchSheet.hidden = true; sidebarTagTree.innerHTML = sidebarTagTreeInitialHTML; setTagSectionExpanded(true); closeCreatePopover(); renderVideos(); renderTags(); updateDraftState(); });
+    document.addEventListener("keydown", event => {
+      if (event.key.toLocaleLowerCase() === "n" && event.metaKey && event.shiftKey) {
+        event.preventDefault();
+        beginSidebarTagCreation();
+        return;
+      }
+      if (event.key === "Escape" && !createPopover.hidden) {
+        closeCreatePopover();
+        return;
+      }
+      if (event.key === "Escape" && isDirty()) discardDraft();
+      if (event.key === "Enter" && event.metaKey && isDirty()) applyDraft();
+    });
+
+    renderVideos();
+    renderTags();
+    updateDraftState();
+  </script>
+</body>
+</html>

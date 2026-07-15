@@ -6,14 +6,33 @@
 2. 永远保持中立、客观和理性。
 3. 永远使用用户视角沟通产品问题。
 
-## 项目事实顺序
+## 产品预期与项目事实
 
-发生冲突时按以下顺序判断：
+判断产品逻辑、交互和 UI 是否符合预期时，按以下顺序判断：
 
-1. 当前代码与自动化测试
-2. `docs/architecture/` 中已接受的架构决策
-3. `docs/product/` 中的当前需求
-4. README 与历史讨论
+1. 用户已经明确验收通过的行为
+2. `docs/product/` 中的当前需求
+3. `docs/architecture/` 中已接受的架构决策
+4. 当前代码与自动化测试所反映的实现现状
+5. README 与历史讨论
+
+自动化测试通过只代表实现满足测试中写明的断言。产品逻辑、交互和 UI 是否符合预期，以用户验收结果为准。
+
+## 开发、验证与提交
+
+- 完成实现后默认只验证构建成功，保留改动交给用户验收；发现偏差后修正并重新交付。
+- 未经用户明确要求，禁止启动或操作 App、打开预览、截图检查、执行交互验收或运行自动化测试；Skill 和其他工作流同样受此限制。
+- 产品逻辑、交互和 UI 由用户验收，构建、测试和代理检查不能代替用户验收。
+- 用户验收通过后，按需为高频主路径、核心状态转换、数据完整性、不可逆操作和高影响故障补充自动化测试；禁止固化未经验收的行为或纯理论场景。
+- 用户明确验收通过后才能提交；未经验收的改动不得提交，也不得与已验收改动混入同一次提交。
+
+## 交互与 UI 原型
+
+- 涉及新交互流程、关键页面布局、多状态变化或预期仍有歧义的需求，先制作可操作的 HTML 稿。
+- HTML 稿应覆盖主要操作路径、关键状态、反馈方式和必要的异常状态，并使用接近真实场景的示例数据。
+- HTML 稿完成后交给用户确认；用户明确认可交互和 UI 方向后，再写入正式 AppKit 或 SwiftUI 实现。
+- 用户在 HTML 稿阶段提出的调整应先更新到原型并再次确认，减少正式实现阶段的方向性返工。
+- 简单文案、明确的局部样式修正和用户明确要求直接修改的事项，可以按用户指示进入实现。
 
 ## 工程规则
 
@@ -26,13 +45,15 @@
 
 ## 验证命令
 
+默认仅运行：
+
 ```bash
 xcodebuild -project VideoTagManager.xcodeproj -scheme VideoTagManager -configuration Debug -derivedDataPath .build/DerivedData build
-xcodebuild -project VideoTagManager.xcodeproj -scheme VideoTagManager -configuration Debug -derivedDataPath .build/DerivedData test
 ```
 
-本地构建并运行：
+仅在用户明确要求时运行：
 
 ```bash
+xcodebuild -project VideoTagManager.xcodeproj -scheme VideoTagManager -configuration Debug -derivedDataPath .build/DerivedData test
 ./script/build_and_run.sh
 ```

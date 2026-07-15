@@ -1,0 +1,855 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video Tag Manager · 手动导入原型</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --desktop: #d9dde3;
+      --window: rgba(246, 246, 246, 0.94);
+      --toolbar: rgba(246, 246, 246, 0.86);
+      --sidebar: rgba(232, 232, 232, 0.9);
+      --content: #ffffff;
+      --inspector: #f7f7f7;
+      --line: rgba(60, 60, 67, 0.18);
+      --line-strong: rgba(60, 60, 67, 0.28);
+      --text: #202124;
+      --secondary: #6e6e73;
+      --tertiary: #8e8e93;
+      --accent: #0a84ff;
+      --accent-soft: rgba(10, 132, 255, 0.14);
+      --selection: rgba(10, 132, 255, 0.18);
+      --success: #248a3d;
+      --warning: #b25000;
+      --shadow: 0 24px 70px rgba(20, 24, 31, 0.28), 0 2px 10px rgba(20, 24, 31, 0.14);
+      --radius: 15px;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --desktop: #17191d;
+        --window: rgba(42, 42, 44, 0.95);
+        --toolbar: rgba(42, 42, 44, 0.9);
+        --sidebar: rgba(37, 37, 39, 0.94);
+        --content: #1f1f21;
+        --inspector: #252527;
+        --line: rgba(235, 235, 245, 0.13);
+        --line-strong: rgba(235, 235, 245, 0.24);
+        --text: #f2f2f7;
+        --secondary: #aeaeb2;
+        --tertiary: #8e8e93;
+        --accent-soft: rgba(10, 132, 255, 0.2);
+        --selection: rgba(10, 132, 255, 0.26);
+        --shadow: 0 26px 80px rgba(0, 0, 0, 0.55), 0 2px 12px rgba(0, 0, 0, 0.4);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      color: var(--text);
+      background: var(--desktop);
+      font-size: 13px;
+    }
+
+    button, input { font: inherit; }
+
+    button {
+      color: inherit;
+      border: 0;
+      cursor: default;
+    }
+
+    .desktop {
+      height: 100%;
+      padding: 44px 24px 62px;
+      background:
+        radial-gradient(circle at 18% 15%, rgba(255,255,255,.55), transparent 32%),
+        linear-gradient(135deg, rgba(200, 213, 227, .56), rgba(224, 226, 230, .2));
+    }
+
+    .app-menubar {
+      position: fixed;
+      z-index: 80;
+      inset: 0 0 auto;
+      display: flex;
+      height: 25px;
+      align-items: center;
+      gap: 1px;
+      padding: 0 14px;
+      border-bottom: 1px solid rgba(60,60,67,.14);
+      background: color-mix(in srgb, var(--window) 91%, transparent);
+      box-shadow: 0 1px 5px rgba(0,0,0,.06);
+      backdrop-filter: blur(24px) saturate(1.35);
+      font-size: 12px;
+    }
+
+    .menu-item-wrap { position: relative; height: 100%; }
+    .menubar-button {
+      height: 100%;
+      padding: 0 8px;
+      border-radius: 4px;
+      background: transparent;
+      font-size: 12px;
+    }
+    .menubar-button.app-name { font-weight: 650; }
+    .menubar-button.open,
+    .menubar-button:hover { background: rgba(127,127,127,.16); }
+
+    .menu-popover {
+      position: absolute;
+      z-index: 90;
+      top: 24px;
+      left: 0;
+      width: 250px;
+      padding: 5px;
+      border: 1px solid rgba(255,255,255,.38);
+      border-radius: 7px;
+      background: color-mix(in srgb, var(--window) 96%, transparent);
+      box-shadow: 0 13px 34px rgba(0,0,0,.28), 0 2px 8px rgba(0,0,0,.16);
+      backdrop-filter: blur(24px) saturate(1.3);
+    }
+
+    .menu-command {
+      display: grid;
+      width: 100%;
+      min-height: 24px;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 18px;
+      padding: 3px 9px;
+      border-radius: 4px;
+      background: transparent;
+      text-align: left;
+    }
+    .menu-command:hover,
+    .menu-command:focus-visible { color: white; outline: 0; background: var(--accent); }
+    .menu-shortcut { color: var(--secondary); font-variant-numeric: tabular-nums; }
+    .menu-command:hover .menu-shortcut,
+    .menu-command:focus-visible .menu-shortcut { color: rgba(255,255,255,.86); }
+    .menu-divider { height: 1px; margin: 4px 6px; background: var(--line); }
+
+    .window {
+      position: relative;
+      display: grid;
+      grid-template-columns: 224px minmax(480px, 1fr) 268px;
+      grid-template-rows: 52px minmax(0, 1fr);
+      width: 100%;
+      height: 100%;
+      min-width: 920px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.5);
+      border-radius: var(--radius);
+      background: var(--window);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(26px) saturate(1.35);
+    }
+
+    .titlebar {
+      grid-column: 1 / 4;
+      display: grid;
+      grid-template-columns: 224px minmax(480px, 1fr) 268px;
+      border-bottom: 1px solid var(--line);
+      background: var(--toolbar);
+      -webkit-app-region: drag;
+    }
+
+    .titlebar-left,
+    .titlebar-center,
+    .titlebar-right {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      padding: 0 12px;
+    }
+
+    .titlebar-left { border-right: 1px solid var(--line); }
+    .titlebar-right { border-left: 1px solid var(--line); justify-content: flex-end; }
+    .titlebar-center { gap: 8px; }
+
+    .traffic { display: flex; gap: 8px; margin-right: 16px; }
+    .traffic span { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.16); }
+    .traffic .red { background: #ff5f57; }
+    .traffic .yellow { background: #febc2e; }
+    .traffic .green { background: #28c840; }
+
+    .icon-button {
+      display: inline-grid;
+      width: 30px;
+      height: 28px;
+      place-items: center;
+      border-radius: 6px;
+      background: transparent;
+    }
+
+    .icon-button:hover { background: rgba(127,127,127,.14); }
+    .icon-button:active { background: rgba(127,127,127,.23); }
+    .icon-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .icon-button.primary { color: var(--accent); }
+
+    .view-title {
+      min-width: 120px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .view-count { color: var(--secondary); font-size: 12px; white-space: nowrap; }
+    .toolbar-spacer { flex: 1; }
+
+    .search {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: min(180px, 23vw);
+      height: 28px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(127,127,127,.1);
+      color: var(--secondary);
+    }
+
+    .search svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+    .search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--text); background: transparent; }
+    .search input::placeholder { color: var(--tertiary); }
+
+    .sidebar {
+      grid-column: 1;
+      grid-row: 2;
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      border-right: 1px solid var(--line);
+      background: var(--sidebar);
+    }
+
+    .sidebar-scroll { flex: 1; overflow: auto; padding: 9px 8px; }
+    .section-label { padding: 12px 9px 5px; color: var(--secondary); font-size: 11px; font-weight: 600; }
+
+    .nav-row {
+      display: flex;
+      height: 28px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border-radius: 6px;
+      color: var(--text);
+    }
+
+    .nav-row.selected { color: var(--text); background: var(--selection); }
+    .nav-row svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+    .nav-row .label { flex: 1; }
+    .nav-row .count { color: var(--secondary); font-size: 11px; }
+    .nav-row.indent { padding-left: 25px; }
+    .tag-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff9f0a; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.12); }
+    .tag-dot.green { background: #30d158; }
+    .tag-dot.blue { background: #64d2ff; }
+
+    .sidebar-footer {
+      display: flex;
+      height: 38px;
+      align-items: center;
+      gap: 2px;
+      padding: 4px 7px;
+      border-top: 1px solid var(--line);
+    }
+
+    .content {
+      position: relative;
+      grid-column: 2;
+      grid-row: 2;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      background: var(--content);
+    }
+
+    .inline-status {
+      position: relative;
+      z-index: 2;
+      display: none;
+      min-height: 42px;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 16px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--content) 90%, var(--accent) 10%);
+    }
+
+    .inline-status.visible { display: flex; }
+    .status-copy { min-width: 0; flex: 1; }
+    .status-title { font-size: 12px; font-weight: 600; }
+    .status-detail { margin-top: 1px; color: var(--secondary); font-size: 11px; }
+
+    .progress-track { width: min(210px, 25vw); height: 4px; overflow: hidden; border-radius: 99px; background: rgba(127,127,127,.22); }
+    .progress-value { width: 0%; height: 100%; border-radius: inherit; background: var(--accent); transition: width .28s ease; }
+
+    .small-button {
+      min-width: 54px;
+      height: 25px;
+      padding: 0 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--content) 88%, var(--text) 12%);
+      box-shadow: 0 1px 1px rgba(0,0,0,.06);
+    }
+
+    .small-button:hover { border-color: var(--tertiary); }
+    .small-button.accent { color: white; border-color: var(--accent); background: var(--accent); }
+
+    .grid-scroll { height: 100%; overflow: auto; padding: 18px; }
+    .grid-scroll.with-status { height: calc(100% - 42px); }
+
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(154px, 1fr));
+      gap: 20px 14px;
+      align-content: start;
+    }
+
+    .video-card {
+      min-width: 0;
+      padding: 4px;
+      border-radius: 8px;
+      transition: background .12s ease, transform .18s ease;
+    }
+
+    .video-card:hover { background: rgba(127,127,127,.08); }
+    .video-card.selected { background: var(--selection); }
+    .video-card.changed { animation: changed 1.1s ease; }
+    @keyframes changed { 0%, 100% { box-shadow: none; } 40% { box-shadow: 0 0 0 2px var(--accent); } }
+
+    .thumb {
+      position: relative;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      border-radius: 6px;
+      background: #d1d1d6;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
+    }
+
+    .thumb::before,
+    .thumb::after { content: ""; position: absolute; }
+    .thumb.coast { background: linear-gradient(165deg, #8ac6d1 0 48%, #d6c190 49% 65%, #66784d 66%); }
+    .thumb.coast::before { width: 54%; height: 50%; left: -5%; bottom: -18%; border-radius: 50%; background: #365f51; transform: rotate(-7deg); }
+    .thumb.city { background: linear-gradient(170deg, #cfb38c 0 54%, #6c727a 55%); }
+    .thumb.city::before { width: 20%; height: 58%; left: 18%; bottom: 20%; background: #414a52; box-shadow: 34px 13px 0 #565d63, 68px -8px 0 #303a43, 102px 18px 0 #747878; }
+    .thumb.studio { background: linear-gradient(135deg, #b48268, #5a3f36); }
+    .thumb.studio::before { width: 62%; height: 62%; left: 19%; top: 18%; border-radius: 50%; background: radial-gradient(circle at 42% 40%, #ffd9a1 0 12%, #5d372e 13% 35%, #222 36%); box-shadow: 0 9px 18px rgba(0,0,0,.34); }
+    .thumb.forest { background: linear-gradient(175deg, #b8c6a3 0 45%, #53694a 46%); }
+    .thumb.forest::before { inset: 15% 4% 0; background: repeating-linear-gradient(76deg, transparent 0 18px, #344a35 19px 24px); }
+    .thumb.indoor { background: linear-gradient(165deg, #d9c9b8 0 56%, #8a7363 57%); }
+    .thumb.indoor::before { width: 40%; height: 52%; left: 30%; bottom: 12%; border-radius: 3px 3px 0 0; background: #704b36; box-shadow: inset 0 0 0 7px #a98361; }
+    .thumb.night { background: linear-gradient(168deg, #183746 0 60%, #18232a 61%); }
+    .thumb.night::before { width: 5px; height: 5px; left: 18%; top: 30%; border-radius: 50%; background: #ffd60a; box-shadow: 26px 11px 0 #ff9f0a, 59px -4px 0 #ffd60a, 91px 16px 0 #ff9f0a, 119px 1px 0 #ffd60a; }
+
+    .duration {
+      position: absolute;
+      right: 6px;
+      bottom: 5px;
+      padding: 2px 5px;
+      border-radius: 4px;
+      color: white;
+      background: rgba(0,0,0,.66);
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .filename { margin-top: 7px; overflow: hidden; color: var(--text); font-size: 12px; font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+    .meta { margin-top: 2px; color: var(--secondary); font-size: 10px; }
+
+    .empty-state {
+      display: none;
+      width: min(420px, 82%);
+      margin: 21vh auto 0;
+      text-align: center;
+    }
+
+    .empty-state.visible { display: block; }
+    .empty-icon { display: grid; width: 54px; height: 54px; margin: 0 auto 15px; place-items: center; border-radius: 13px; color: var(--accent); background: var(--accent-soft); }
+    .empty-icon svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.45; }
+    .empty-state h2 { margin: 0; font-size: 17px; font-weight: 650; }
+    .empty-state p { max-width: 330px; margin: 7px auto 16px; color: var(--secondary); line-height: 1.45; }
+    .shortcut-hint { display: inline-flex; align-items: center; gap: 5px; color: var(--secondary); font-size: 11px; }
+    .shortcut-hint kbd { min-width: 49px; padding: 2px 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: rgba(127,127,127,.08); color: var(--text); box-shadow: 0 1px 1px rgba(0,0,0,.07); font: inherit; }
+
+    .inspector {
+      grid-column: 3;
+      grid-row: 2;
+      min-height: 0;
+      overflow: auto;
+      border-left: 1px solid var(--line);
+      background: var(--inspector);
+    }
+
+    .inspector-head { padding: 16px 16px 13px; border-bottom: 1px solid var(--line); }
+    .inspector-head h3 { margin: 0; font-size: 13px; }
+    .inspector-head p { margin: 4px 0 0; overflow: hidden; color: var(--secondary); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+    .inspector-section { padding: 13px 16px; border-bottom: 1px solid var(--line); }
+    .inspector-label { margin-bottom: 9px; color: var(--secondary); font-size: 11px; font-weight: 600; }
+    .info-row { display: grid; grid-template-columns: 66px minmax(0,1fr); gap: 8px; margin: 7px 0; font-size: 11px; }
+    .info-row span:first-child { color: var(--secondary); }
+    .info-row span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { padding: 3px 7px; border: 1px solid var(--line); border-radius: 99px; background: rgba(127,127,127,.08); font-size: 11px; }
+
+    .modal-backdrop {
+      position: absolute;
+      z-index: 20;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(20,20,22,.28);
+      backdrop-filter: blur(2px);
+    }
+
+    .modal-backdrop.visible { display: flex; }
+    .sheet {
+      width: 590px;
+      max-width: 82%;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.42);
+      border-radius: 12px;
+      background: var(--window);
+      box-shadow: 0 22px 54px rgba(0,0,0,.34);
+    }
+
+    .sheet-title { padding: 17px 20px 12px; text-align: center; }
+    .sheet-title h2 { margin: 0; font-size: 15px; }
+    .sheet-title p { margin: 5px 0 0; color: var(--secondary); font-size: 11px; }
+    .folder-list { margin: 0 18px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--content); }
+    .folder-row { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 8px; min-height: 46px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+    .folder-row:last-child { border-bottom: 0; }
+    .folder-row.selected { background: var(--selection); }
+    .folder-row svg { width: 20px; height: 20px; fill: rgba(10,132,255,.18); stroke: var(--accent); stroke-width: 1.4; }
+    .folder-name { font-size: 12px; font-weight: 500; }
+    .folder-path { margin-top: 2px; color: var(--secondary); font-size: 10px; }
+    .folder-note { color: var(--secondary); font-size: 10px; }
+    .sheet-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 18px 16px; }
+
+    .demo-bar {
+      position: fixed;
+      z-index: 50;
+      left: 50%;
+      bottom: 13px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      height: 38px;
+      padding: 5px 7px;
+      transform: translateX(-50%);
+      border: 1px solid rgba(255,255,255,.45);
+      border-radius: 10px;
+      background: rgba(42,42,44,.88);
+      color: white;
+      box-shadow: 0 8px 24px rgba(0,0,0,.22);
+      backdrop-filter: blur(18px);
+    }
+
+    .demo-label { padding: 0 6px; color: rgba(255,255,255,.65); font-size: 10px; font-weight: 600; }
+    .demo-button { height: 26px; padding: 0 9px; border-radius: 6px; background: transparent; color: white; font-size: 11px; }
+    .demo-button:hover { background: rgba(255,255,255,.12); }
+    .demo-button.active { background: rgba(255,255,255,.2); }
+    .demo-separator { width: 1px; height: 18px; background: rgba(255,255,255,.22); }
+
+    @media (max-width: 1080px) {
+      .window { grid-template-columns: 205px minmax(430px, 1fr) 238px; }
+      .titlebar { grid-template-columns: 205px minmax(430px, 1fr) 238px; }
+      .search { width: 130px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-menubar" aria-label="应用菜单栏">
+    <button class="menubar-button app-name">Video Tag Manager</button>
+    <div class="menu-item-wrap">
+      <button class="menubar-button" id="fileMenuButton" aria-haspopup="menu" aria-expanded="false">文件</button>
+      <div class="menu-popover" id="fileMenu" role="menu" hidden>
+        <button class="menu-command" id="importMenuItem" role="menuitem"><span>导入视频…</span><span class="menu-shortcut">⇧⌘I</span></button>
+        <div class="menu-divider"></div>
+        <button class="menu-command" role="menuitem"><span>关闭窗口</span><span class="menu-shortcut">⌘W</span></button>
+      </div>
+    </div>
+    <button class="menubar-button">编辑</button>
+    <button class="menubar-button">显示</button>
+    <button class="menubar-button">窗口</button>
+    <button class="menubar-button">帮助</button>
+  </header>
+  <main class="desktop">
+    <section class="window" aria-label="Video Tag Manager 原型窗口">
+      <header class="titlebar">
+        <div class="titlebar-left">
+          <div class="traffic" aria-hidden="true"><span class="red"></span><span class="yellow"></span><span class="green"></span></div>
+          <button class="icon-button" title="隐藏侧边栏" aria-label="隐藏侧边栏">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M8 4v16"></path></svg>
+          </button>
+        </div>
+        <div class="titlebar-center">
+          <span class="view-title" id="viewTitle">全部视频</span>
+          <span class="view-count" id="viewCount">24 个视频</span>
+          <span class="toolbar-spacer"></span>
+          <label class="search" aria-label="搜索视频">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m16.5 16.5 4 4"></path></svg>
+            <input id="searchInput" type="search" placeholder="搜索">
+          </label>
+        </div>
+        <div class="titlebar-right">
+          <button class="icon-button" title="隐藏检查器" aria-label="隐藏检查器">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M16 4v16"></path></svg>
+          </button>
+        </div>
+      </header>
+
+      <aside class="sidebar">
+        <div class="sidebar-scroll">
+          <div class="section-label">资料库</div>
+          <div class="nav-row selected">
+            <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m8 9 3 3-3 3"></path><path d="M13 15h4"></path></svg>
+            <span class="label">全部视频</span><span class="count" id="sidebarCount">24</span>
+          </div>
+          <div class="nav-row">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+            <span class="label">最近添加</span><span class="count library-dependent" data-count="8">8</span>
+          </div>
+          <div class="nav-row">
+            <svg viewBox="0 0 24 24"><path d="M20 13 13 20 4 11V4h7z"></path><circle cx="8.5" cy="8.5" r="1"></circle></svg>
+            <span class="label">未添加标签</span><span class="count library-dependent" data-count="6">6</span>
+          </div>
+
+          <div class="section-label">标签</div>
+          <div class="nav-row"><span class="tag-dot"></span><span class="label">人物</span><span class="count library-dependent" data-count="9">9</span></div>
+          <div class="nav-row indent"><span class="tag-dot"></span><span class="label">家人</span><span class="count library-dependent" data-count="5">5</span></div>
+          <div class="nav-row indent"><span class="tag-dot green"></span><span class="label">朋友</span><span class="count library-dependent" data-count="4">4</span></div>
+          <div class="nav-row"><span class="tag-dot blue"></span><span class="label">用途</span><span class="count library-dependent" data-count="13">13</span></div>
+          <div class="nav-row indent"><span class="tag-dot blue"></span><span class="label">工作素材</span><span class="count library-dependent" data-count="7">7</span></div>
+        </div>
+        <div class="sidebar-footer">
+          <button class="icon-button" title="添加标签" aria-label="添加标签"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg></button>
+          <button class="icon-button" title="修改标签" aria-label="修改标签"><svg viewBox="0 0 24 24"><path d="m4 16-.8 4 4-.8L18 8.4 14.6 5z"></path><path d="m13 6.6 3.4 3.4"></path></svg></button>
+        </div>
+      </aside>
+
+      <section class="content">
+        <div class="inline-status" id="inlineStatus" role="status" aria-live="polite">
+          <div class="status-copy"><div class="status-title" id="statusTitle">正在导入“项目 B”</div><div class="status-detail" id="statusDetail">正在发现视频…</div></div>
+          <div class="progress-track" id="progressTrack"><div class="progress-value" id="progressValue"></div></div>
+          <button class="small-button" id="cancelImport">取消</button>
+          <button class="small-button" id="dismissStatus" hidden>完成</button>
+        </div>
+
+        <div class="grid-scroll" id="gridScroll">
+          <div class="video-grid" id="videoGrid"></div>
+          <div class="empty-state" id="emptyState">
+            <div class="empty-icon"><svg viewBox="0 0 24 24"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="M12 12v6M9 15h6"></path></svg></div>
+            <h2>从菜单栏导入视频</h2>
+            <p>选择“文件 > 导入视频…”，Tag Manager 会导入文件夹及全部子文件夹中的视频。以后可以继续从其他位置添加。</p>
+            <span class="shortcut-hint">也可以使用 <kbd>⇧⌘I</kbd></span>
+          </div>
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <div class="inspector-head"><h3 id="inspectorName">海边日落.mov</h3><p id="inspectorPath">旅行 / 2026 / 海边日落.mov</p></div>
+        <div id="inspectorDetails">
+          <div class="inspector-section">
+            <div class="inspector-label">信息</div>
+            <div class="info-row"><span>时长</span><span id="inspectorDuration">00:42</span></div>
+            <div class="info-row"><span>尺寸</span><span>3840 × 2160</span></div>
+            <div class="info-row"><span>格式</span><span>QuickTime 影片</span></div>
+            <div class="info-row"><span>大小</span><span>268.4 MB</span></div>
+          </div>
+          <div class="inspector-section">
+            <div class="inspector-label">标签</div>
+            <div class="chip-row"><span class="chip">旅行</span><span class="chip">家人</span><span class="chip">待整理</span></div>
+          </div>
+        </div>
+      </aside>
+
+      <div class="modal-backdrop" id="modalBackdrop" role="dialog" aria-modal="true" aria-labelledby="pickerTitle">
+        <div class="sheet">
+          <div class="sheet-title"><h2 id="pickerTitle">选择包含视频的文件夹</h2><p>将递归导入所选文件夹及子文件夹中的视频</p></div>
+          <div class="folder-list" id="folderList">
+            <div class="folder-row selected" data-folder="A" data-new="5" data-existing="0" data-failed="0">
+              <svg viewBox="0 0 24 24"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+              <div><div class="folder-name">旅行素材 A</div><div class="folder-path">影片 / 旅行素材 A</div></div><span class="folder-note">5 个新视频</span>
+            </div>
+            <div class="folder-row" data-folder="B" data-new="3" data-existing="2" data-failed="1">
+              <svg viewBox="0 0 24 24"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+              <div><div class="folder-name">项目素材 B</div><div class="folder-path">桌面 / 项目素材 B</div></div><span class="folder-note">含重复和损坏文件</span>
+            </div>
+            <div class="folder-row" data-folder="overlap" data-new="0" data-existing="6" data-failed="0">
+              <svg viewBox="0 0 24 24"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+              <div><div class="folder-name">旅行素材 A / 精选</div><div class="folder-path">影片 / 旅行素材 A / 精选</div></div><span class="folder-note">6 个已导入视频</span>
+            </div>
+          </div>
+          <div class="sheet-footer"><button class="small-button" id="closePicker">取消</button><button class="small-button accent" id="startImport">导入</button></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="demo-bar" aria-label="原型演示控制">
+    <span class="demo-label">原型状态</span>
+    <button class="demo-button active" id="showLibrary">已有视频</button>
+    <button class="demo-button" id="showEmpty">空资料库</button>
+    <span class="demo-separator"></span>
+    <button class="demo-button" id="simulateMove">模拟移动</button>
+    <button class="demo-button" id="simulateDelete">模拟删除</button>
+    <button class="demo-button" id="resetDemo">重置</button>
+  </nav>
+
+  <script>
+    const initialVideos = [
+      { id: 1, name: "海边日落.mov", path: "旅行 / 2026 / 海边日落.mov", duration: "00:42", style: "coast" },
+      { id: 2, name: "城市街景.mp4", path: "项目 / 城市 / 城市街景.mp4", duration: "01:18", style: "city" },
+      { id: 3, name: "产品镜头 03.mov", path: "工作 / 产品 / 产品镜头 03.mov", duration: "00:27", style: "studio" },
+      { id: 4, name: "森林步道.m4v", path: "旅行 / 徒步 / 森林步道.m4v", duration: "02:06", style: "forest" },
+      { id: 5, name: "室内采访.mp4", path: "项目 / 采访 / 室内采访.mp4", duration: "04:31", style: "indoor" },
+      { id: 6, name: "夜间延时.mov", path: "个人 / 夜间延时.mov", duration: "00:58", style: "night" },
+      { id: 7, name: "海岸航拍.mp4", path: "旅行 / 精选 / 海岸航拍.mp4", duration: "01:46", style: "coast" },
+      { id: 8, name: "展厅记录.mov", path: "工作 / 展厅记录.mov", duration: "03:12", style: "indoor" }
+    ];
+
+    let videos = initialVideos.map(video => ({ ...video }));
+    let selectedID = 1;
+    let importTimer = null;
+    let importProgress = 0;
+    let currentFolder = null;
+    let emptyMode = false;
+
+    const grid = document.getElementById("videoGrid");
+    const emptyState = document.getElementById("emptyState");
+    const gridScroll = document.getElementById("gridScroll");
+    const inlineStatus = document.getElementById("inlineStatus");
+    const statusTitle = document.getElementById("statusTitle");
+    const statusDetail = document.getElementById("statusDetail");
+    const progressTrack = document.getElementById("progressTrack");
+    const progressValue = document.getElementById("progressValue");
+    const cancelImport = document.getElementById("cancelImport");
+    const dismissStatus = document.getElementById("dismissStatus");
+    const modalBackdrop = document.getElementById("modalBackdrop");
+    const searchInput = document.getElementById("searchInput");
+    const fileMenuButton = document.getElementById("fileMenuButton");
+    const fileMenu = document.getElementById("fileMenu");
+
+    function renderVideos() {
+      const query = searchInput.value.trim().toLocaleLowerCase();
+      const visible = videos.filter(video => video.name.toLocaleLowerCase().includes(query));
+      grid.innerHTML = "";
+
+      visible.forEach(video => {
+        const card = document.createElement("article");
+        card.className = `video-card${video.id === selectedID ? " selected" : ""}`;
+        card.dataset.id = String(video.id);
+        card.innerHTML = `
+          <div class="thumb ${video.style}"><span class="duration">${video.duration}</span></div>
+          <div class="filename">${video.name}</div>
+          <div class="meta">${video.path.split(" / ")[0]}</div>`;
+        card.addEventListener("click", () => selectVideo(video.id));
+        grid.appendChild(card);
+      });
+
+      grid.hidden = emptyMode;
+      emptyState.classList.toggle("visible", emptyMode);
+      updateCounts();
+    }
+
+    function updateCounts() {
+      const total = emptyMode ? 0 : videos.length + 16;
+      document.getElementById("viewCount").textContent = `${total} 个视频`;
+      document.getElementById("sidebarCount").textContent = String(total);
+      document.querySelectorAll(".library-dependent").forEach(count => {
+        count.textContent = emptyMode ? "0" : count.dataset.count;
+      });
+    }
+
+    function selectVideo(id) {
+      selectedID = id;
+      const video = videos.find(item => item.id === id);
+      if (!video) return;
+      document.getElementById("inspectorName").textContent = video.name;
+      document.getElementById("inspectorPath").textContent = video.path;
+      document.getElementById("inspectorDuration").textContent = video.duration;
+      renderVideos();
+    }
+
+    function showPicker() {
+      closeFileMenu();
+      modalBackdrop.classList.add("visible");
+    }
+
+    function hidePicker() {
+      modalBackdrop.classList.remove("visible");
+    }
+
+    function toggleFileMenu() {
+      const willOpen = fileMenu.hidden;
+      fileMenu.hidden = !willOpen;
+      fileMenuButton.classList.toggle("open", willOpen);
+      fileMenuButton.setAttribute("aria-expanded", String(willOpen));
+    }
+
+    function closeFileMenu() {
+      fileMenu.hidden = true;
+      fileMenuButton.classList.remove("open");
+      fileMenuButton.setAttribute("aria-expanded", "false");
+    }
+
+    function setStatusVisible(visible) {
+      inlineStatus.classList.toggle("visible", visible);
+      gridScroll.classList.toggle("with-status", visible);
+    }
+
+    function beginImport() {
+      currentFolder = document.querySelector(".folder-row.selected");
+      if (!currentFolder) return;
+      hidePicker();
+      clearInterval(importTimer);
+      importProgress = 4;
+      progressValue.style.width = `${importProgress}%`;
+      progressTrack.hidden = false;
+      cancelImport.hidden = false;
+      dismissStatus.hidden = true;
+      statusTitle.textContent = `正在导入“${currentFolder.querySelector(".folder-name").textContent}”`;
+      statusDetail.textContent = "正在发现视频…";
+      setStatusVisible(true);
+
+      importTimer = setInterval(() => {
+        importProgress = Math.min(100, importProgress + Math.ceil(Math.random() * 13));
+        progressValue.style.width = `${importProgress}%`;
+        statusDetail.textContent = importProgress < 38 ? "正在发现视频…" : importProgress < 82 ? "正在核对已导入的视频…" : "正在保存新视频…";
+        if (importProgress >= 100) finishImport();
+      }, 300);
+    }
+
+    function finishImport() {
+      clearInterval(importTimer);
+      importTimer = null;
+      const wasEmpty = emptyMode;
+      const newCount = Number(currentFolder.dataset.new);
+      const existing = Number(currentFolder.dataset.existing);
+      const failed = Number(currentFolder.dataset.failed);
+      const folderName = currentFolder.querySelector(".folder-name").textContent;
+
+      for (let index = 0; index < newCount; index += 1) {
+        const id = Math.max(0, ...videos.map(video => video.id)) + 1;
+        const styles = ["coast", "city", "studio", "forest", "indoor", "night"];
+        videos.unshift({ id, name: `${folderName} ${index + 1}.mov`, path: `${folderName} / 新视频 ${index + 1}.mov`, duration: `00:${String(24 + index * 7).padStart(2, "0")}`, style: styles[index % styles.length] });
+      }
+
+      emptyMode = false;
+      document.getElementById("inspectorDetails").hidden = false;
+      if (wasEmpty && videos.length > 0) selectedID = videos[0].id;
+      document.getElementById("showEmpty").classList.remove("active");
+      document.getElementById("showLibrary").classList.add("active");
+      statusTitle.textContent = `已完成导入“${folderName}”`;
+      const parts = [`新增 ${newCount} 个`, `已存在 ${existing} 个`];
+      if (failed > 0) parts.push(`失败 ${failed} 个`);
+      statusDetail.textContent = parts.join(" · ");
+      progressTrack.hidden = true;
+      cancelImport.hidden = true;
+      dismissStatus.hidden = false;
+      if (selectedID) selectVideo(selectedID);
+      else renderVideos();
+    }
+
+    function cancelCurrentImport() {
+      clearInterval(importTimer);
+      importTimer = null;
+      statusTitle.textContent = "已取消导入";
+      statusDetail.textContent = "已经完整加入的项目会保留，再次导入不会重复";
+      progressTrack.hidden = true;
+      cancelImport.hidden = true;
+      dismissStatus.hidden = false;
+    }
+
+    function setMode(mode) {
+      emptyMode = mode === "empty";
+      document.getElementById("showEmpty").classList.toggle("active", emptyMode);
+      document.getElementById("showLibrary").classList.toggle("active", !emptyMode);
+      document.getElementById("inspectorName").textContent = emptyMode ? "未选择视频" : (videos.find(item => item.id === selectedID)?.name ?? "未选择视频");
+      document.getElementById("inspectorPath").textContent = emptyMode ? "导入视频后可在这里查看信息" : (videos.find(item => item.id === selectedID)?.path ?? "");
+      document.getElementById("inspectorDetails").hidden = emptyMode;
+      setStatusVisible(false);
+      renderVideos();
+    }
+
+    function simulateMove() {
+      const video = videos.find(item => item.id === selectedID) ?? videos[0];
+      if (!video) return;
+      video.name = video.name.includes("已移动") ? video.name : `已移动 · ${video.name}`;
+      video.path = `整理后 / ${video.name}`;
+      selectVideo(video.id);
+      requestAnimationFrame(() => document.querySelector(`[data-id="${video.id}"]`)?.classList.add("changed"));
+    }
+
+    function simulateDelete() {
+      const index = videos.findIndex(item => item.id === selectedID);
+      if (index < 0) return;
+      videos.splice(index, 1);
+      selectedID = videos[0]?.id ?? null;
+      if (selectedID) selectVideo(selectedID);
+      else renderVideos();
+    }
+
+    function resetDemo() {
+      clearInterval(importTimer);
+      videos = initialVideos.map(video => ({ ...video }));
+      selectedID = 1;
+      searchInput.value = "";
+      emptyMode = false;
+      document.getElementById("inspectorDetails").hidden = false;
+      setStatusVisible(false);
+      document.getElementById("showEmpty").classList.remove("active");
+      document.getElementById("showLibrary").classList.add("active");
+      closeFileMenu();
+      selectVideo(1);
+    }
+
+    fileMenuButton.addEventListener("click", toggleFileMenu);
+    document.getElementById("importMenuItem").addEventListener("click", showPicker);
+    document.getElementById("closePicker").addEventListener("click", hidePicker);
+    document.getElementById("startImport").addEventListener("click", beginImport);
+    cancelImport.addEventListener("click", cancelCurrentImport);
+    dismissStatus.addEventListener("click", () => setStatusVisible(false));
+    searchInput.addEventListener("input", renderVideos);
+    document.getElementById("showLibrary").addEventListener("click", () => setMode("library"));
+    document.getElementById("showEmpty").addEventListener("click", () => setMode("empty"));
+    document.getElementById("simulateMove").addEventListener("click", simulateMove);
+    document.getElementById("simulateDelete").addEventListener("click", simulateDelete);
+    document.getElementById("resetDemo").addEventListener("click", resetDemo);
+    document.querySelectorAll(".folder-row").forEach(row => row.addEventListener("click", () => {
+      document.querySelectorAll(".folder-row").forEach(item => item.classList.remove("selected"));
+      row.classList.add("selected");
+    }));
+    modalBackdrop.addEventListener("click", event => { if (event.target === modalBackdrop) hidePicker(); });
+    document.addEventListener("click", event => {
+      if (!fileMenu.contains(event.target) && event.target !== fileMenuButton) closeFileMenu();
+    });
+    document.addEventListener("keydown", event => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "i") {
+        event.preventDefault();
+        showPicker();
+        return;
+      }
+      if (event.key === "Escape") {
+        closeFileMenu();
+        hidePicker();
+      }
+    });
+
+    selectVideo(1);
+  </script>
+</body>
+</html>
