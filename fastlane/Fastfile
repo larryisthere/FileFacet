@@ -1,0 +1,239 @@
+require "digest"
+require "fileutils"
+require "shellwords"
+
+ENV["FASTLANE_OPT_OUT_USAGE"] = "1"
+ENV["FASTLANE_SKIP_UPDATE_CHECK"] = "1"
+
+default_platform(:mac)
+
+REPO_ROOT = File.expand_path("..", __dir__)
+PROJECT = File.join(REPO_ROOT, "VideoTagManager.xcodeproj")
+SCHEME = "VideoTagManager"
+PRODUCT_NAME = "VideoTagManager"
+DISPLAY_NAME = "Video Tag Manager"
+
+def shell_escape(value)
+  Shellwords.escape(value.to_s)
+end
+
+def release_build_settings
+  @release_build_settings ||= begin
+    output = sh(
+      "xcodebuild -project #{shell_escape(PROJECT)} -scheme #{shell_escape(SCHEME)} " \
+      "-configuration Release -showBuildSettings",
+      log: false
+    )
+    keys = %w[MARKETING_VERSION CURRENT_PROJECT_VERSION DEVELOPMENT_TEAM PRODUCT_BUNDLE_IDENTIFIER]
+    settings = {}
+    output.each_line do |line|
+      match = line.match(/^\s*(#{keys.join('|')})\s*=\s*(.*?)\s*$/)
+      settings[match[1]] = match[2] if match
+    end
+    missing = keys.reject { |key| settings[key] && !settings[key].empty? }
+    UI.user_error!("Release 构建设置缺少：#{missing.join(', ')}") unless missing.empty?
+    settings
+  end
+end
+
+def release_commit
+  @release_commit ||= sh("git -C #{shell_escape(REPO_ROOT)} rev-parse HEAD", log: false).strip
+end
+
+def require_clean_release_source!
+  status = sh(
+    "git -C #{shell_escape(REPO_ROOT)} status --porcelain --untracked-files=all",
+    log: false
+  ).strip
+  UI.user_error!("正式发布要求工作区无未提交改动") unless status.empty?
+end
+
+def require_github_commit!(repository)
+  sh(
+    "gh api #{shell_escape("repos/#{repository}/commits/#{release_commit}")} --silent"
+  )
+end
+
+def release_identifier
+  settings = release_build_settings
+  "#{settings['MARKETING_VERSION']}-#{settings['CURRENT_PROJECT_VERSION']}"
+end
+
+def release_root(channel)
+  File.join(REPO_ROOT, ".build", "releases", release_identifier, channel)
+end
+
+def validate_app!(app_path, allow_development_signing:)
+  UI.user_error!("找不到 App：#{app_path}") unless File.directory?(app_path)
+
+  info_plist = File.join(app_path, "Contents", "Info.plist")
+  executable = File.join(app_path, "Contents", "MacOS", PRODUCT_NAME)
+  settings = release_build_settings
+  actual_version = sh("/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' #{shell_escape(info_plist)}", log: false).strip
+  actual_build = sh("/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' #{shell_escape(info_plist)}", log: false).strip
+  actual_bundle_id = sh("/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' #{shell_escape(info_plist)}", log: false).strip
+  UI.user_error!("App 版本号不匹配：#{actual_version}") unless actual_version == settings["MARKETING_VERSION"]
+  UI.user_error!("App 构建号不匹配：#{actual_build}") unless actual_build == settings["CURRENT_PROJECT_VERSION"]
+  UI.user_error!("App Bundle ID 不匹配：#{actual_bundle_id}") unless actual_bundle_id == settings["PRODUCT_BUNDLE_IDENTIFIER"]
+
+  architectures = sh("lipo -archs #{shell_escape(executable)}", log: false).split
+  missing_architectures = %w[arm64 x86_64] - architectures
+  UI.user_error!("App 缺少架构：#{missing_architectures.join(', ')}") unless missing_architectures.empty?
+
+  sh("codesign --verify --deep --strict --verbose=2 #{shell_escape(app_path)}")
+  signing = sh("codesign -dvvv --entitlements - #{shell_escape(app_path)} 2>&1", log: false)
+  UI.user_error!("App Team 标识不匹配") unless signing.include?("TeamIdentifier=#{settings['DEVELOPMENT_TEAM']}")
+  UI.user_error!("App 未启用 Hardened Runtime") unless signing.include?("flags=0x10000(runtime)")
+  UI.user_error!("App 未启用 Sandbox") unless signing.include?("com.apple.security.app-sandbox")
+
+  has_get_task_allow = signing.match?(/com\.apple\.security\.get-task-allow[\s\S]{0,120}(true|<true\/>)/)
+  if allow_development_signing
+    UI.important("本地包使用开发签名，仅供已配置证书的开发 Mac 使用") if has_get_task_allow
+  else
+    UI.user_error!("分发包包含 get-task-allow，禁止发布") if has_get_task_allow
+  end
+end
+
+def release_notes_file!(output_directory)
+  version = release_build_settings["MARKETING_VERSION"]
+  changelog_path = File.join(REPO_ROOT, "CHANGELOG.md")
+  lines = File.readlines(changelog_path)
+  heading = /^## \[#{Regexp.escape(version)}\](?:\s+-.*)?\s*$/
+  start_index = lines.index { |line| line.match?(heading) }
+  UI.user_error!("CHANGELOG.md 缺少版本 #{version} 的发布说明") unless start_index
+  end_index = lines.each_index.find { |index| index > start_index && lines[index].match?(/^## \[/) } || lines.length
+  notes = lines[start_index...end_index].join.strip
+  UI.user_error!("版本 #{version} 的发布说明为空") if notes.empty?
+
+  FileUtils.mkdir_p(output_directory)
+  path = File.join(output_directory, "release-notes-#{version}.md")
+  File.write(path, "#{notes}\n")
+  path
+end
+
+def package_app!(app_path, output_directory)
+  FileUtils.mkdir_p(output_directory)
+  settings = release_build_settings
+  base_name = "Video-Tag-Manager-#{settings['MARKETING_VERSION']}-#{settings['CURRENT_PROJECT_VERSION']}-macOS-universal"
+  zip_path = File.join(output_directory, "#{base_name}.zip")
+  checksum_path = "#{zip_path}.sha256"
+  FileUtils.rm_f([zip_path, checksum_path])
+  sh("ditto -c -k --sequesterRsrc --keepParent #{shell_escape(app_path)} #{shell_escape(zip_path)}")
+  checksum = Digest::SHA256.file(zip_path).hexdigest
+  File.write(checksum_path, "#{checksum}  #{File.basename(zip_path)}\n")
+  UI.success("Release 包：#{File.expand_path(zip_path)}")
+  UI.success("SHA-256：#{checksum}")
+  [zip_path, checksum_path]
+end
+
+def require_environment!(*names)
+  missing = names.select { |name| ENV[name].to_s.empty? }
+  UI.user_error!("缺少环境变量：#{missing.join(', ')}") unless missing.empty?
+end
+
+platform :mac do
+  desc "构建供当前开发 Mac 本地使用的签名 Universal Release"
+  lane :local_release do
+    output_directory = release_root("local")
+    derived_data = File.join(REPO_ROOT, ".build", "fastlane", "local")
+    built_app = File.join(derived_data, "Build", "Products", "Release", "#{PRODUCT_NAME}.app")
+    output_app = File.join(output_directory, "#{DISPLAY_NAME}.app")
+
+    FileUtils.rm_rf(output_directory)
+    FileUtils.mkdir_p(output_directory)
+    sh(
+      "xcodebuild -project #{shell_escape(PROJECT)} -scheme #{shell_escape(SCHEME)} " \
+      "-configuration Release -destination generic/platform=macOS " \
+      "-derivedDataPath #{shell_escape(derived_data)} -allowProvisioningUpdates clean build"
+    )
+    FileUtils.rm_rf(output_app)
+    sh("ditto #{shell_escape(built_app)} #{shell_escape(output_app)}")
+    validate_app!(output_app, allow_development_signing: true)
+    package_app!(output_app, output_directory)
+  end
+
+  desc "使用 Developer ID 签名、公证并发布到 GitHub Releases"
+  lane :github_release do
+    require_environment!("DEVELOPER_ID_APPLICATION", "NOTARYTOOL_KEYCHAIN_PROFILE", "GITHUB_REPOSITORY")
+    require_clean_release_source!
+    require_github_commit!(ENV.fetch("GITHUB_REPOSITORY"))
+    output_directory = release_root("github")
+    derived_data = File.join(REPO_ROOT, ".build", "fastlane", "github")
+    built_app = File.join(derived_data, "Build", "Products", "Release", "#{PRODUCT_NAME}.app")
+    output_app = File.join(output_directory, "#{DISPLAY_NAME}.app")
+    identity = ENV.fetch("DEVELOPER_ID_APPLICATION")
+
+    FileUtils.rm_rf(output_directory)
+    FileUtils.mkdir_p(output_directory)
+    sh("security find-identity -p codesigning -v | grep -F #{shell_escape(identity)}")
+    sh(
+      "xcodebuild -project #{shell_escape(PROJECT)} -scheme #{shell_escape(SCHEME)} " \
+      "-configuration Release -destination generic/platform=macOS " \
+      "-derivedDataPath #{shell_escape(derived_data)} -allowProvisioningUpdates clean build " \
+      "CODE_SIGN_STYLE=Automatic CODE_SIGN_IDENTITY=#{shell_escape(identity)}"
+    )
+    sh("ditto #{shell_escape(built_app)} #{shell_escape(output_app)}")
+    validate_app!(output_app, allow_development_signing: false)
+
+    submission_zip = File.join(output_directory, "notarization-submission.zip")
+    sh("ditto -c -k --sequesterRsrc --keepParent #{shell_escape(output_app)} #{shell_escape(submission_zip)}")
+    sh(
+      "xcrun notarytool submit #{shell_escape(submission_zip)} --wait " \
+      "--keychain-profile #{shell_escape(ENV.fetch('NOTARYTOOL_KEYCHAIN_PROFILE'))}"
+    )
+    sh("xcrun stapler staple #{shell_escape(output_app)}")
+    sh("xcrun stapler validate #{shell_escape(output_app)}")
+    FileUtils.rm_f(submission_zip)
+    zip_path, checksum_path = package_app!(output_app, output_directory)
+
+    settings = release_build_settings
+    tag = ENV.fetch("RELEASE_TAG", "v#{settings['MARKETING_VERSION']}")
+    notes_path = release_notes_file!(output_directory)
+    sh(
+      "gh release create #{shell_escape(tag)} #{shell_escape(zip_path)} #{shell_escape(checksum_path)} " \
+      "--repo #{shell_escape(ENV.fetch('GITHUB_REPOSITORY'))} " \
+      "--target #{shell_escape(release_commit)} " \
+      "--title #{shell_escape("Video Tag Manager #{settings['MARKETING_VERSION']}")} " \
+      "--notes-file #{shell_escape(notes_path)}"
+    )
+  end
+
+  desc "构建并上传 Mac App Store Connect 包"
+  lane :app_store_release do
+    require_environment!("APP_STORE_CONNECT_KEY_ID", "APP_STORE_CONNECT_ISSUER_ID", "APP_STORE_CONNECT_KEY_PATH")
+    require_clean_release_source!
+    output_directory = release_root("app-store")
+    FileUtils.rm_rf(output_directory)
+    FileUtils.mkdir_p(output_directory)
+
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("APP_STORE_CONNECT_KEY_ID"),
+      issuer_id: ENV.fetch("APP_STORE_CONNECT_ISSUER_ID"),
+      key_filepath: ENV.fetch("APP_STORE_CONNECT_KEY_PATH")
+    )
+    build_app(
+      project: PROJECT,
+      scheme: SCHEME,
+      configuration: "Release",
+      clean: true,
+      export_method: "app-store",
+      output_directory: output_directory,
+      output_name: "VideoTagManager.pkg",
+      export_options: {
+        signingStyle: "automatic",
+        teamID: release_build_settings["DEVELOPMENT_TEAM"]
+      },
+      xcargs: "-allowProvisioningUpdates"
+    )
+    pkg_path = File.join(output_directory, "VideoTagManager.pkg")
+    UI.user_error!("找不到 App Store 包：#{pkg_path}") unless File.file?(pkg_path)
+    upload_to_app_store(
+      api_key: api_key,
+      pkg: pkg_path,
+      skip_metadata: true,
+      skip_screenshots: true,
+      submit_for_review: false,
+      run_precheck_before_submit: false
+    )
+  end
+end
