@@ -47,7 +47,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
 
     init(
         onCancelImport: @escaping () -> Void,
-        onImportDroppedVideos: @escaping ([URL]) -> Void,
+        onImportDroppedItems: @escaping ([URL]) -> Void,
         onRemoveVideos: @escaping ([String], @escaping (Bool) -> Void) -> Void,
         onUndoLastMutation: @escaping () -> Void,
         onOpenVideo: @escaping (VideoRecord) -> Void,
@@ -96,7 +96,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             thumbnailURL: thumbnailURL,
             onAssignTagID: onAssignTagID,
             onCancelImport: onCancelImport,
-            onImportDroppedVideos: onImportDroppedVideos,
+            onImportDroppedItems: onImportDroppedItems,
             onRemoveVideos: { [weak inspector] videoIDs, completion in
                 let pendingDraft = inspector?.takePendingTagChanges()
                 onRemoveVideos(videoIDs) { succeeded in

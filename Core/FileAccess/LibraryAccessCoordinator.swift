@@ -3,9 +3,28 @@ import Foundation
 enum LibraryImportState: Equatable, Sendable {
     case idle
     case importing(title: String, detail: String, progress: Double?)
-    case completed(addedCount: Int, existingCount: Int, failedCount: Int)
+    case completed(LibraryImportSummary)
     case cancelled
     case failed(message: String)
+}
+
+struct LibraryImportSummary: Equatable, Sendable {
+    let title: String
+    let addedCount: Int
+    let existingCount: Int
+    let failedVideoCount: Int
+    let failedInputCount: Int
+    let checkedInputCount: Int
+    let checkedFolderCount: Int
+}
+
+private struct LibraryImportRequest {
+    let roots: [VideoImportRoot]
+    let title: String
+    let completionTitle: String
+    let initialDetail: String
+    let inputCount: Int
+    let folderCount: Int
 }
 
 private struct PendingImportSource {
@@ -13,6 +32,8 @@ private struct PendingImportSource {
     let url: URL
     let bookmark: Data
     let isNew: Bool
+    let kind: VideoImportRootKind
+    let requestIndex: Int
 }
 
 private enum LastUndoMutation {
@@ -151,45 +172,55 @@ final class LibraryAccessCoordinator {
 
     func importVideos() {
         guard let url = picker.chooseDirectory() else { return }
-
-        startImport(
-            urls: [url],
+        guard let root = VideoFileDiscovery.importRoot(for: url) else {
+            onImportStateChanged?(.failed(message: "无法读取所选文件夹。"))
+            return
+        }
+        runImport(LibraryImportRequest(
+            roots: [root],
             title: "正在导入“\(url.lastPathComponent)”",
-            initialDetail: "正在发现视频…"
-        )
+            completionTitle: "已完成导入“\(url.lastPathComponent)”",
+            initialDetail: "正在扫描文件夹…",
+            inputCount: 1,
+            folderCount: 1
+        ))
     }
 
-    func importDroppedVideos(_ urls: [URL]) {
-        let videoURLs = urls
-            .filter(VideoFileDiscovery.isSupportedVideoURL)
-            .reduce(into: [URL]()) { result, url in
-                let standardizedURL = url.standardizedFileURL
-                if result.contains(where: { $0.standardizedFileURL == standardizedURL }) == false {
-                    result.append(standardizedURL)
-                }
-            }
-        guard videoURLs.isEmpty == false else {
+    func importDroppedItems(_ urls: [URL]) {
+        let plan = VideoFileDiscovery.importPlan(for: urls)
+        guard plan.roots.isEmpty == false else {
             onImportStateChanged?(.failed(
-                message: "没有可导入的视频。请拖入 MOV、MP4、M4V、AVI、MKV 或 WebM 文件。"
+                message: "没有可导入的内容。请拖入视频文件或普通文件夹。"
             ))
             return
         }
-
-        startImport(
-            urls: videoURLs,
-            title: "正在导入拖入的 \(videoURLs.count) 个视频",
-            initialDetail: "正在核对已导入的视频…"
-        )
+        let title: String
+        if plan.fileCount > 0, plan.folderCount > 0 {
+            title = "正在导入拖入的 \(plan.acceptedInputCount) 个项目"
+        } else if plan.folderCount > 0 {
+            title = "正在导入拖入的 \(plan.folderCount) 个文件夹"
+        } else {
+            title = "正在导入拖入的 \(plan.fileCount) 个视频"
+        }
+        let initialDetail = plan.collapsedInputCount > 0
+            ? "已合并 \(plan.collapsedInputCount) 个重叠项目，正在处理第 1 / \(plan.roots.count) 个项目…"
+            : "正在处理第 1 / \(plan.roots.count) 个项目…"
+        runImport(LibraryImportRequest(
+            roots: plan.roots,
+            title: title,
+            completionTitle: "已完成拖入导入",
+            initialDetail: initialDetail,
+            inputCount: plan.roots.count,
+            folderCount: plan.roots.filter { $0.kind == .directory }.count
+        ))
     }
 
-    private func startImport(urls: [URL], title: String, initialDetail: String) {
-        let standardizedURLs = urls.map(\.standardizedFileURL)
-
+    private func runImport(_ request: LibraryImportRequest) {
         var preparationFailedCount = 0
         var sources: [PendingImportSource] = []
-        for url in standardizedURLs {
+        for (index, root) in request.roots.enumerated() {
             do {
-                sources.append(try prepareImportSource(for: url))
+                sources.append(try prepareImportSource(for: root, requestIndex: index))
             } catch {
                 preparationFailedCount += 1
             }
@@ -203,7 +234,7 @@ final class LibraryAccessCoordinator {
         let revision = importRevision
         let previousMutationTask = tagMutationTask
         let previousCleanupTask = artifactCleanupTask
-        onImportStateChanged?(.importing(title: title, detail: initialDetail, progress: nil))
+        onImportStateChanged?(.importing(title: request.title, detail: request.initialDetail, progress: nil))
         let discovery = self.discovery
         let database = self.database
         importTask = Task { [weak self] in
@@ -226,16 +257,17 @@ final class LibraryAccessCoordinator {
                 }
                 var addedCount = 0
                 var existingCount = 0
-                var failedCount = preparationFailedCount
+                var failedVideoCount = 0
+                var failedInputCount = preparationFailedCount
                 var importedVideos: [VideoRecord] = []
-                for (index, source) in sources.enumerated() {
+                for (sourceIndex, source) in sources.enumerated() {
                     try Task.checkCancellation()
-                    let sourceProgress = Double(index) / Double(sources.count)
+                    let sourceProgress = Double(sourceIndex) / Double(sources.count)
                     onImportStateChanged?(.importing(
-                        title: title,
-                        detail: sources.count == 1
-                            ? "正在发现视频…"
-                            : "正在核对第 \(index + 1) / \(sources.count) 个视频…",
+                        title: request.title,
+                        detail: request.inputCount == 1
+                            ? (source.kind == .directory ? "正在扫描文件夹…" : "正在核对视频…")
+                            : "正在扫描第 \(source.requestIndex + 1) / \(request.inputCount) 个项目…",
                         progress: sources.count == 1 ? nil : sourceProgress
                     ))
                     do {
@@ -252,9 +284,11 @@ final class LibraryAccessCoordinator {
                         }
                         try Task.checkCancellation()
                         onImportStateChanged?(.importing(
-                            title: title,
-                            detail: "正在保存视频…",
-                            progress: (Double(index) + 0.5) / Double(sources.count)
+                            title: request.title,
+                            detail: request.inputCount == 1
+                                ? "正在保存视频…"
+                                : "正在保存第 \(source.requestIndex + 1) / \(request.inputCount) 个项目…",
+                            progress: (Double(sourceIndex) + 0.5) / Double(sources.count)
                         ))
                         try await database.saveSourceAuthorization(SourceAuthorizationRecord(
                             id: source.id,
@@ -271,12 +305,12 @@ final class LibraryAccessCoordinator {
                         )
                         addedCount += result.addedCount
                         existingCount += result.existingCount
-                        failedCount += result.failedCount
+                        failedVideoCount += result.failedCount
                         importedVideos.append(contentsOf: result.importedVideos)
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch {
-                        failedCount += 1
+                        failedInputCount += 1
                         if source.isNew, persistedSourceIDs.contains(source.id) == false {
                             disconnectSource(source.id)
                         }
@@ -286,7 +320,7 @@ final class LibraryAccessCoordinator {
                     }
                 }
                 onImportStateChanged?(.importing(
-                    title: title,
+                    title: request.title,
                     detail: "正在更新资料库…",
                     progress: 0.98
                 ))
@@ -297,11 +331,15 @@ final class LibraryAccessCoordinator {
                 invalidateUndoHistoryUnlessVideoRemoval()
                 startMediaProcessing(videos: importedVideos)
                 guard importRevision == revision else { return }
-                onImportStateChanged?(.completed(
+                onImportStateChanged?(.completed(LibraryImportSummary(
+                    title: request.completionTitle,
                     addedCount: addedCount,
                     existingCount: existingCount,
-                    failedCount: failedCount
-                ))
+                    failedVideoCount: failedVideoCount,
+                    failedInputCount: failedInputCount,
+                    checkedInputCount: request.inputCount,
+                    checkedFolderCount: request.folderCount
+                )))
                 AppLogger.library.notice("Manual import completed with \(addedCount, privacy: .public) new videos")
             } catch is CancellationError {
                 disconnectUnpersistedNewSources(sources, persistedSourceIDs: persistedSourceIDs)
@@ -643,7 +681,11 @@ final class LibraryAccessCoordinator {
         )
     }
 
-    private func prepareImportSource(for url: URL) throws -> PendingImportSource {
+    private func prepareImportSource(
+        for root: VideoImportRoot,
+        requestIndex: Int
+    ) throws -> PendingImportSource {
+        let url = root.url
         let existingSourceID = sourceURLs.first {
             $0.value.standardizedFileURL == url.standardizedFileURL
         }?.key
@@ -689,7 +731,9 @@ final class LibraryAccessCoordinator {
             id: sourceID,
             url: authorizedURL,
             bookmark: bookmark,
-            isNew: existingSourceID == nil
+            isNew: existingSourceID == nil,
+            kind: root.kind,
+            requestIndex: requestIndex
         )
     }
 

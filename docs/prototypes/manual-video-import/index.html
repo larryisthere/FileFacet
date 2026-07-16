@@ -472,6 +472,8 @@
       align-items: center;
       gap: 6px;
       height: 38px;
+      max-width: calc(100vw - 24px);
+      overflow-x: auto;
       padding: 5px 7px;
       transform: translateX(-50%);
       border: 1px solid rgba(255,255,255,.45);
@@ -579,7 +581,7 @@
           <div class="empty-state" id="emptyState">
             <div class="empty-icon"><svg viewBox="0 0 24 24"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="M12 12v6M9 15h6"></path></svg></div>
             <h2>从菜单栏导入视频</h2>
-            <p>选择“文件 > 导入视频…”，或直接将视频拖到中间区域。以后可以继续从其他位置添加。</p>
+            <p>选择“文件 > 导入视频…”，或直接将视频、文件夹拖到中间区域。以后可以继续从其他位置添加。</p>
             <span class="shortcut-hint">菜单快捷键 <kbd>⇧⌘I</kbd></span>
           </div>
         </div>
@@ -651,7 +653,10 @@
     <button class="demo-button active" id="showLibrary">已有视频</button>
     <button class="demo-button" id="showEmpty">空资料库</button>
     <span class="demo-separator"></span>
-    <button class="demo-button" id="simulateValidDrop">预览可导入指针</button>
+    <button class="demo-button" id="simulateFileDrop">拖入 3 个视频</button>
+    <button class="demo-button" id="simulateFolderDrop">拖入 2 个文件夹</button>
+    <button class="demo-button" id="simulateMixedDrop">混合拖入</button>
+    <button class="demo-button" id="simulateEmptyFolders">拖入空文件夹</button>
     <button class="demo-button" id="simulateInvalidDrop">预览禁止指针</button>
     <span class="demo-separator"></span>
     <button class="demo-button" id="simulateMove">模拟移动</button>
@@ -701,6 +706,28 @@
     const content = document.querySelector(".content");
     const appWindow = document.querySelector(".window");
     const supportedVideoExtensions = new Set(["mov", "mp4", "m4v", "avi", "mkv", "webm"]);
+    const droppedImportScenarios = {
+      files: {
+        inputCount: 3, sourceCount: 3, fileCount: 3, folderCount: 0,
+        newCount: 3, existingCount: 0, failedVideoCount: 0, failedInputCount: 0,
+        label: "拖入的视频"
+      },
+      folders: {
+        inputCount: 2, sourceCount: 2, fileCount: 0, folderCount: 2,
+        newCount: 5, existingCount: 2, failedVideoCount: 0, failedInputCount: 0,
+        label: "文件夹视频"
+      },
+      mixed: {
+        inputCount: 5, sourceCount: 3, fileCount: 2, folderCount: 3,
+        newCount: 4, existingCount: 2, failedVideoCount: 1, failedInputCount: 1,
+        label: "混合导入视频"
+      },
+      emptyFolders: {
+        inputCount: 2, sourceCount: 2, fileCount: 0, folderCount: 2,
+        newCount: 0, existingCount: 0, failedVideoCount: 0, failedInputCount: 0,
+        label: "空文件夹"
+      }
+    };
 
     function renderVideos() {
       const query = searchInput.value.trim().toLocaleLowerCase();
@@ -890,14 +917,59 @@
       }, duration);
     }
 
-    function videoFilesFrom(dataTransfer) {
-      return [...(dataTransfer?.files ?? [])].filter(file => {
+    function droppedItemsFrom(dataTransfer) {
+      const transferItems = [...(dataTransfer?.items ?? [])];
+      if (transferItems.length > 0) {
+        return transferItems.map(item => {
+          const entry = item.webkitGetAsEntry?.();
+          if (entry?.isDirectory) return { kind: "folder", name: entry.name };
+          const file = item.getAsFile?.();
+          const name = file?.name ?? entry?.name ?? "";
+          const extension = name.split(".").pop()?.toLocaleLowerCase() ?? "";
+          return supportedVideoExtensions.has(extension)
+            ? { kind: "video", name }
+            : { kind: "unsupported", name };
+        });
+      }
+      return [...(dataTransfer?.files ?? [])].map(file => {
         const extension = file.name.split(".").pop()?.toLocaleLowerCase() ?? "";
-        return supportedVideoExtensions.has(extension);
+        return supportedVideoExtensions.has(extension)
+          ? { kind: "video", name: file.name }
+          : { kind: "unsupported", name: file.name };
       });
     }
 
-    function beginDroppedImport(count) {
+    function validDroppedItemsFrom(dataTransfer) {
+      return droppedItemsFrom(dataTransfer).filter(item => item.kind === "video" || item.kind === "folder");
+    }
+
+    function dynamicDropScenario(items) {
+      const fileCount = items.filter(item => item.kind === "video").length;
+      const folderCount = items.filter(item => item.kind === "folder").length;
+      return {
+        inputCount: items.length,
+        sourceCount: items.length,
+        fileCount,
+        folderCount,
+        newCount: fileCount + folderCount * 2,
+        existingCount: 0,
+        failedVideoCount: 0,
+        failedInputCount: 0,
+        label: folderCount > 0 ? "拖入文件夹中的视频" : "拖入的视频"
+      };
+    }
+
+    function droppedImportTitle(scenario) {
+      if (scenario.fileCount > 0 && scenario.folderCount > 0) {
+        return `正在导入拖入的 ${scenario.inputCount} 个项目`;
+      }
+      if (scenario.folderCount > 0) {
+        return `正在导入拖入的 ${scenario.folderCount} 个文件夹`;
+      }
+      return `正在导入拖入的 ${scenario.fileCount} 个视频`;
+    }
+
+    function beginDroppedImport(scenario) {
       clearInterval(importTimer);
       importProgress = 8;
       currentFolder = null;
@@ -906,43 +978,72 @@
       cancelImport.hidden = false;
       undoRemoval.hidden = true;
       dismissStatus.hidden = true;
-      statusTitle.textContent = `正在导入拖入的 ${count} 个视频`;
-      statusDetail.textContent = "正在核对已导入的视频…";
+      statusTitle.textContent = droppedImportTitle(scenario);
+      statusDetail.textContent = scenario.sourceCount < scenario.inputCount
+        ? `已合并 ${scenario.inputCount - scenario.sourceCount} 个重叠项目，正在处理第 1 / ${scenario.sourceCount} 个项目…`
+        : `正在处理第 1 / ${scenario.sourceCount} 个项目…`;
       setStatusVisible(true);
       importTimer = setInterval(() => {
-        importProgress = Math.min(100, importProgress + 18);
+        importProgress = Math.min(100, importProgress + 14);
         progressValue.style.width = `${importProgress}%`;
-        statusDetail.textContent = importProgress < 75 ? "正在核对已导入的视频…" : "正在保存新视频…";
-        if (importProgress >= 100) finishDroppedImport(count);
+        const sourceIndex = Math.min(
+          scenario.sourceCount,
+          Math.max(1, Math.ceil((importProgress / 82) * scenario.sourceCount))
+        );
+        statusDetail.textContent = importProgress < 36
+          ? `正在扫描第 ${sourceIndex} / ${scenario.sourceCount} 个项目…`
+          : importProgress < 82
+            ? `正在核对第 ${sourceIndex} / ${scenario.sourceCount} 个项目…`
+            : "正在保存新视频…";
+        if (importProgress >= 100) finishDroppedImport(scenario);
       }, 260);
     }
 
-    function finishDroppedImport(count) {
+    function finishDroppedImport(scenario) {
       clearInterval(importTimer);
       importTimer = null;
       const styles = ["coast", "city", "studio"];
-      for (let index = 0; index < count; index += 1) {
+      for (let index = 0; index < scenario.newCount; index += 1) {
         const id = Math.max(0, ...videos.map(video => video.id)) + 1;
         videos.unshift({
           id,
-          name: `拖入的视频 ${index + 1}.mov`,
-          path: `拖入项目 / 视频 ${index + 1}.mov`,
+          name: `${scenario.label} ${index + 1}.mov`,
+          path: `拖入项目 / ${scenario.label} ${index + 1}.mov`,
           duration: `00:${String(31 + index * 8).padStart(2, "0")}`,
           style: styles[index % styles.length]
         });
       }
-      emptyMode = false;
-      selectedID = videos[0]?.id ?? null;
-      statusTitle.textContent = "已完成拖入导入";
-      statusDetail.textContent = `新增 ${count} 个 · 已存在 0 个 · 失败 0 个`;
+      const discoveredAnyVideo = scenario.newCount > 0 || scenario.existingCount > 0;
+      if (discoveredAnyVideo) {
+        emptyMode = false;
+        selectedID = videos[0]?.id ?? null;
+      }
+      if (scenario.newCount === 0 && scenario.existingCount === 0 && scenario.failedVideoCount === 0 && scenario.failedInputCount === 0) {
+        statusTitle.textContent = "未发现可导入的视频";
+        statusDetail.textContent = `已检查 ${scenario.folderCount} 个文件夹`;
+      } else {
+        statusTitle.textContent = "已完成拖入导入";
+        const parts = [`新增 ${scenario.newCount} 个`, `已存在 ${scenario.existingCount} 个`];
+        if (scenario.failedVideoCount > 0) parts.push(`视频失败 ${scenario.failedVideoCount} 个`);
+        if (scenario.failedInputCount > 0) parts.push(`无法读取 ${scenario.failedInputCount} 个项目`);
+        statusDetail.textContent = parts.join(" · ");
+      }
       progressTrack.hidden = true;
       cancelImport.hidden = true;
       undoRemoval.hidden = true;
       dismissStatus.hidden = false;
-      document.getElementById("showEmpty").classList.remove("active");
-      document.getElementById("showLibrary").classList.add("active");
-      if (selectedID) selectVideo(selectedID);
-      else renderVideos();
+      document.getElementById("showEmpty").classList.toggle("active", emptyMode);
+      document.getElementById("showLibrary").classList.toggle("active", !emptyMode);
+      if (emptyMode) {
+        document.getElementById("inspectorName").textContent = "未选择视频";
+        document.getElementById("inspectorPath").textContent = "导入视频后可在这里查看信息";
+        document.getElementById("inspectorDetails").hidden = true;
+        renderVideos();
+      } else if (selectedID) {
+        selectVideo(selectedID);
+      } else {
+        renderVideos();
+      }
     }
 
     function finishImport() {
@@ -1050,9 +1151,21 @@
     searchInput.addEventListener("input", renderVideos);
     document.getElementById("showLibrary").addEventListener("click", () => setMode("library"));
     document.getElementById("showEmpty").addEventListener("click", () => setMode("empty"));
-    document.getElementById("simulateValidDrop").addEventListener("click", () => {
+    document.getElementById("simulateFileDrop").addEventListener("click", () => {
       previewDropCursor("accepted");
-      setTimeout(() => beginDroppedImport(3), 1100);
+      setTimeout(() => beginDroppedImport(droppedImportScenarios.files), 1100);
+    });
+    document.getElementById("simulateFolderDrop").addEventListener("click", () => {
+      previewDropCursor("accepted");
+      setTimeout(() => beginDroppedImport(droppedImportScenarios.folders), 1100);
+    });
+    document.getElementById("simulateMixedDrop").addEventListener("click", () => {
+      previewDropCursor("accepted");
+      setTimeout(() => beginDroppedImport(droppedImportScenarios.mixed), 1100);
+    });
+    document.getElementById("simulateEmptyFolders").addEventListener("click", () => {
+      previewDropCursor("accepted");
+      setTimeout(() => beginDroppedImport(droppedImportScenarios.emptyFolders), 1100);
     });
     document.getElementById("simulateInvalidDrop").addEventListener("click", () => {
       previewDropCursor("rejected");
@@ -1071,12 +1184,12 @@
     });
     content.addEventListener("dragover", event => {
       event.preventDefault();
-      event.dataTransfer.dropEffect = videoFilesFrom(event.dataTransfer).length > 0 ? "copy" : "none";
+      event.dataTransfer.dropEffect = validDroppedItemsFrom(event.dataTransfer).length > 0 ? "copy" : "none";
     });
     content.addEventListener("drop", event => {
       event.preventDefault();
-      const files = videoFilesFrom(event.dataTransfer);
-      if (files.length > 0) beginDroppedImport(files.length);
+      const items = validDroppedItemsFrom(event.dataTransfer);
+      if (items.length > 0) beginDroppedImport(dynamicDropScenario(items));
     });
     document.addEventListener("click", event => {
       if (!fileMenu.contains(event.target) && event.target !== fileMenuButton) closeFileMenu();

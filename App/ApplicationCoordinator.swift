@@ -29,7 +29,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
 
     private lazy var libraryViewController = LibrarySplitViewController(
         onCancelImport: { [weak self] in self?.libraryAccessCoordinator?.cancelImport() },
-        onImportDroppedVideos: { [weak self] urls in self?.libraryAccessCoordinator?.importDroppedVideos(urls) },
+        onImportDroppedItems: { [weak self] urls in self?.libraryAccessCoordinator?.importDroppedItems(urls) },
         onRemoveVideos: { [weak self] videoIDs, completion in
             guard let coordinator = self?.libraryAccessCoordinator else {
                 completion(false)

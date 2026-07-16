@@ -1,5 +1,25 @@
 import Foundation
 
+enum VideoImportRootKind: Equatable, Sendable {
+    case videoFile
+    case directory
+}
+
+struct VideoImportRoot: Equatable, Sendable {
+    let url: URL
+    let kind: VideoImportRootKind
+}
+
+struct VideoImportPlan: Equatable, Sendable {
+    let acceptedRoots: [VideoImportRoot]
+    let roots: [VideoImportRoot]
+
+    var acceptedInputCount: Int { acceptedRoots.count }
+    var fileCount: Int { acceptedRoots.filter { $0.kind == .videoFile }.count }
+    var folderCount: Int { acceptedRoots.filter { $0.kind == .directory }.count }
+    var collapsedInputCount: Int { acceptedRoots.count - roots.count }
+}
+
 protocol VideoFileDiscovering: Sendable {
     func discoverVideoResult(at rootURL: URL) throws -> VideoDiscoveryResult
 }
@@ -22,6 +42,43 @@ struct VideoFileDiscovery: VideoFileDiscovering {
 
     static func isSupportedVideoURL(_ url: URL) -> Bool {
         supportedExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    static func importRoot(for url: URL) -> VideoImportRoot? {
+        let standardizedURL = url.standardizedFileURL
+        guard standardizedURL.isFileURL,
+              let values = try? standardizedURL.resourceValues(forKeys: [
+                  .isRegularFileKey,
+                  .isDirectoryKey,
+                  .isSymbolicLinkKey,
+                  .isPackageKey,
+              ]),
+              values.isSymbolicLink != true,
+              values.isPackage != true else { return nil }
+        if values.isDirectory == true {
+            return VideoImportRoot(url: standardizedURL, kind: .directory)
+        }
+        guard values.isRegularFile == true, isSupportedVideoURL(standardizedURL) else { return nil }
+        return VideoImportRoot(url: standardizedURL, kind: .videoFile)
+    }
+
+    static func importPlan(for urls: [URL]) -> VideoImportPlan {
+        let acceptedRoots = urls.compactMap(importRoot)
+        var seenPaths = Set<String>()
+        let uniqueRoots = acceptedRoots.filter { root in
+            seenPaths.insert(root.url.path).inserted
+        }
+        let roots = uniqueRoots.filter { candidate in
+            uniqueRoots.contains { possibleParent in
+                guard possibleParent.kind == .directory,
+                      possibleParent.url != candidate.url else { return false }
+                let parentComponents = possibleParent.url.pathComponents
+                let candidateComponents = candidate.url.pathComponents
+                return parentComponents.count < candidateComponents.count
+                    && candidateComponents.starts(with: parentComponents)
+            } == false
+        }
+        return VideoImportPlan(acceptedRoots: acceptedRoots, roots: roots)
     }
 
     func discoverVideoResult(at rootURL: URL) throws -> VideoDiscoveryResult {

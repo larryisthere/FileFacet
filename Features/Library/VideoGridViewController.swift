@@ -20,7 +20,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     private let thumbnailURL: (VideoRecord) -> URL?
     private let onAssignTagID: (String, [String]) -> Void
     private let onCancelImport: () -> Void
-    private let onImportDroppedVideos: ([URL]) -> Void
+    private let onImportDroppedItems: ([URL]) -> Void
     private let onRemoveVideos: ([String], @escaping (Bool) -> Void) -> Void
     private let onUndoLastMutation: () -> Void
     private let importStatusView = ImportStatusView()
@@ -31,7 +31,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
 
     private let emptyState = NSStackView()
     private let emptyTitleLabel = NSTextField(labelWithString: "从菜单栏导入视频")
-    private let emptyDetailLabel = NSTextField(wrappingLabelWithString: "选择“文件 > 导入视频…”或使用 ⇧⌘I，可继续从任意文件夹添加视频。")
+    private let emptyDetailLabel = NSTextField(wrappingLabelWithString: "选择“文件 > 导入视频…”或使用 ⇧⌘I，也可以直接拖入视频或文件夹。")
     init(
         onOpenVideo: @escaping (VideoRecord) -> Void,
         onRevealVideo: @escaping (VideoRecord) -> Void,
@@ -41,7 +41,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         thumbnailURL: @escaping (VideoRecord) -> URL?,
         onAssignTagID: @escaping (String, [String]) -> Void,
         onCancelImport: @escaping () -> Void,
-        onImportDroppedVideos: @escaping ([URL]) -> Void,
+        onImportDroppedItems: @escaping ([URL]) -> Void,
         onRemoveVideos: @escaping ([String], @escaping (Bool) -> Void) -> Void,
         onUndoLastMutation: @escaping () -> Void
     ) {
@@ -53,7 +53,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         self.thumbnailURL = thumbnailURL
         self.onAssignTagID = onAssignTagID
         self.onCancelImport = onCancelImport
-        self.onImportDroppedVideos = onImportDroppedVideos
+        self.onImportDroppedItems = onImportDroppedItems
         self.onRemoveVideos = onRemoveVideos
         self.onUndoLastMutation = onUndoLastMutation
         super.init(nibName: nil, bundle: nil)
@@ -66,8 +66,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
 
     override func loadView() {
         let container = VideoImportDropView()
-        container.onImportDroppedVideos = { [weak self] urls in
-            self?.onImportDroppedVideos(urls)
+        container.onImportDroppedItems = { [weak self] urls in
+            self?.onImportDroppedItems(urls)
         }
 
         let layout = NSCollectionViewFlowLayout()
@@ -163,11 +163,33 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         case let .importing(title, detail, progress):
             importStatusView.configureImporting(title: title, detail: detail, progress: progress)
             showImportStatus()
-        case let .completed(addedCount, existingCount, failedCount):
-            importStatusView.configureFinished(
-                title: "已完成视频导入",
-                detail: "新增 \(addedCount) 个 · 已存在 \(existingCount) 个 · 失败 \(failedCount) 个"
-            )
+        case let .completed(summary):
+            let foundNoVideos = summary.addedCount == 0
+                && summary.existingCount == 0
+                && summary.failedVideoCount == 0
+                && summary.failedInputCount == 0
+            if foundNoVideos {
+                let noun = summary.checkedFolderCount == summary.checkedInputCount ? "文件夹" : "项目"
+                importStatusView.configureFinished(
+                    title: "未发现可导入的视频",
+                    detail: "已检查 \(summary.checkedInputCount) 个\(noun)。"
+                )
+            } else {
+                var resultParts = [
+                    "新增 \(summary.addedCount) 个",
+                    "已存在 \(summary.existingCount) 个",
+                ]
+                if summary.failedVideoCount > 0 {
+                    resultParts.append("视频失败 \(summary.failedVideoCount) 个")
+                }
+                if summary.failedInputCount > 0 {
+                    resultParts.append("无法读取 \(summary.failedInputCount) 个项目")
+                }
+                importStatusView.configureFinished(
+                    title: summary.title,
+                    detail: resultParts.joined(separator: " · ")
+                )
+            }
             showImportStatus()
         case .cancelled:
             importStatusView.configureFinished(
@@ -328,7 +350,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     private func updateEmptyState() {
         emptyState.isHidden = videos.isEmpty == false
         emptyTitleLabel.stringValue = "从菜单栏导入视频"
-        emptyDetailLabel.stringValue = "选择“文件 > 导入视频…”、使用 ⇧⌘I，或直接将视频拖到这里。"
+        emptyDetailLabel.stringValue = "选择“文件 > 导入视频…”、使用 ⇧⌘I，或直接将视频、文件夹拖到这里。"
     }
 
     private func openVideo(at indexPath: IndexPath) {
@@ -650,7 +672,9 @@ private final class ImportStatusView: NSView {
 
 @MainActor
 private final class VideoImportDropView: NSView {
-    var onImportDroppedVideos: (([URL]) -> Void)?
+    var onImportDroppedItems: (([URL]) -> Void)?
+    private var cachedDraggingSequenceNumber: Int?
+    private var cachedImportPlan: VideoImportPlan?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -663,26 +687,43 @@ private final class VideoImportDropView: NSView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        dragOperation(for: droppedURLs(from: sender))
+        dragOperation(for: importPlan(from: sender))
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        dragOperation(for: droppedURLs(from: sender))
+        dragOperation(for: importPlan(from: sender))
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        clearCachedImportPlan()
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let videoURLs = supportedVideoURLs(from: droppedURLs(from: sender))
-        guard videoURLs.isEmpty == false else { return false }
-        onImportDroppedVideos?(videoURLs)
+        let plan = importPlan(from: sender)
+        clearCachedImportPlan()
+        guard plan.acceptedRoots.isEmpty == false else { return false }
+        onImportDroppedItems?(plan.acceptedRoots.map(\.url))
         return true
     }
 
-    private func dragOperation(for urls: [URL]) -> NSDragOperation {
-        supportedVideoURLs(from: urls).isEmpty ? [] : .copy
+    private func dragOperation(for plan: VideoImportPlan) -> NSDragOperation {
+        plan.acceptedRoots.isEmpty ? [] : .copy
     }
 
-    private func supportedVideoURLs(from urls: [URL]) -> [URL] {
-        urls.filter { $0.hasDirectoryPath == false && VideoFileDiscovery.isSupportedVideoURL($0) }
+    private func importPlan(from sender: NSDraggingInfo) -> VideoImportPlan {
+        let sequenceNumber = sender.draggingSequenceNumber
+        if cachedDraggingSequenceNumber == sequenceNumber, let cachedImportPlan {
+            return cachedImportPlan
+        }
+        let plan = VideoFileDiscovery.importPlan(for: droppedURLs(from: sender))
+        cachedDraggingSequenceNumber = sequenceNumber
+        cachedImportPlan = plan
+        return plan
+    }
+
+    private func clearCachedImportPlan() {
+        cachedDraggingSequenceNumber = nil
+        cachedImportPlan = nil
     }
 
     private func droppedURLs(from sender: NSDraggingInfo) -> [URL] {
