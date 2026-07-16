@@ -66,7 +66,8 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
                 completion: completion
             )
         },
-        loadTagStates: { [weak self] videoIDs, completion in self?.libraryAccessCoordinator?.tagAssignmentStates(videoIDs: videoIDs, completion: completion) }
+        loadTagStates: { [weak self] videoIDs, completion in self?.libraryAccessCoordinator?.tagAssignmentStates(videoIDs: videoIDs, completion: completion) },
+        settingsViewController: settingsViewController
     )
 
     private lazy var libraryAccessCoordinator: LibraryAccessCoordinator? = {
@@ -74,11 +75,16 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         return LibraryAccessCoordinator(database: databaseStore)
     }()
 
-    private lazy var settingsWindowController = SettingsWindowController(
-        preferences: preferencesStore,
-        setAuthenticationEnabled: { [weak self] enabled in
-            self?.setAuthenticationEnabled(enabled)
-        }
+    private lazy var settingsNavigation = SettingsNavigationModel()
+
+    private lazy var settingsViewController = NSHostingController(
+        rootView: SettingsView(
+            preferences: preferencesStore,
+            navigation: settingsNavigation,
+            setAuthenticationEnabled: { [weak self] enabled in
+                self?.setAuthenticationEnabled(enabled)
+            }
+        )
     )
 
     override init() {
@@ -242,7 +248,19 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     }
 
     @objc private func showSettings() {
-        settingsWindowController.present()
+        presentSettings(section: .privacy)
+    }
+
+    @objc private func showAbout() {
+        presentSettings(section: .about)
+    }
+
+    private func presentSettings(section: SettingsSection) {
+        guard lockCoordinator.state == .unlocked else { return }
+        settingsNavigation.selection = section
+        libraryViewController.showSettings()
+        windowController.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func importVideos() {
@@ -302,6 +320,9 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
                 && databaseStore != nil
                 && libraryViewController.canBeginCreatingRootTag
         }
+        if menuItem.action == #selector(showSettings) || menuItem.action == #selector(showAbout) {
+            return lockCoordinator.state == .unlocked
+        }
         return true
     }
 
@@ -320,11 +341,13 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
 
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu(title: AppConfiguration.displayName)
-        appMenu.addItem(
-            withTitle: "关于 \(AppConfiguration.displayName)",
-            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+        let aboutItem = NSMenuItem(
+            title: "关于 \(AppConfiguration.displayName)",
+            action: #selector(showAbout),
             keyEquivalent: ""
         )
+        aboutItem.target = self
+        appMenu.addItem(aboutItem)
         appMenu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ",")
         settingsItem.target = self

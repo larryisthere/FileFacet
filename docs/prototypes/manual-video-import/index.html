@@ -251,6 +251,12 @@
 
     .sidebar-scroll { flex: 1; overflow: auto; padding: 9px 8px; }
     .section-label { padding: 12px 9px 5px; color: var(--secondary); font-size: 11px; font-weight: 600; }
+    .tag-section-label { display: flex; align-items: center; gap: 4px; padding-right: 0; }
+    .tag-section-toggle { display: flex; min-width: 0; flex: 1; align-items: center; gap: 4px; padding: 0; color: inherit; background: transparent; font: inherit; text-align: left; }
+    .tag-section-toggle svg { width: 9px; height: 9px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .tag-section-add { display: inline-grid; width: 26px; height: 22px; place-items: center; border-radius: 5px; color: var(--secondary); background: transparent; }
+    .tag-section-add:hover { background: rgba(127,127,127,.14); }
+    .tag-section-add svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; }
 
     .nav-row {
       display: flex;
@@ -271,14 +277,88 @@
     .tag-dot.green { background: #30d158; }
     .tag-dot.blue { background: #64d2ff; }
 
-    .sidebar-footer {
-      display: flex;
-      height: 38px;
-      align-items: center;
-      gap: 2px;
-      padding: 4px 7px;
-      border-top: 1px solid var(--line);
+    .window.settings-mode .titlebar { grid-template-columns: 188px minmax(0, 1fr); }
+    .window.settings-mode .titlebar-center { grid-column: 2; }
+    .window.settings-mode .titlebar-left .library-sidebar-button,
+    .window.settings-mode .titlebar-right,
+    .window.settings-mode .sidebar,
+    .window.settings-mode .content,
+    .window.settings-mode .inspector { display: none; }
+
+    .settings-workspace {
+      grid-column: 1 / 4;
+      grid-row: 2;
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-template-columns: 188px minmax(0, 1fr);
+      background: var(--content);
     }
+
+    .settings-navigation {
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      padding: 16px 10px 12px;
+      border-right: 1px solid var(--line);
+      background: color-mix(in srgb, var(--inspector) 88%, var(--content) 12%);
+    }
+
+    .settings-navigation-title {
+      padding: 0 10px 12px;
+      color: var(--secondary);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .settings-nav-row {
+      display: flex;
+      width: 100%;
+      height: 32px;
+      align-items: center;
+      gap: 9px;
+      padding: 0 10px;
+      border-radius: 7px;
+      background: transparent;
+      text-align: left;
+    }
+
+    .settings-nav-row:hover { background: rgba(127,127,127,.1); }
+    .settings-nav-row.selected { background: var(--selection); }
+    .settings-nav-row svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
+    .settings-detail {
+      min-width: 0;
+      overflow: auto;
+      padding: 34px clamp(28px, 6vw, 72px) 52px;
+    }
+
+    .settings-panel { width: min(680px, 100%); }
+    .settings-panel h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.25px; }
+    .settings-panel-intro { margin: 7px 0 26px; color: var(--secondary); line-height: 1.5; }
+    .settings-group { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--content) 96%, var(--text) 4%); }
+    .settings-row { display: grid; min-height: 58px; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 22px; padding: 11px 15px; border-bottom: 1px solid var(--line); }
+    .settings-row:last-child { border-bottom: 0; }
+    .settings-row-title { font-weight: 550; }
+    .settings-row-note { margin-top: 3px; color: var(--secondary); font-size: 11px; line-height: 1.4; }
+
+    .switch { position: relative; width: 34px; height: 20px; padding: 0; border-radius: 99px; background: rgba(127,127,127,.35); transition: background .14s ease; }
+    .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: white; box-shadow: 0 1px 3px rgba(0,0,0,.28); transition: transform .14s ease; }
+    .switch.on { background: var(--accent); }
+    .switch.on::after { transform: translateX(14px); }
+
+    .settings-select { min-width: 122px; height: 28px; padding: 0 26px 0 9px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--text); background: var(--content); font: inherit; }
+    .settings-select:disabled { opacity: .48; }
+    .about-lockup { display: grid; grid-template-columns: 64px minmax(0,1fr); align-items: center; gap: 18px; margin: 4px 0 28px; }
+    .about-icon { display: grid; width: 64px; height: 64px; place-items: center; border-radius: 15px; color: white; background: linear-gradient(150deg, #4fb3ff, #0878d1); box-shadow: inset 0 0 0 1px rgba(255,255,255,.35), 0 6px 16px rgba(10,132,255,.2); }
+    .about-icon svg { width: 34px; height: 34px; fill: none; stroke: currentColor; stroke-width: 1.35; stroke-linecap: round; stroke-linejoin: round; }
+    .about-name { font-size: 18px; font-weight: 650; }
+    .about-version { margin-top: 4px; color: var(--secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .about-fact { grid-template-columns: 120px minmax(0,1fr); }
+    .about-fact .settings-row-title { color: var(--secondary); font-weight: 450; }
+
+    .settings-back-button { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px; border-radius: 6px; background: transparent; }
+    .settings-back-button:hover { background: rgba(127,127,127,.14); }
+    .settings-back-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
     .content {
       position: relative;
@@ -499,7 +579,16 @@
 </head>
 <body>
   <header class="app-menubar" aria-label="应用菜单栏">
-    <button class="menubar-button app-name">Video Tag Manager</button>
+    <div class="menu-item-wrap">
+      <button class="menubar-button app-name" id="appMenuButton" aria-haspopup="menu" aria-expanded="false">Video Tag Manager</button>
+      <div class="menu-popover" id="appMenu" role="menu" hidden>
+        <button class="menu-command" id="aboutMenuItem" role="menuitem"><span>关于 Video Tag Manager</span></button>
+        <div class="menu-divider"></div>
+        <button class="menu-command" id="settingsMenuItem" role="menuitem"><span>设置…</span><span class="menu-shortcut">⌘,</span></button>
+        <div class="menu-divider"></div>
+        <button class="menu-command" role="menuitem"><span>退出 Video Tag Manager</span><span class="menu-shortcut">⌘Q</span></button>
+      </div>
+    </div>
     <div class="menu-item-wrap">
       <button class="menubar-button" id="fileMenuButton" aria-haspopup="menu" aria-expanded="false">文件</button>
       <div class="menu-popover" id="fileMenu" role="menu" hidden>
@@ -518,11 +607,12 @@
       <header class="titlebar">
         <div class="titlebar-left">
           <div class="traffic" aria-hidden="true"><span class="red"></span><span class="yellow"></span><span class="green"></span></div>
-          <button class="icon-button" title="隐藏侧边栏" aria-label="隐藏侧边栏">
+          <button class="icon-button library-sidebar-button" title="隐藏侧边栏" aria-label="隐藏侧边栏">
             <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M8 4v16"></path></svg>
           </button>
         </div>
         <div class="titlebar-center">
+          <button class="settings-back-button" id="settingsBackButton" hidden><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"></path></svg><span>资料库</span></button>
           <span class="view-title" id="viewTitle">全部视频</span>
           <span class="view-count" id="viewCount">24 个视频</span>
           <span class="toolbar-spacer"></span>
@@ -541,7 +631,7 @@
       <aside class="sidebar">
         <div class="sidebar-scroll">
           <div class="section-label">资料库</div>
-          <div class="nav-row selected">
+          <div class="nav-row selected" id="allVideosNav">
             <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m8 9 3 3-3 3"></path><path d="M13 15h4"></path></svg>
             <span class="label">全部视频</span><span class="count" id="sidebarCount">24</span>
           </div>
@@ -554,16 +644,15 @@
             <span class="label">未添加标签</span><span class="count library-dependent" data-count="6">6</span>
           </div>
 
-          <div class="section-label">标签</div>
-          <div class="nav-row"><span class="tag-dot"></span><span class="label">人物</span><span class="count library-dependent" data-count="9">9</span></div>
-          <div class="nav-row indent"><span class="tag-dot"></span><span class="label">家人</span><span class="count library-dependent" data-count="5">5</span></div>
-          <div class="nav-row indent"><span class="tag-dot green"></span><span class="label">朋友</span><span class="count library-dependent" data-count="4">4</span></div>
-          <div class="nav-row"><span class="tag-dot blue"></span><span class="label">用途</span><span class="count library-dependent" data-count="13">13</span></div>
-          <div class="nav-row indent"><span class="tag-dot blue"></span><span class="label">工作素材</span><span class="count library-dependent" data-count="7">7</span></div>
-        </div>
-        <div class="sidebar-footer">
-          <button class="icon-button" title="添加标签" aria-label="添加标签"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg></button>
-          <button class="icon-button" title="修改标签" aria-label="修改标签"><svg viewBox="0 0 24 24"><path d="m4 16-.8 4 4-.8L18 8.4 14.6 5z"></path><path d="m13 6.6 3.4 3.4"></path></svg></button>
+          <div class="section-label tag-section-label">
+            <button class="tag-section-toggle" aria-label="收起标签"><span>标签</span><svg viewBox="0 0 12 12"><path d="m3 4.5 3 3 3-3"></path></svg></button>
+            <button class="tag-section-add" title="新建标签" aria-label="新建标签"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg></button>
+          </div>
+          <div class="nav-row tag-nav-row"><span class="tag-dot"></span><span class="label">人物</span><span class="count library-dependent" data-count="9">9</span></div>
+          <div class="nav-row indent tag-nav-row"><span class="tag-dot"></span><span class="label">家人</span><span class="count library-dependent" data-count="5">5</span></div>
+          <div class="nav-row indent tag-nav-row"><span class="tag-dot green"></span><span class="label">朋友</span><span class="count library-dependent" data-count="4">4</span></div>
+          <div class="nav-row tag-nav-row"><span class="tag-dot blue"></span><span class="label">用途</span><span class="count library-dependent" data-count="13">13</span></div>
+          <div class="nav-row indent tag-nav-row"><span class="tag-dot blue"></span><span class="label">工作素材</span><span class="count library-dependent" data-count="7">7</span></div>
         </div>
       </aside>
 
@@ -603,6 +692,50 @@
           </div>
         </div>
       </aside>
+
+      <section class="settings-workspace" id="settingsWorkspace" hidden aria-label="设置">
+        <nav class="settings-navigation" aria-label="设置分类">
+          <div class="settings-navigation-title">设置</div>
+          <button class="settings-nav-row selected" data-settings-panel="privacy">
+            <svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>
+            <span>隐私</span>
+          </button>
+          <button class="settings-nav-row" data-settings-panel="about">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v6"></path><path d="M12 7.5h.01"></path></svg>
+            <span>关于</span>
+          </button>
+        </nav>
+        <div class="settings-detail">
+          <section class="settings-panel" id="settingsPanelPrivacy">
+            <h1>隐私</h1>
+            <p class="settings-panel-intro">控制应用锁和离开电脑后的自动保护行为。</p>
+            <div class="settings-group">
+              <div class="settings-row">
+                <div><div class="settings-row-title">启用应用锁</div><div class="settings-row-note">使用 Touch ID 或 Mac 登录密码验证。</div></div>
+                <button class="switch" id="authenticationSwitch" role="switch" aria-checked="false" aria-label="启用应用锁"></button>
+              </div>
+              <div class="settings-row">
+                <div><div class="settings-row-title">闲置后锁定</div><div class="settings-row-note">达到所选时间后再次进入应用需要验证。</div></div>
+                <select class="settings-select" id="idleLockSelect" disabled aria-label="闲置后锁定">
+                  <option>立即</option><option selected>5 分钟</option><option>15 分钟</option><option>30 分钟</option><option>永不</option>
+                </select>
+              </div>
+            </div>
+          </section>
+          <section class="settings-panel" id="settingsPanelAbout" hidden>
+            <h1>关于</h1>
+            <p class="settings-panel-intro">查看当前安装版本和运行要求。</p>
+            <div class="about-lockup">
+              <div class="about-icon"><svg viewBox="0 0 24 24"><path d="M4 7.5h6l2 2h8v8.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2z"></path><path d="m9 12 2 2 4-4"></path></svg></div>
+              <div><div class="about-name">Video Tag Manager</div><div class="about-version">版本 1.0.0（构建 1）</div></div>
+            </div>
+            <div class="settings-group">
+              <div class="settings-row about-fact"><div class="settings-row-title">最低系统要求</div><div>macOS 14 Sonoma</div></div>
+              <div class="settings-row about-fact"><div class="settings-row-title">数据与视频</div><div>本地保存 · 原视频只读</div></div>
+            </div>
+          </section>
+        </div>
+      </section>
 
       <div class="context-menu" id="videoContextMenu" role="menu" hidden>
         <button class="menu-command" role="menuitem"><span>快速查看</span><span class="menu-shortcut">Space</span></button>
@@ -652,6 +785,7 @@
     <span class="demo-label">原型状态</span>
     <button class="demo-button active" id="showLibrary">已有视频</button>
     <button class="demo-button" id="showEmpty">空资料库</button>
+    <button class="demo-button" id="showSettingsDemo">主窗口设置</button>
     <span class="demo-separator"></span>
     <button class="demo-button" id="simulateFileDrop">拖入 3 个视频</button>
     <button class="demo-button" id="simulateFolderDrop">拖入 2 个文件夹</button>
@@ -685,6 +819,7 @@
     let importProgress = 0;
     let currentFolder = null;
     let emptyMode = false;
+    let settingsMode = false;
 
     const grid = document.getElementById("videoGrid");
     const emptyState = document.getElementById("emptyState");
@@ -701,10 +836,14 @@
     const removalBackdrop = document.getElementById("removalBackdrop");
     const videoContextMenu = document.getElementById("videoContextMenu");
     const searchInput = document.getElementById("searchInput");
+    const appMenuButton = document.getElementById("appMenuButton");
+    const appMenu = document.getElementById("appMenu");
     const fileMenuButton = document.getElementById("fileMenuButton");
     const fileMenu = document.getElementById("fileMenu");
     const content = document.querySelector(".content");
     const appWindow = document.querySelector(".window");
+    const settingsWorkspace = document.getElementById("settingsWorkspace");
+    const settingsBackButton = document.getElementById("settingsBackButton");
     const supportedVideoExtensions = new Set(["mov", "mp4", "m4v", "avi", "mkv", "webm"]);
     const droppedImportScenarios = {
       files: {
@@ -870,6 +1009,7 @@
 
     function toggleFileMenu() {
       const willOpen = fileMenu.hidden;
+      closeAppMenu();
       fileMenu.hidden = !willOpen;
       fileMenuButton.classList.toggle("open", willOpen);
       fileMenuButton.setAttribute("aria-expanded", String(willOpen));
@@ -879,6 +1019,61 @@
       fileMenu.hidden = true;
       fileMenuButton.classList.remove("open");
       fileMenuButton.setAttribute("aria-expanded", "false");
+    }
+
+    function toggleAppMenu() {
+      const willOpen = appMenu.hidden;
+      closeFileMenu();
+      appMenu.hidden = !willOpen;
+      appMenuButton.classList.toggle("open", willOpen);
+      appMenuButton.setAttribute("aria-expanded", String(willOpen));
+    }
+
+    function closeAppMenu() {
+      appMenu.hidden = true;
+      appMenuButton.classList.remove("open");
+      appMenuButton.setAttribute("aria-expanded", "false");
+    }
+
+    function showSettingsPanel(panel) {
+      document.querySelectorAll(".settings-nav-row").forEach(row => {
+        row.classList.toggle("selected", row.dataset.settingsPanel === panel);
+      });
+      document.getElementById("settingsPanelPrivacy").hidden = panel !== "privacy";
+      document.getElementById("settingsPanelAbout").hidden = panel !== "about";
+    }
+
+    function showSettings(panel = "privacy") {
+      settingsMode = true;
+      appWindow.classList.add("settings-mode");
+      settingsWorkspace.hidden = false;
+      settingsBackButton.hidden = false;
+      document.getElementById("viewTitle").textContent = "设置";
+      document.getElementById("viewCount").hidden = true;
+      searchInput.closest(".search").hidden = true;
+      document.getElementById("showLibrary").classList.remove("active");
+      document.getElementById("showEmpty").classList.remove("active");
+      document.getElementById("showSettingsDemo").classList.add("active");
+      showSettingsPanel(panel);
+      closeAppMenu();
+      closeFileMenu();
+      closeVideoContextMenu();
+    }
+
+    function showLibraryWorkspace() {
+      if (!settingsMode) return;
+      settingsMode = false;
+      appWindow.classList.remove("settings-mode");
+      settingsWorkspace.hidden = true;
+      settingsBackButton.hidden = true;
+      document.getElementById("viewTitle").textContent = "全部视频";
+      document.getElementById("viewCount").hidden = false;
+      searchInput.closest(".search").hidden = false;
+      document.getElementById("allVideosNav").classList.add("selected");
+      document.getElementById("showSettingsDemo").classList.remove("active");
+      document.getElementById("showEmpty").classList.toggle("active", emptyMode);
+      document.getElementById("showLibrary").classList.toggle("active", !emptyMode);
+      updateCounts();
     }
 
     function setStatusVisible(visible) {
@@ -1090,6 +1285,7 @@
     }
 
     function setMode(mode) {
+      showLibraryWorkspace();
       emptyMode = mode === "empty";
       document.getElementById("showEmpty").classList.toggle("active", emptyMode);
       document.getElementById("showLibrary").classList.toggle("active", !emptyMode);
@@ -1133,12 +1329,35 @@
       document.getElementById("showEmpty").classList.remove("active");
       document.getElementById("showLibrary").classList.add("active");
       closeFileMenu();
+      closeAppMenu();
       closeVideoContextMenu();
       cancelPendingRemoval();
+      showLibraryWorkspace();
       selectVideo(1);
     }
 
+    appMenuButton.addEventListener("click", toggleAppMenu);
     fileMenuButton.addEventListener("click", toggleFileMenu);
+    document.getElementById("settingsMenuItem").addEventListener("click", () => showSettings("privacy"));
+    document.getElementById("aboutMenuItem").addEventListener("click", () => showSettings("about"));
+    settingsBackButton.addEventListener("click", showLibraryWorkspace);
+    document.getElementById("allVideosNav").addEventListener("click", showLibraryWorkspace);
+    document.getElementById("showSettingsDemo").addEventListener("click", () => showSettings("privacy"));
+    document.querySelectorAll(".settings-nav-row").forEach(row => {
+      row.addEventListener("click", () => showSettingsPanel(row.dataset.settingsPanel));
+    });
+    document.getElementById("authenticationSwitch").addEventListener("click", event => {
+      const enabled = event.currentTarget.classList.toggle("on");
+      event.currentTarget.setAttribute("aria-checked", String(enabled));
+      document.getElementById("idleLockSelect").disabled = !enabled;
+    });
+    document.querySelector(".tag-section-toggle").addEventListener("click", event => {
+      const rows = [...document.querySelectorAll(".tag-nav-row")];
+      const willCollapse = rows.some(row => row.hidden === false);
+      rows.forEach(row => { row.hidden = willCollapse; });
+      event.currentTarget.setAttribute("aria-label", willCollapse ? "展开标签" : "收起标签");
+      event.currentTarget.querySelector("path").setAttribute("d", willCollapse ? "m4.5 3 3 3-3 3" : "m3 4.5 3 3 3-3");
+    });
     document.getElementById("importMenuItem").addEventListener("click", showPicker);
     document.getElementById("closePicker").addEventListener("click", hidePicker);
     document.getElementById("startImport").addEventListener("click", beginImport);
@@ -1192,11 +1411,17 @@
       if (items.length > 0) beginDroppedImport(dynamicDropScenario(items));
     });
     document.addEventListener("click", event => {
+      if (!appMenu.contains(event.target) && !appMenuButton.contains(event.target)) closeAppMenu();
       if (!fileMenu.contains(event.target) && event.target !== fileMenuButton) closeFileMenu();
       if (!videoContextMenu.contains(event.target)) closeVideoContextMenu();
     });
     document.addEventListener("keydown", event => {
       const isEditing = event.target.matches?.("input, textarea, [contenteditable='true']");
+      if (event.metaKey && event.key === ",") {
+        event.preventDefault();
+        showSettings("privacy");
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "i") {
         event.preventDefault();
         showPicker();
@@ -1213,6 +1438,8 @@
         return;
       }
       if (event.key === "Escape") {
+        if (settingsMode) showLibraryWorkspace();
+        closeAppMenu();
         closeFileMenu();
         hidePicker();
         closeVideoContextMenu();

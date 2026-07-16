@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate, NSToolbarItemValidation {
     private static let toolbarIdentifier = NSToolbar.Identifier("LibraryToolbar")
+    private static let settingsToolbarIdentifier = NSToolbar.Identifier("SettingsToolbar")
     private static let searchItemIdentifier = NSToolbarItem.Identifier("LibrarySearch")
     private static let zoomItemIdentifier = NSToolbarItem.Identifier("LibraryZoom")
     private static let zoomOutItemIdentifier = NSToolbarItem.Identifier("LibraryZoomOut")
@@ -11,12 +12,15 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private static let toggleSidebarItemIdentifier = NSToolbarItem.Identifier("ToggleLibrarySidebar")
     private static let toggleInspectorItemIdentifier = NSToolbarItem.Identifier("ToggleLibraryInspector")
     private static let contextTitleItemIdentifier = NSToolbarItem.Identifier("LibraryContextTitle")
+    private static let settingsBackItemIdentifier = NSToolbarItem.Identifier("SettingsBack")
+    private static let settingsTitleItemIdentifier = NSToolbarItem.Identifier("SettingsTitle")
     private static let splitViewAutosaveName = "MainLibrarySplitView"
     private static let splitViewAutosaveDefaultsKey = "NSSplitView Subview Frames \(splitViewAutosaveName)"
 
     private let videoGridViewController: VideoGridViewController
     private let inspectorViewController: InspectorViewController
     private let sidebarViewController: SidebarViewController
+    private let settingsViewController: NSViewController
     private let onSearchChanged: (String) -> Void
     private var contextTitle = "全部视频"
     private var contextTagID: String?
@@ -35,10 +39,22 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private weak var sidebarToggleButton: NSButton?
     private weak var inspectorToggleButton: NSButton?
     private weak var contextTitleView: ToolbarTitleView?
-    private weak var sidebarSplitViewItem: NSSplitViewItem?
-    private weak var inspectorSplitViewItem: NSSplitViewItem?
+    private var sidebarSplitViewItem: NSSplitViewItem?
+    private var gridSplitViewItem: NSSplitViewItem?
+    private var inspectorSplitViewItem: NSSplitViewItem?
+    private var settingsSplitViewItem: NSSplitViewItem?
+    private var isShowingSettings = false
+    private var sidebarWasCollapsedBeforeSettings = false
+    private var inspectorWasCollapsedBeforeSettings = false
     private lazy var libraryToolbar: NSToolbar = {
         let toolbar = NSToolbar(identifier: Self.toolbarIdentifier)
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        return toolbar
+    }()
+    private lazy var settingsToolbar: NSToolbar = {
+        let toolbar = NSToolbar(identifier: Self.settingsToolbarIdentifier)
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false
@@ -67,9 +83,11 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         onAssignVideos: @escaping (TagRecord, [String]) -> Void,
         onAssignTagID: @escaping (String, [String]) -> Void,
         onApplyTagDraft: @escaping ([TagCreationDraft], [String: Bool], [String], @escaping (Bool) -> Void) -> Void,
-        loadTagStates: @escaping ([String], @escaping ([String: TagAssignmentState]) -> Void) -> Void
+        loadTagStates: @escaping ([String], @escaping ([String: TagAssignmentState]) -> Void) -> Void,
+        settingsViewController: NSViewController
     ) {
         self.onSearchChanged = onSearchChanged
+        self.settingsViewController = settingsViewController
         let inspector = InspectorViewController(
             onApplyTagDraft: onApplyTagDraft,
             loadTagStates: loadTagStates,
@@ -149,6 +167,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
 
         let gridItem = NSSplitViewItem(viewController: videoGridViewController)
         gridItem.minimumThickness = 420
+        gridSplitViewItem = gridItem
 
         let inspectorItem = NSSplitViewItem(inspectorWithViewController: inspectorViewController)
         inspectorItem.minimumThickness = 240
@@ -157,6 +176,11 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         inspectorItem.preferredThicknessFraction = 0.24
         inspectorItem.isCollapsed = false
         inspectorSplitViewItem = inspectorItem
+
+        let settingsItem = NSSplitViewItem(viewController: settingsViewController)
+        settingsItem.minimumThickness = 420
+        settingsItem.canCollapse = false
+        settingsSplitViewItem = settingsItem
 
         addSplitViewItem(sidebarItem)
         addSplitViewItem(gridItem)
@@ -168,7 +192,47 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     }
 
     func makeToolbar() -> NSToolbar {
-        libraryToolbar
+        isShowingSettings ? settingsToolbar : libraryToolbar
+    }
+
+    func showSettings() {
+        loadViewIfNeeded()
+        guard isShowingSettings == false,
+              let sidebarSplitViewItem,
+              let gridSplitViewItem,
+              let inspectorSplitViewItem,
+              let settingsSplitViewItem else { return }
+        isShowingSettings = true
+        sidebarWasCollapsedBeforeSettings = sidebarSplitViewItem.isCollapsed
+        inspectorWasCollapsedBeforeSettings = inspectorSplitViewItem.isCollapsed
+        removeSplitViewItem(inspectorSplitViewItem)
+        removeSplitViewItem(gridSplitViewItem)
+        removeSplitViewItem(sidebarSplitViewItem)
+        addSplitViewItem(settingsSplitViewItem)
+        view.window?.toolbar = settingsToolbar
+        view.window?.title = "设置"
+        view.window?.subtitle = ""
+        updateSplitViewToggleState()
+    }
+
+    private func showLibrary() {
+        guard isShowingSettings,
+              let sidebarSplitViewItem,
+              let gridSplitViewItem,
+              let inspectorSplitViewItem,
+              let settingsSplitViewItem else { return }
+        isShowingSettings = false
+        removeSplitViewItem(settingsSplitViewItem)
+        addSplitViewItem(sidebarSplitViewItem)
+        addSplitViewItem(gridSplitViewItem)
+        addSplitViewItem(inspectorSplitViewItem)
+        sidebarSplitViewItem.isCollapsed = sidebarWasCollapsedBeforeSettings
+        inspectorSplitViewItem.isCollapsed = inspectorWasCollapsedBeforeSettings
+        view.window?.toolbar = libraryToolbar
+        updateWindowTitle()
+        DispatchQueue.main.async { [weak self] in
+            self?.updateSplitViewToggleState()
+        }
     }
 
     override func viewDidLayout() {
@@ -306,7 +370,14 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [
+        if toolbar.identifier == Self.settingsToolbarIdentifier {
+            return [
+                Self.settingsBackItemIdentifier,
+                Self.settingsTitleItemIdentifier,
+                .flexibleSpace,
+            ]
+        }
+        return [
             Self.toggleSidebarItemIdentifier,
             .sidebarTrackingSeparator,
             Self.contextTitleItemIdentifier,
@@ -321,7 +392,14 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [
+        if toolbar.identifier == Self.settingsToolbarIdentifier {
+            return [
+                Self.settingsBackItemIdentifier,
+                Self.settingsTitleItemIdentifier,
+                .flexibleSpace,
+            ]
+        }
+        return [
             Self.toggleSidebarItemIdentifier,
             .sidebarTrackingSeparator,
             Self.contextTitleItemIdentifier,
@@ -350,6 +428,10 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
                 isOn: sidebarSplitViewItem?.isCollapsed == false,
                 buttonStore: { [weak self] button in self?.sidebarToggleButton = button }
             )
+        case Self.settingsBackItemIdentifier:
+            return makeSettingsBackToolbarItem(identifier: itemIdentifier)
+        case Self.settingsTitleItemIdentifier:
+            return makeSettingsTitleToolbarItem(identifier: itemIdentifier)
         case Self.toggleInspectorItemIdentifier:
             return makeSplitViewToggleToolbarItem(
                 identifier: itemIdentifier,
@@ -464,6 +546,45 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         return item
     }
 
+    private func makeSettingsBackToolbarItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
+        let image = NSImage(
+            systemSymbolName: "chevron.left",
+            accessibilityDescription: "返回资料库"
+        ) ?? NSImage()
+        let button = NSButton(
+            title: "资料库",
+            image: image,
+            target: self,
+            action: #selector(returnToLibraryFromSettings(_:))
+        )
+        button.imagePosition = .imageLeading
+        button.bezelStyle = .toolbar
+        button.toolTip = "返回资料库"
+        button.setAccessibilityLabel("返回资料库")
+
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = "返回资料库"
+        item.paletteLabel = "返回资料库"
+        item.view = button
+        return item
+    }
+
+    private func makeSettingsTitleToolbarItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
+        let label = NSTextField(labelWithString: "设置")
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = "设置"
+        item.paletteLabel = "设置"
+        item.isBordered = false
+        if #available(macOS 26.0, *) {
+            item.style = .plain
+        }
+        item.view = label
+        return item
+    }
+
     private func makeSplitViewToggleToolbarItem(
         identifier: NSToolbarItem.Identifier,
         symbolName: String,
@@ -567,6 +688,10 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     @objc private func toggleSidebarFromToolbar(_ sender: NSButton) {
         guard let sidebarSplitViewItem else { return }
         sidebarSplitViewItem.animator().isCollapsed = sender.state == .off
+    }
+
+    @objc private func returnToLibraryFromSettings(_ sender: Any?) {
+        showLibrary()
     }
 
     @objc private func toggleInspectorFromToolbar(_ sender: NSButton) {
