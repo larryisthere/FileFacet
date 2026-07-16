@@ -578,6 +578,9 @@ private final class ToolbarTitleView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
 
+        let textContainer = NSView()
+        textContainer.translatesAutoresizingMaskIntoConstraints = false
+
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
@@ -590,16 +593,22 @@ private final class ToolbarTitleView: NSView {
         subtitleLabel.lineBreakMode = .byTruncatingTail
         subtitleLabel.maximumNumberOfLines = 1
 
-        addSubview(titleLabel)
-        addSubview(subtitleLabel)
+        addSubview(textContainer)
+        textContainer.addSubview(titleLabel)
+        textContainer.addSubview(subtitleLabel)
         NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
-            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
-            titleLabel.topAnchor.constraint(equalTo: topAnchor),
-            subtitleLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
-            subtitleLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
+            textContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            textContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            textContainer.centerYAnchor.constraint(equalTo: centerYAnchor),
+            textContainer.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
+            textContainer.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: textContainer.leadingAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
+            titleLabel.topAnchor.constraint(equalTo: textContainer.topAnchor),
+            subtitleLabel.leadingAnchor.constraint(equalTo: textContainer.leadingAnchor),
+            subtitleLabel.trailingAnchor.constraint(equalTo: textContainer.trailingAnchor),
             subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: -1),
-            subtitleLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+            subtitleLabel.bottomAnchor.constraint(equalTo: textContainer.bottomAnchor),
         ])
     }
 
