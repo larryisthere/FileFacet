@@ -2,7 +2,7 @@ import Foundation
 
 enum LibraryImportState: Equatable, Sendable {
     case idle
-    case importing(title: String, detail: String)
+    case importing(title: String, detail: String, progress: Double?)
     case completed(addedCount: Int, existingCount: Int, failedCount: Int)
     case cancelled
     case failed(message: String)
@@ -12,6 +12,12 @@ private struct PendingImportSource {
     let id: String
     let url: URL
     let bookmark: Data
+    let isNew: Bool
+}
+
+private enum LastUndoMutation {
+    case tag
+    case videoRemoval(VideoRemovalSnapshot)
 }
 
 @MainActor
@@ -22,13 +28,16 @@ final class LibraryAccessCoordinator {
     private let mediaService: MediaProcessingService?
     private var resources: [String: SecurityScopedResource] = [:]
     private var sourceURLs: [String: URL] = [:]
-    private var watchers: [String: FSEventsWatcher] = [:]
+    private var sourceBookmarks: [String: Data] = [:]
+    private var watchersByPath: [String: FSEventsWatcher] = [:]
+    private var sourceWatchPaths: [String: String] = [:]
     private var resolvedVideoURLs: [String: URL] = [:]
     private var importTask: Task<Void, Never>?
     private var importRevision = 0
     private var maintenanceTask: Task<Void, Never>?
-    private var maintenanceDebounceTasks: [String: Task<Void, Never>] = [:]
+    private var maintenanceDebounceTask: Task<Void, Never>?
     private var mediaTask: Task<Void, Never>?
+    private var artifactCleanupTask: Task<Void, Never>?
     private var pendingMediaVideos: [String: VideoRecord] = [:]
     private var queryTask: Task<Void, Never>?
     private var tagMutationTask: Task<Void, Never>?
@@ -46,11 +55,21 @@ final class LibraryAccessCoordinator {
     var onTagAssignmentsChanged: (() -> Void)?
     var onError: ((String) -> Void)?
     var onOperationError: ((String) -> Void)?
+    var onVideoRemovalUndoDiscarded: (() -> Void)?
     private let undoManager = UndoManager()
+    private var lastUndoMutation: LastUndoMutation?
 
-    var canUndoLastTagMutation: Bool {
+    var canUndoLastMutation: Bool {
         pendingTagMutationCount == 0 && undoManager.canUndo
     }
+
+    var canUndoVideoRemoval: Bool {
+        guard canUndoLastMutation else { return false }
+        if case .videoRemoval = lastUndoMutation { return true }
+        return false
+    }
+
+    var onVideoRemovalRestored: (([String]) -> Void)?
 
     init(
         database: DatabaseStore,
@@ -66,6 +85,25 @@ final class LibraryAccessCoordinator {
     func restoreLibrary() {
         Task {
             do {
+                let previousCleanupTask = artifactCleanupTask
+                let cleanupTask = Task { [weak self] in
+                    _ = await previousCleanupTask?.value
+                    guard let self else { return }
+                    do {
+                        let removedSourceIDs = try await database.removeUnreferencedSourceAuthorizations()
+                        for sourceID in removedSourceIDs { disconnectSource(sourceID) }
+                        if let mediaService {
+                            let referencedThumbnailIDs = try await database.fetchReferencedThumbnailIDs()
+                            try await mediaService.removeUnreferencedThumbnails(retaining: referencedThumbnailIDs)
+                        }
+                    } catch {
+                        AppLogger.library.error(
+                            "Startup artifact cleanup failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                        )
+                    }
+                }
+                artifactCleanupTask = cleanupTask
+                await cleanupTask.value
                 let sources = try await database.fetchSourceAuthorizations()
                 for source in sources {
                     do {
@@ -76,13 +114,16 @@ final class LibraryAccessCoordinator {
                             relativeTo: nil,
                             bookmarkDataIsStale: &isStale
                         )
+                        sourceBookmarks[source.id] = source.rootBookmarkData
                         try connect(sourceID: source.id, url: url)
                         if isStale {
+                            let refreshedBookmark = try makeBookmark(for: url)
+                            sourceBookmarks[source.id] = refreshedBookmark
                             try await database.saveSourceAuthorization(SourceAuthorizationRecord(
                                 id: source.id,
                                 libraryID: source.libraryID,
                                 displayName: url.lastPathComponent,
-                                rootBookmarkData: try makeBookmark(for: url),
+                                rootBookmarkData: refreshedBookmark,
                                 createdAt: source.createdAt
                             ))
                         }
@@ -100,7 +141,7 @@ final class LibraryAccessCoordinator {
                 try await refreshSidebarFilterCounts()
                 onVideosChanged?(existingVideos)
                 startMediaProcessing(videos: existingVideos)
-                for sourceID in sourceURLs.keys { scheduleMaintenance(sourceID: sourceID) }
+                if sourceURLs.isEmpty == false { scheduleMaintenance() }
             } catch {
                 AppLogger.library.error("Library restore failed with category: \(String(describing: type(of: error)), privacy: .public)")
                 onError?("无法读取现有视频索引，请重新启动应用。")
@@ -114,7 +155,7 @@ final class LibraryAccessCoordinator {
         startImport(
             urls: [url],
             title: "正在导入“\(url.lastPathComponent)”",
-            detail: "正在发现视频…"
+            initialDetail: "正在发现视频…"
         )
     }
 
@@ -137,58 +178,69 @@ final class LibraryAccessCoordinator {
         startImport(
             urls: videoURLs,
             title: "正在导入拖入的 \(videoURLs.count) 个视频",
-            detail: "正在核对已导入的视频…"
+            initialDetail: "正在核对已导入的视频…"
         )
     }
 
-    private func startImport(urls: [URL], title: String, detail: String) {
+    private func startImport(urls: [URL], title: String, initialDetail: String) {
         let standardizedURLs = urls.map(\.standardizedFileURL)
 
-        do {
-            let sources = try standardizedURLs.map { url in
-                let existingSourceID = sourceURLs.first {
-                    $0.value.standardizedFileURL == url
-                }?.key
-                let sourceID = existingSourceID ?? UUID().uuidString
-                let bookmark = try makeBookmark(for: url)
-                try connect(sourceID: sourceID, url: url)
-                return PendingImportSource(id: sourceID, url: url, bookmark: bookmark)
+        var preparationFailedCount = 0
+        var sources: [PendingImportSource] = []
+        for url in standardizedURLs {
+            do {
+                sources.append(try prepareImportSource(for: url))
+            } catch {
+                preparationFailedCount += 1
             }
-            guard let initialSource = sources.first else { return }
-            importTask?.cancel()
-            importRevision += 1
-            let revision = importRevision
-            onImportStateChanged?(.importing(title: title, detail: detail))
-            let discovery = self.discovery
-            let database = self.database
-            importTask = Task { [weak self] in
-                guard let self else { return }
-                defer {
-                    if importRevision == revision { importTask = nil }
+        }
+        guard let initialSource = sources.first else {
+            onImportStateChanged?(.failed(message: "无法获得所选内容的持续访问权限。"))
+            return
+        }
+        importTask?.cancel()
+        importRevision += 1
+        let revision = importRevision
+        let previousMutationTask = tagMutationTask
+        let previousCleanupTask = artifactCleanupTask
+        onImportStateChanged?(.importing(title: title, detail: initialDetail, progress: nil))
+        let discovery = self.discovery
+        let database = self.database
+        importTask = Task { [weak self] in
+            _ = await previousMutationTask?.value
+            _ = await previousCleanupTask?.value
+            guard let self else { return }
+            var persistedSourceIDs = Set<String>()
+            defer {
+                if importRevision == revision { importTask = nil }
+            }
+            do {
+                if try await database.fetchPrimaryLibrary() == nil {
+                    try await database.saveLibrary(LibraryRecord(
+                        id: LibraryRecord.primaryID,
+                        name: "全部视频",
+                        rootBookmarkData: initialSource.bookmark,
+                        createdAt: Date(),
+                        lastScanAt: nil
+                    ))
                 }
-                do {
-                    if try await database.fetchPrimaryLibrary() == nil {
-                        try await database.saveLibrary(LibraryRecord(
-                            id: LibraryRecord.primaryID,
-                            name: "全部视频",
-                            rootBookmarkData: initialSource.bookmark,
-                            createdAt: Date(),
-                            lastScanAt: nil
-                        ))
-                    }
-                    var addedCount = 0
-                    var existingCount = 0
-                    var failedCount = 0
-                    var importedVideos: [VideoRecord] = []
-                    for source in sources {
-                        try Task.checkCancellation()
-                        try await database.saveSourceAuthorization(SourceAuthorizationRecord(
-                            id: source.id,
-                            libraryID: LibraryRecord.primaryID,
-                            displayName: source.url.lastPathComponent,
-                            rootBookmarkData: source.bookmark,
-                            createdAt: Date()
-                        ))
+                var addedCount = 0
+                var existingCount = 0
+                var failedCount = preparationFailedCount
+                var importedVideos: [VideoRecord] = []
+                for (index, source) in sources.enumerated() {
+                    try Task.checkCancellation()
+                    let sourceProgress = Double(index) / Double(sources.count)
+                    onImportStateChanged?(.importing(
+                        title: title,
+                        detail: sources.count == 1
+                            ? "正在发现视频…"
+                            : "正在核对第 \(index + 1) / \(sources.count) 个视频…",
+                        progress: sources.count == 1 ? nil : sourceProgress
+                    ))
+                    do {
+                        try connect(sourceID: source.id, url: source.url)
+                        sourceBookmarks[source.id] = source.bookmark
                         let sourceURL = source.url
                         let discoveryTask = Task.detached(priority: .utility) {
                             try discovery.discoverVideoResult(at: sourceURL)
@@ -199,6 +251,19 @@ final class LibraryAccessCoordinator {
                             discoveryTask.cancel()
                         }
                         try Task.checkCancellation()
+                        onImportStateChanged?(.importing(
+                            title: title,
+                            detail: "正在保存视频…",
+                            progress: (Double(index) + 0.5) / Double(sources.count)
+                        ))
+                        try await database.saveSourceAuthorization(SourceAuthorizationRecord(
+                            id: source.id,
+                            libraryID: LibraryRecord.primaryID,
+                            displayName: source.url.lastPathComponent,
+                            rootBookmarkData: source.bookmark,
+                            createdAt: Date()
+                        ))
+                        persistedSourceIDs.insert(source.id)
                         let result = try await database.importVideos(
                             sourceID: source.id,
                             discoveredVideos: discoveryResult.videos,
@@ -208,34 +273,57 @@ final class LibraryAccessCoordinator {
                         existingCount += result.existingCount
                         failedCount += result.failedCount
                         importedVideos.append(contentsOf: result.importedVideos)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        failedCount += 1
+                        if source.isNew, persistedSourceIDs.contains(source.id) == false {
+                            disconnectSource(source.id)
+                        }
+                        AppLogger.library.error(
+                            "Import item failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                        )
                     }
-                    try await refreshTags(libraryID: LibraryRecord.primaryID)
-                    try await refreshResolvedVideoURLs()
-                    try await refreshVisibleVideosNow()
-                    tagStateRevision += 1
-                    undoManager.removeAllActions()
-                    startMediaProcessing(videos: importedVideos)
-                    guard importRevision == revision else { return }
-                    onImportStateChanged?(.completed(
-                        addedCount: addedCount,
-                        existingCount: existingCount,
-                        failedCount: failedCount
-                    ))
-                    AppLogger.library.notice("Manual import completed with \(addedCount, privacy: .public) new videos")
-                } catch is CancellationError {
-                    await refreshAfterInterruptedImportInFreshTask()
-                    guard importRevision == revision else { return }
-                    onImportStateChanged?(.cancelled)
-                } catch {
-                    AppLogger.library.error("Manual import failed with category: \(String(describing: type(of: error)), privacy: .public)")
-                    await refreshAfterInterruptedImportInFreshTask()
-                    guard importRevision == revision else { return }
-                    onImportStateChanged?(.failed(message: "导入未完成；已经完整加入的视频会保留，请重试剩余内容。"))
                 }
+                onImportStateChanged?(.importing(
+                    title: title,
+                    detail: "正在更新资料库…",
+                    progress: 0.98
+                ))
+                try await refreshTags(libraryID: LibraryRecord.primaryID)
+                try await refreshResolvedVideoURLs()
+                try await refreshVisibleVideosNow()
+                tagStateRevision += 1
+                invalidateUndoHistoryUnlessVideoRemoval()
+                startMediaProcessing(videos: importedVideos)
+                guard importRevision == revision else { return }
+                onImportStateChanged?(.completed(
+                    addedCount: addedCount,
+                    existingCount: existingCount,
+                    failedCount: failedCount
+                ))
+                AppLogger.library.notice("Manual import completed with \(addedCount, privacy: .public) new videos")
+            } catch is CancellationError {
+                disconnectUnpersistedNewSources(sources, persistedSourceIDs: persistedSourceIDs)
+                await refreshAfterInterruptedImportInFreshTask()
+                guard importRevision == revision else { return }
+                onImportStateChanged?(.cancelled)
+            } catch {
+                disconnectUnpersistedNewSources(sources, persistedSourceIDs: persistedSourceIDs)
+                AppLogger.library.error("Manual import failed with category: \(String(describing: type(of: error)), privacy: .public)")
+                await refreshAfterInterruptedImportInFreshTask()
+                guard importRevision == revision else { return }
+                onImportStateChanged?(.failed(message: "导入未完成；已经完整加入的视频会保留，请重试剩余内容。"))
             }
-        } catch {
-            AppLogger.library.error("Import authorization failed with category: \(String(describing: type(of: error)), privacy: .public)")
-            onImportStateChanged?(.failed(message: "无法获得所选内容的持续访问权限。"))
+        }
+    }
+
+    private func disconnectUnpersistedNewSources(
+        _ sources: [PendingImportSource],
+        persistedSourceIDs: Set<String>
+    ) {
+        for source in sources where source.isNew && persistedSourceIDs.contains(source.id) == false {
+            disconnectSource(source.id)
         }
     }
 
@@ -256,7 +344,7 @@ final class LibraryAccessCoordinator {
             try await refreshResolvedVideoURLs()
             try await refreshVisibleVideosNow()
             tagStateRevision += 1
-            undoManager.removeAllActions()
+            invalidateUndoHistoryUnlessVideoRemoval()
             let videos = try await database.fetchVideos(libraryID: LibraryRecord.primaryID)
             startMediaProcessing(videos: videos)
         } catch {
@@ -362,6 +450,48 @@ final class LibraryAccessCoordinator {
         setTagAssignment(tag, videoIDs: videoIDs, enabled: enabled)
     }
 
+    func removeVideos(ids: [String], completion: ((Bool) -> Void)? = nil) {
+        let videoIDs = Array(Set(ids))
+        guard videoIDs.isEmpty == false else {
+            completion?(false)
+            return
+        }
+        let previousTask = tagMutationTask
+        let previousImportTask = importTask
+        pendingTagMutationCount += 1
+        tagMutationTask = Task { [weak self] in
+            _ = await previousTask?.value
+            _ = await previousImportTask?.value
+            guard let self else { return }
+            defer { pendingTagMutationCount -= 1 }
+            do {
+                let snapshot = try await database.removeVideos(ids: videoIDs)
+                guard snapshot.videos.isEmpty == false else {
+                    completion?(false)
+                    return
+                }
+                for videoID in videoIDs { pendingMediaVideos.removeValue(forKey: videoID) }
+                registerVideoRemovalUndo(snapshot)
+                do {
+                    try await refreshResolvedVideoURLs()
+                    try await refreshTags(libraryID: LibraryRecord.primaryID)
+                    try await refreshVisibleVideosNow()
+                    onTagAssignmentsChanged?()
+                } catch {
+                    AppLogger.database.error(
+                        "Video removal refresh failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                    )
+                    onOperationError?("视频已从资料库移出，但列表未能刷新；重新启动应用后会显示最新结果。")
+                }
+                completion?(true)
+            } catch {
+                completion?(false)
+                AppLogger.database.error("Video removal failed with category: \(String(describing: type(of: error)), privacy: .public)")
+                onOperationError?("视频未能从资料库移出，请重试。")
+            }
+        }
+    }
+
     func tagAssignmentStates(videoIDs: [String], completion: @escaping ([String: TagAssignmentState]) -> Void) {
         let tags = self.tags
         Task {
@@ -370,25 +500,139 @@ final class LibraryAccessCoordinator {
         }
     }
 
-    func undoLastTagMutation() {
-        guard canUndoLastTagMutation else { return }
+    func undoLastMutation() {
+        guard canUndoLastMutation else { return }
         undoManager.undo()
+    }
+
+    private func restoreRemovedVideos(_ snapshot: VideoRemovalSnapshot) {
+        let previousTask = tagMutationTask
+        pendingTagMutationCount += 1
+        tagMutationTask = Task { [weak self] in
+            _ = await previousTask?.value
+            guard let self else { return }
+            defer { pendingTagMutationCount -= 1 }
+            do {
+                let restoredVideoIDs = try await database.restoreVideos(snapshot)
+                do {
+                    try await refreshResolvedVideoURLs()
+                    try await refreshTags(libraryID: LibraryRecord.primaryID)
+                    try await refreshVisibleVideosNow()
+                    onTagAssignmentsChanged?()
+                } catch {
+                    AppLogger.database.error(
+                        "Video removal undo refresh failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                    )
+                    onOperationError?("视频已经恢复，但列表未能刷新；重新启动应用后会显示最新结果。")
+                }
+                undoManager.removeAllActions()
+                lastUndoMutation = nil
+                onVideoRemovalRestored?(restoredVideoIDs)
+            } catch {
+                undoManager.removeAllActions()
+                installVideoRemovalUndo(snapshot)
+                AppLogger.database.error("Video removal undo failed with category: \(String(describing: type(of: error)), privacy: .public)")
+                onOperationError?("撤回移出未完成，请重试。")
+            }
+        }
+    }
+
+    private func registerVideoRemovalUndo(_ snapshot: VideoRemovalSnapshot) {
+        invalidateUndoHistory()
+        installVideoRemovalUndo(snapshot)
+    }
+
+    private func installVideoRemovalUndo(_ snapshot: VideoRemovalSnapshot) {
+        lastUndoMutation = .videoRemoval(snapshot)
+        undoManager.registerUndo(withTarget: self) { target in
+            target.restoreRemovedVideos(snapshot)
+        }
+        undoManager.setActionName(snapshot.videos.count > 1 ? "移出多个视频" : "移出视频")
+    }
+
+    private func invalidateUndoHistoryUnlessVideoRemoval() {
+        if case .videoRemoval = lastUndoMutation { return }
+        invalidateUndoHistory()
+    }
+
+    private func invalidateUndoHistory() {
+        let discardedRemoval: VideoRemovalSnapshot?
+        if case let .videoRemoval(snapshot) = lastUndoMutation {
+            discardedRemoval = snapshot
+        } else {
+            discardedRemoval = nil
+        }
+        undoManager.removeAllActions()
+        lastUndoMutation = nil
+        if let discardedRemoval {
+            onVideoRemovalUndoDiscarded?()
+            cleanupDiscardedRemoval(discardedRemoval)
+        }
+    }
+
+    private func cleanupDiscardedRemoval(_ snapshot: VideoRemovalSnapshot) {
+        let database = self.database
+        let mediaService = self.mediaService
+        let previousCleanupTask = artifactCleanupTask
+        artifactCleanupTask = Task { [weak self] in
+            _ = await previousCleanupTask?.value
+            do {
+                var removableThumbnailIDs: [String] = []
+                for video in snapshot.videos {
+                    if try await database.fetchVideo(id: video.id) == nil,
+                       let thumbnailID = video.thumbnailID {
+                        removableThumbnailIDs.append(thumbnailID)
+                    }
+                }
+                try await mediaService?.removeThumbnails(identifiers: removableThumbnailIDs)
+                let sourceIDs = snapshot.locations.map(\.sourceID)
+                let removedSourceIDs = try await database.removeUnreferencedSourceAuthorizations(
+                    candidateIDs: sourceIDs
+                )
+                for sourceID in removedSourceIDs { self?.disconnectSource(sourceID) }
+            } catch {
+                AppLogger.library.error(
+                    "Removed video cleanup failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                )
+            }
+        }
     }
 
     private func connect(sourceID: String, url: URL) throws {
         if sourceURLs[sourceID]?.standardizedFileURL == url.standardizedFileURL,
            resources[sourceID] != nil { return }
-        watchers[sourceID]?.stop()
         guard let resource = SecurityScopedResource(url: url) else {
             throw CocoaError(.fileReadNoPermission)
         }
         resources[sourceID] = resource
         sourceURLs[sourceID] = url
-        let watcher = FSEventsWatcher { [weak self] in
-            Task { @MainActor [weak self] in self?.scheduleMaintenance(sourceID: sourceID) }
+        updateWatcher(sourceID: sourceID, url: url)
+    }
+
+    private func updateWatcher(sourceID: String, url: URL) {
+        let watchURL = url.hasDirectoryPath ? url : url.deletingLastPathComponent()
+        let watchPath = watchURL.standardizedFileURL.path
+        let previousPath = sourceWatchPaths.updateValue(watchPath, forKey: sourceID)
+        if let previousPath,
+           previousPath != watchPath,
+           sourceWatchPaths.values.contains(previousPath) == false {
+            watchersByPath.removeValue(forKey: previousPath)?.stop()
         }
-        watchers[sourceID] = watcher
-        watcher.start(watching: url)
+        guard watchersByPath[watchPath] == nil else { return }
+        let watcher = FSEventsWatcher { [weak self] in
+            Task { @MainActor [weak self] in self?.scheduleMaintenance() }
+        }
+        watchersByPath[watchPath] = watcher
+        watcher.start(watching: watchURL)
+    }
+
+    private func disconnectSource(_ sourceID: String) {
+        resources.removeValue(forKey: sourceID)
+        sourceURLs.removeValue(forKey: sourceID)
+        sourceBookmarks.removeValue(forKey: sourceID)
+        guard let watchPath = sourceWatchPaths.removeValue(forKey: sourceID),
+              sourceWatchPaths.values.contains(watchPath) == false else { return }
+        watchersByPath.removeValue(forKey: watchPath)?.stop()
     }
 
     private func makeBookmark(for url: URL) throws -> Data {
@@ -399,24 +643,76 @@ final class LibraryAccessCoordinator {
         )
     }
 
-    private func scheduleMaintenance(sourceID: String) {
-        maintenanceDebounceTasks[sourceID]?.cancel()
-        maintenanceDebounceTasks[sourceID] = Task { [weak self] in
+    private func prepareImportSource(for url: URL) throws -> PendingImportSource {
+        let existingSourceID = sourceURLs.first {
+            $0.value.standardizedFileURL == url.standardizedFileURL
+        }?.key
+        let sourceID = existingSourceID ?? UUID().uuidString
+
+        let bookmark: Data
+        do {
+            bookmark = try makeBookmark(for: url)
+        } catch {
+            AppLogger.library.error(
+                "Import bookmark creation failed with category: \(String(describing: type(of: error)), privacy: .public)"
+            )
+            throw error
+        }
+
+        let authorizedURL: URL
+        do {
+            var isStale = false
+            authorizedURL = try URL(
+                resolvingBookmarkData: bookmark,
+                options: [.withSecurityScope, .withoutUI],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+        } catch {
+            AppLogger.library.error(
+                "Import bookmark resolution failed with category: \(String(describing: type(of: error)), privacy: .public)"
+            )
+            throw error
+        }
+
+        do {
+            try connect(sourceID: sourceID, url: authorizedURL)
+        } catch {
+            AppLogger.library.error(
+                "Import scoped access failed with category: \(String(describing: type(of: error)), privacy: .public)"
+            )
+            throw error
+        }
+
+        sourceBookmarks[sourceID] = bookmark
+        return PendingImportSource(
+            id: sourceID,
+            url: authorizedURL,
+            bookmark: bookmark,
+            isNew: existingSourceID == nil
+        )
+    }
+
+    private func scheduleMaintenance() {
+        maintenanceDebounceTask?.cancel()
+        maintenanceDebounceTask = Task { [weak self] in
             do {
                 try await Task.sleep(nanoseconds: 1_000_000_000)
-                self?.startMaintenance(sourceID: sourceID)
+                self?.startMaintenance()
             } catch {}
         }
     }
 
-    private func startMaintenance(sourceID: String) {
-        guard sourceURLs[sourceID] != nil else { return }
-        let sources = sourceURLs
+    private func startMaintenance() {
+        guard sourceURLs.isEmpty == false else { return }
         maintenanceTask?.cancel()
         let discovery = self.discovery
         let database = self.database
         maintenanceTask = Task(priority: .utility) { [weak self] in
             do {
+                guard let self else { return }
+                await refreshSourceURLsFromBookmarks()
+                let sources = sourceURLs
                 var discoveredVideosBySource: [String: [DiscoveredVideo]] = [:]
                 var canConfirmDeletions = true
                 for sourceID in sources.keys.sorted() {
@@ -450,7 +746,6 @@ final class LibraryAccessCoordinator {
                     confirmDeletions: canConfirmDeletions
                 )
                 try Task.checkCancellation()
-                guard let self else { return }
                 try await refreshResolvedVideoURLs()
                 try await refreshTags(libraryID: LibraryRecord.primaryID)
                 try await refreshVisibleVideosNow()
@@ -465,6 +760,37 @@ final class LibraryAccessCoordinator {
                 return
             } catch {
                 AppLogger.library.error("Silent source maintenance failed with category: \(String(describing: type(of: error)), privacy: .public)")
+            }
+        }
+    }
+
+    private func refreshSourceURLsFromBookmarks() async {
+        let bookmarks = sourceBookmarks
+        for (sourceID, bookmark) in bookmarks {
+            do {
+                var isStale = false
+                let resolvedURL = try URL(
+                    resolvingBookmarkData: bookmark,
+                    options: [.withSecurityScope, .withoutUI],
+                    relativeTo: nil,
+                    bookmarkDataIsStale: &isStale
+                )
+                let locationChanged = sourceURLs[sourceID]?.standardizedFileURL != resolvedURL.standardizedFileURL
+                guard locationChanged || isStale else { continue }
+                try connect(sourceID: sourceID, url: resolvedURL)
+                let refreshedBookmark = isStale ? try makeBookmark(for: resolvedURL) : bookmark
+                sourceBookmarks[sourceID] = refreshedBookmark
+                try await database.saveSourceAuthorization(SourceAuthorizationRecord(
+                    id: sourceID,
+                    libraryID: LibraryRecord.primaryID,
+                    displayName: resolvedURL.lastPathComponent,
+                    rootBookmarkData: refreshedBookmark,
+                    createdAt: Date()
+                ))
+            } catch {
+                AppLogger.library.error(
+                    "Source bookmark refresh failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                )
             }
         }
     }
@@ -520,6 +846,8 @@ final class LibraryAccessCoordinator {
                     try Task.checkCancellation()
                     if let updated = try await database.updateMediaInfo(videoID: video.id, result: result) {
                         onVideoChanged?(updated)
+                    } else if let thumbnailID = result.thumbnailID {
+                        try? await mediaService.removeThumbnails(identifiers: [thumbnailID])
                     }
                 } catch is CancellationError {
                     return
@@ -543,9 +871,11 @@ final class LibraryAccessCoordinator {
     ) {
         let database = self.database
         let previousTask = tagMutationTask
+        let previousImportTask = importTask
         pendingTagMutationCount += 1
         tagMutationTask = Task { [weak self] in
             _ = await previousTask?.value
+            _ = await previousImportTask?.value
             guard let self else { return }
             defer { pendingTagMutationCount -= 1 }
             do {
@@ -556,12 +886,13 @@ final class LibraryAccessCoordinator {
                 try await refreshVisibleVideosNow()
                 completion?(true)
                 onTagAssignmentsChanged?()
-                undoManager.removeAllActions()
+                invalidateUndoHistory()
                 if tagStateRevision == startingRevision {
                     undoManager.registerUndo(withTarget: self) { target in
                         target.restoreTagState(snapshot)
                     }
                     undoManager.setActionName(actionName)
+                    lastUndoMutation = .tag
                 }
             } catch {
                 completion?(false)
@@ -583,7 +914,7 @@ final class LibraryAccessCoordinator {
                 try await refreshTags(libraryID: snapshot.libraryID)
                 try await refreshVisibleVideosNow()
                 onTagAssignmentsChanged?()
-                undoManager.removeAllActions()
+                invalidateUndoHistory()
             } catch {
                 AppLogger.database.error("Tag undo failed with category: \(String(describing: type(of: error)), privacy: .public)")
                 onOperationError?("撤销未完成，请重试。")

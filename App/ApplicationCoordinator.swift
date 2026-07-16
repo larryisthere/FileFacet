@@ -30,6 +30,14 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     private lazy var libraryViewController = LibrarySplitViewController(
         onCancelImport: { [weak self] in self?.libraryAccessCoordinator?.cancelImport() },
         onImportDroppedVideos: { [weak self] urls in self?.libraryAccessCoordinator?.importDroppedVideos(urls) },
+        onRemoveVideos: { [weak self] videoIDs, completion in
+            guard let coordinator = self?.libraryAccessCoordinator else {
+                completion(false)
+                return
+            }
+            coordinator.removeVideos(ids: videoIDs, completion: completion)
+        },
+        onUndoLastMutation: { [weak self] in self?.libraryAccessCoordinator?.undoLastMutation() },
         onOpenVideo: { [weak self] video in self?.openVideo(video) },
         onRevealVideo: { [weak self] video in self?.revealVideo(video) },
         onCopyPath: { [weak self] video in self?.copyPath(video) },
@@ -113,13 +121,28 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
             self?.libraryViewController.updateVideo(video)
         }
         libraryAccessCoordinator?.onImportStateChanged = { [weak self] state in
-            self?.libraryViewController.setImportState(state)
+            guard let self else { return }
+            libraryViewController.setImportState(state)
+            switch state {
+            case .completed, .cancelled, .failed:
+                if libraryAccessCoordinator?.canUndoVideoRemoval == true {
+                    libraryViewController.offerVideoRemovalUndoForCurrentStatus()
+                }
+            case .idle, .importing:
+                break
+            }
         }
         libraryAccessCoordinator?.onTagsChanged = { [weak self] tags in
             self?.libraryViewController.setTags(tags)
         }
         libraryAccessCoordinator?.onTagAssignmentsChanged = { [weak self] in
             self?.libraryViewController.refreshTagAssignments()
+        }
+        libraryAccessCoordinator?.onVideoRemovalRestored = { [weak self] videoIDs in
+            self?.libraryViewController.showRestoredVideos(videoIDs)
+        }
+        libraryAccessCoordinator?.onVideoRemovalUndoDiscarded = { [weak self] in
+            self?.libraryViewController.removeVideoRemovalUndoOffer()
         }
         libraryAccessCoordinator?.onError = { [weak self] message in
             self?.libraryViewController.setLibraryError(message)
@@ -231,9 +254,9 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         libraryAccessCoordinator.importVideos()
     }
 
-    @objc private func undoLastTagMutation() {
+    @objc private func undoLastMutation() {
         guard lockCoordinator.state == .unlocked else { return }
-        libraryAccessCoordinator?.undoLastTagMutation()
+        libraryAccessCoordinator?.undoLastMutation()
     }
 
     @objc private func createRootTag() {
@@ -270,9 +293,9 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         if menuItem.action == #selector(importVideos) {
             return lockCoordinator.state == .unlocked && databaseStore != nil
         }
-        if menuItem.action == #selector(undoLastTagMutation) {
+        if menuItem.action == #selector(undoLastMutation) {
             return lockCoordinator.state == .unlocked
-                && libraryAccessCoordinator?.canUndoLastTagMutation == true
+                && libraryAccessCoordinator?.canUndoLastMutation == true
         }
         if menuItem.action == #selector(createRootTag) {
             return lockCoordinator.state == .unlocked
@@ -339,8 +362,8 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         let editMenuItem = NSMenuItem()
         let editMenu = NSMenu(title: "编辑")
         let undoItem = NSMenuItem(
-            title: "撤销上一次标签操作",
-            action: #selector(undoLastTagMutation),
+            title: "撤销上一次操作",
+            action: #selector(undoLastMutation),
             keyEquivalent: "z"
         )
         undoItem.target = self

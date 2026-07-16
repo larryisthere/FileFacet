@@ -21,6 +21,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     private let onAssignTagID: (String, [String]) -> Void
     private let onCancelImport: () -> Void
     private let onImportDroppedVideos: ([URL]) -> Void
+    private let onRemoveVideos: ([String], @escaping (Bool) -> Void) -> Void
+    private let onUndoLastMutation: () -> Void
     private let importStatusView = ImportStatusView()
     private var importStatusHeightConstraint: NSLayoutConstraint?
     private var importState: LibraryImportState = .idle
@@ -39,7 +41,9 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         thumbnailURL: @escaping (VideoRecord) -> URL?,
         onAssignTagID: @escaping (String, [String]) -> Void,
         onCancelImport: @escaping () -> Void,
-        onImportDroppedVideos: @escaping ([URL]) -> Void
+        onImportDroppedVideos: @escaping ([URL]) -> Void,
+        onRemoveVideos: @escaping ([String], @escaping (Bool) -> Void) -> Void,
+        onUndoLastMutation: @escaping () -> Void
     ) {
         self.onOpenVideo = onOpenVideo
         self.onRevealVideo = onRevealVideo
@@ -50,6 +54,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         self.onAssignTagID = onAssignTagID
         self.onCancelImport = onCancelImport
         self.onImportDroppedVideos = onImportDroppedVideos
+        self.onRemoveVideos = onRemoveVideos
+        self.onUndoLastMutation = onUndoLastMutation
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -62,14 +68,6 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         let container = VideoImportDropView()
         container.onImportDroppedVideos = { [weak self] urls in
             self?.onImportDroppedVideos(urls)
-        }
-        container.onRejectedDrop = { [weak self] in
-            guard let self, case .importing = self.importState else {
-                self?.setImportState(.failed(
-                    message: "没有可导入的视频。请拖入 MOV、MP4、M4V、AVI、MKV 或 WebM 文件。"
-                ))
-                return
-            }
         }
 
         let layout = NSCollectionViewFlowLayout()
@@ -96,6 +94,9 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         }
         collectionView.onSelectionGesture = { [weak self] indexPath, modifiers in
             self?.handleSelectionGesture(at: indexPath, modifiers: modifiers) ?? false
+        }
+        collectionView.onRemoveSelection = { [weak self] in
+            self?.requestRemoveSelectedVideos()
         }
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -126,6 +127,9 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         importStatusView.translatesAutoresizingMaskIntoConstraints = false
         importStatusView.onCancel = { [weak self] in self?.onCancelImport() }
         importStatusView.onDismiss = { [weak self] in self?.setImportState(.idle) }
+        importStatusView.onUndo = { [weak self] in
+            self?.onUndoLastMutation()
+        }
         container.addSubview(scrollView)
         container.addSubview(emptyState)
         container.addSubview(importStatusView)
@@ -145,7 +149,6 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
             emptyState.widthAnchor.constraint(lessThanOrEqualToConstant: 380),
         ])
         importStatusView.isHidden = true
-        container.installDropOverlay()
         view = container
         updateEmptyState()
     }
@@ -157,8 +160,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         case .idle:
             importStatusView.isHidden = true
             importStatusHeightConstraint?.constant = 0
-        case let .importing(title, detail):
-            importStatusView.configureImporting(title: title, detail: detail)
+        case let .importing(title, detail, progress):
+            importStatusView.configureImporting(title: title, detail: detail, progress: progress)
             showImportStatus()
         case let .completed(addedCount, existingCount, failedCount):
             importStatusView.configureFinished(
@@ -183,6 +186,14 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
             setImportState(.idle)
             return
         }
+    }
+
+    func offerVideoRemovalUndoForCurrentStatus() {
+        importStatusView.configureUndoActionOnly()
+    }
+
+    func removeVideoRemovalUndoOffer() {
+        importStatusView.configureDismissActionOnly()
     }
 
     private func showImportStatus() {
@@ -235,6 +246,17 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
             }
         )
         if notify { notifySelectionChanged() }
+    }
+
+    func showRestoredVideos(_ videoIDs: [String]) {
+        setSelectedVideoIDs(videoIDs)
+        importStatusView.configureFinished(
+            title: videoIDs.count > 1
+                ? "已撤回，恢复 \(videoIDs.count) 个视频"
+                : "已撤回，恢复 1 个视频",
+            detail: "视频及其应用标签已恢复到资料库。"
+        )
+        showImportStatus()
     }
 
     func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
@@ -352,7 +374,48 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
             action: #selector(copyPathFromContextMenu(_:)),
             video: video
         ))
+        menu.addItem(.separator())
+        let selectedCount = collectionView.selectionIndexPaths.count
+        let removeItem = NSMenuItem(
+            title: selectedCount > 1 ? "从资料库移除 \(selectedCount) 个视频" : "从资料库移除",
+            action: #selector(removeVideosFromContextMenu(_:)),
+            keyEquivalent: "\u{8}"
+        )
+        removeItem.keyEquivalentModifierMask = [.command]
+        removeItem.target = self
+        removeItem.isEnabled = selectedCount > 0
+        menu.addItem(removeItem)
         return menu
+    }
+
+    private func requestRemoveSelectedVideos() {
+        let selected = selectedVideos()
+        guard selected.isEmpty == false, let window = view.window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = selected.count > 1
+            ? "从资料库移除 \(selected.count) 个视频？"
+            : "从资料库移除这个视频？"
+        alert.informativeText = selected.count > 1
+            ? "这些视频会从 Video Tag Manager 及其标签中移除，Mac 上的原视频仍会保留。"
+            : "视频会从 Video Tag Manager 及其标签中移除，Mac 上的原视频仍会保留。"
+        alert.addButton(withTitle: "移除")
+        alert.addButton(withTitle: "取消")
+        alert.buttons.first?.hasDestructiveAction = true
+        let videoIDs = selected.map(\.id)
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.onRemoveVideos(videoIDs) { [weak self] succeeded in
+                guard let self, succeeded else { return }
+                self.importStatusView.configureUndo(
+                    title: videoIDs.count > 1
+                        ? "已从资料库移除 \(videoIDs.count) 个视频"
+                        : "已从资料库移除 1 个视频",
+                    detail: "Mac 上的原视频仍然保留。"
+                )
+                self.showImportStatus()
+            }
+        }
     }
 
     private func handleSelectionGesture(
@@ -416,6 +479,10 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         if let video = video(from: sender) { onCopyPath(video) }
     }
 
+    @objc private func removeVideosFromContextMenu(_ sender: NSMenuItem) {
+        requestRemoveSelectedVideos()
+    }
+
     func setGridItemWidth(_ width: Double) {
         guard let layout = collectionView.collectionViewLayout as? NSCollectionViewFlowLayout else { return }
         let clampedWidth = min(Self.maximumGridItemWidth, max(Self.minimumGridItemWidth, width))
@@ -451,10 +518,12 @@ private final class ImportStatusView: NSView {
     private enum ActionMode {
         case cancel
         case dismiss
+        case undo
     }
 
     var onCancel: (() -> Void)?
     var onDismiss: (() -> Void)?
+    var onUndo: (() -> Void)?
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
@@ -524,11 +593,20 @@ private final class ImportStatusView: NSView {
 
     override var wantsUpdateLayer: Bool { true }
 
-    func configureImporting(title: String, detail: String) {
+    func configureImporting(title: String, detail: String, progress: Double?) {
         titleLabel.stringValue = title
         detailLabel.stringValue = detail
         progressIndicator.isHidden = false
-        progressIndicator.startAnimation(nil)
+        if let progress {
+            progressIndicator.stopAnimation(nil)
+            progressIndicator.isIndeterminate = false
+            progressIndicator.minValue = 0
+            progressIndicator.maxValue = 1
+            progressIndicator.doubleValue = min(1, max(0, progress))
+        } else {
+            progressIndicator.isIndeterminate = true
+            progressIndicator.startAnimation(nil)
+        }
         actionButton.title = "取消"
         actionMode = .cancel
     }
@@ -542,10 +620,30 @@ private final class ImportStatusView: NSView {
         actionMode = .dismiss
     }
 
+    func configureUndo(title: String, detail: String) {
+        titleLabel.stringValue = title
+        detailLabel.stringValue = detail
+        progressIndicator.stopAnimation(nil)
+        progressIndicator.isHidden = true
+        actionButton.title = "撤回"
+        actionMode = .undo
+    }
+
+    func configureUndoActionOnly() {
+        actionButton.title = "撤回移出"
+        actionMode = .undo
+    }
+
+    func configureDismissActionOnly() {
+        actionButton.title = "完成"
+        actionMode = .dismiss
+    }
+
     @objc private func performAction() {
         switch actionMode {
         case .cancel: onCancel?()
         case .dismiss: onDismiss?()
+        case .undo: onUndo?()
         }
     }
 }
@@ -553,13 +651,6 @@ private final class ImportStatusView: NSView {
 @MainActor
 private final class VideoImportDropView: NSView {
     var onImportDroppedVideos: (([URL]) -> Void)?
-    var onRejectedDrop: (() -> Void)?
-
-    private let overlay = NSView()
-    private let borderLayer = CAShapeLayer()
-    private let symbolLabel = NSTextField(labelWithString: "⇩")
-    private let titleLabel = NSTextField(labelWithString: "松开以导入视频")
-    private let detailLabel = NSTextField(wrappingLabelWithString: "视频将加入当前资料库，并在首次导入时迁移 Finder 标签。")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -571,92 +662,23 @@ private final class VideoImportDropView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func installDropOverlay() {
-        overlay.translatesAutoresizingMaskIntoConstraints = false
-        overlay.wantsLayer = true
-        overlay.layer?.cornerRadius = 12
-        overlay.layer?.addSublayer(borderLayer)
-        overlay.isHidden = true
-
-        symbolLabel.font = .systemFont(ofSize: 32, weight: .light)
-        symbolLabel.alignment = .center
-        titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
-        titleLabel.alignment = .center
-        detailLabel.textColor = .secondaryLabelColor
-        detailLabel.alignment = .center
-        detailLabel.maximumNumberOfLines = 2
-
-        let stack = NSStackView(views: [symbolLabel, titleLabel, detailLabel])
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.orientation = .vertical
-        stack.alignment = .centerX
-        stack.spacing = 7
-        overlay.addSubview(stack)
-        addSubview(overlay)
-        NSLayoutConstraint.activate([
-            overlay.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            overlay.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            overlay.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 14),
-            overlay.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
-            stack.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
-            stack.widthAnchor.constraint(lessThanOrEqualToConstant: 380),
-        ])
-    }
-
-    override func layout() {
-        super.layout()
-        borderLayer.frame = overlay.bounds
-        borderLayer.path = CGPath(
-            roundedRect: overlay.bounds.insetBy(dx: 1, dy: 1),
-            cornerWidth: 12,
-            cornerHeight: 12,
-            transform: nil
-        )
-        borderLayer.fillColor = NSColor.clear.cgColor
-        borderLayer.lineWidth = 2
-        borderLayer.lineDashPattern = [7, 5]
-    }
-
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        updateOverlay(for: droppedURLs(from: sender))
+        dragOperation(for: droppedURLs(from: sender))
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        updateOverlay(for: droppedURLs(from: sender))
-    }
-
-    override func draggingExited(_ sender: NSDraggingInfo?) {
-        overlay.isHidden = true
+        dragOperation(for: droppedURLs(from: sender))
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         let videoURLs = supportedVideoURLs(from: droppedURLs(from: sender))
-        overlay.isHidden = true
-        guard videoURLs.isEmpty == false else {
-            onRejectedDrop?()
-            return true
-        }
+        guard videoURLs.isEmpty == false else { return false }
         onImportDroppedVideos?(videoURLs)
         return true
     }
 
-    private func updateOverlay(for urls: [URL]) -> NSDragOperation {
-        let videoURLs = supportedVideoURLs(from: urls)
-        let accepted = videoURLs.isEmpty == false
-        overlay.isHidden = false
-        symbolLabel.stringValue = accepted ? "⇩" : "⊘"
-        titleLabel.stringValue = accepted
-            ? "松开以导入 \(videoURLs.count) 个视频"
-            : "没有可导入的视频"
-        detailLabel.stringValue = accepted
-            ? "视频将加入当前资料库，并在首次导入时迁移 Finder 标签。"
-            : "请拖入 MOV、MP4、M4V、AVI、MKV 或 WebM 文件。"
-        let color = accepted ? NSColor.controlAccentColor : NSColor.systemRed
-        symbolLabel.textColor = color
-        borderLayer.strokeColor = color.cgColor
-        overlay.layer?.backgroundColor = color.withAlphaComponent(0.10).cgColor
-        return accepted ? .copy : []
+    private func dragOperation(for urls: [URL]) -> NSDragOperation {
+        supportedVideoURLs(from: urls).isEmpty ? [] : .copy
     }
 
     private func supportedVideoURLs(from urls: [URL]) -> [URL] {
@@ -679,6 +701,7 @@ private final class VideoCollectionView: NSCollectionView {
     var onContextMenuItem: ((IndexPath) -> NSMenu?)?
     var onPreviewSelection: (() -> Void)?
     var onSelectionGesture: ((IndexPath?, NSEvent.ModifierFlags) -> Bool)?
+    var onRemoveSelection: (() -> Void)?
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
@@ -700,6 +723,12 @@ private final class VideoCollectionView: NSCollectionView {
     }
 
     override func keyDown(with event: NSEvent) {
+        let relevantModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        let modifiers = event.modifierFlags.intersection(relevantModifiers)
+        if event.keyCode == 51, modifiers == [.command] {
+            onRemoveSelection?()
+            return
+        }
         let disallowedModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
         if event.charactersIgnoringModifiers == " ",
            event.modifierFlags.intersection(disallowedModifiers).isEmpty {

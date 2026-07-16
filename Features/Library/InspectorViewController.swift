@@ -1,5 +1,10 @@
 import AppKit
 
+struct InspectorTagDraftSnapshot {
+    let states: [String: TagAssignmentState]
+    let creations: [TagCreationDraft]
+}
+
 @MainActor
 final class InspectorViewController: NSViewController {
     private let stack = NSStackView()
@@ -541,6 +546,23 @@ final class InspectorViewController: NSViewController {
         closeNewTagPopover()
         draftTagCreations = []
         draftTagStates = tagStates
+        renderSelection()
+    }
+
+    func takePendingTagChanges() -> InspectorTagDraftSnapshot? {
+        guard hasPendingTagChanges, isApplyingTagChanges == false else { return nil }
+        let snapshot = InspectorTagDraftSnapshot(
+            states: draftTagStates,
+            creations: draftTagCreations
+        )
+        discardPendingTagChanges()
+        return snapshot
+    }
+
+    func restorePendingTagChanges(_ snapshot: InspectorTagDraftSnapshot) {
+        guard isApplyingTagChanges == false else { return }
+        draftTagStates = snapshot.states
+        draftTagCreations = snapshot.creations
         renderSelection()
     }
 

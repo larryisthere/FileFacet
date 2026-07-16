@@ -156,6 +156,21 @@ actor MediaProcessingService {
         }
     }
 
+    func removeUnreferencedThumbnails(
+        retaining identifiers: Set<String>,
+        fileManager: FileManager = .default
+    ) throws {
+        let urls = try fileManager.contentsOfDirectory(
+            at: thumbnailDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        for url in urls where url.pathExtension.lowercased() == "jpg" {
+            guard identifiers.contains(url.deletingPathExtension().lastPathComponent) == false else { continue }
+            try fileManager.removeItem(at: url)
+        }
+    }
+
     private static func prune(directory: URL, maximumBytes: Int64, fileManager: FileManager) throws {
         let urls = try fileManager.contentsOfDirectory(
             at: directory,

@@ -48,6 +48,8 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     init(
         onCancelImport: @escaping () -> Void,
         onImportDroppedVideos: @escaping ([URL]) -> Void,
+        onRemoveVideos: @escaping ([String], @escaping (Bool) -> Void) -> Void,
+        onUndoLastMutation: @escaping () -> Void,
         onOpenVideo: @escaping (VideoRecord) -> Void,
         onRevealVideo: @escaping (VideoRecord) -> Void,
         onCopyPath: @escaping (VideoRecord) -> Void,
@@ -94,7 +96,17 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             thumbnailURL: thumbnailURL,
             onAssignTagID: onAssignTagID,
             onCancelImport: onCancelImport,
-            onImportDroppedVideos: onImportDroppedVideos
+            onImportDroppedVideos: onImportDroppedVideos,
+            onRemoveVideos: { [weak inspector] videoIDs, completion in
+                let pendingDraft = inspector?.takePendingTagChanges()
+                onRemoveVideos(videoIDs) { succeeded in
+                    if succeeded == false, let pendingDraft {
+                        inspector?.restorePendingTagChanges(pendingDraft)
+                    }
+                    completion(succeeded)
+                }
+            },
+            onUndoLastMutation: onUndoLastMutation
         )
         super.init(nibName: nil, bundle: nil)
         videoGridViewController.onSelectionChanged = { [weak self] videos in
@@ -107,6 +119,18 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         sidebarViewController.setSelectionTitleHandler { [weak self] title, tag in
             self?.setContextTitle(title, tagID: tag?.id)
         }
+    }
+
+    func showRestoredVideos(_ videoIDs: [String]) {
+        videoGridViewController.showRestoredVideos(videoIDs)
+    }
+
+    func offerVideoRemovalUndoForCurrentStatus() {
+        videoGridViewController.offerVideoRemovalUndoForCurrentStatus()
+    }
+
+    func removeVideoRemovalUndoOffer() {
+        videoGridViewController.removeVideoRemovalUndoOffer()
     }
 
     @available(*, unavailable)

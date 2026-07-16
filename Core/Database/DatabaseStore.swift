@@ -206,6 +206,91 @@ actor DatabaseStore {
         return records
     }
 
+    func removeUnreferencedSourceAuthorizations(candidateIDs: [String]? = nil) throws -> [String] {
+        try prepareIfNeeded()
+        try execute("BEGIN IMMEDIATE")
+        do {
+            var restriction = ""
+            if let candidateIDs {
+                try execute("CREATE TEMP TABLE IF NOT EXISTS pending_source_cleanup_ids (id TEXT PRIMARY KEY)")
+                try execute("DELETE FROM pending_source_cleanup_ids")
+                let insert = try prepare(
+                    "INSERT OR IGNORE INTO pending_source_cleanup_ids (id) VALUES (?)",
+                    operation: "准备清理来源授权"
+                )
+                for id in Set(candidateIDs) {
+                    sqlite3_reset(insert)
+                    sqlite3_clear_bindings(insert)
+                    bindText(id, to: 1, in: insert)
+                    guard sqlite3_step(insert) == SQLITE_DONE else {
+                        sqlite3_finalize(insert)
+                        throw DatabaseError.statementFailed("准备清理来源授权")
+                    }
+                }
+                sqlite3_finalize(insert)
+                restriction = "AND id IN (SELECT id FROM pending_source_cleanup_ids)"
+            }
+
+            let lookup = try prepare(
+                """
+                SELECT id FROM source_authorizations
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM video_locations
+                    WHERE video_locations.source_id = source_authorizations.id
+                )
+                \(restriction)
+                """,
+                operation: "读取无引用来源授权"
+            )
+            var sourceIDs: [String] = []
+            while sqlite3_step(lookup) == SQLITE_ROW {
+                if let id = text(at: 0, in: lookup) { sourceIDs.append(id) }
+            }
+            sqlite3_finalize(lookup)
+
+            if sourceIDs.isEmpty == false {
+                try execute("CREATE TEMP TABLE IF NOT EXISTS removable_source_ids (id TEXT PRIMARY KEY)")
+                try execute("DELETE FROM removable_source_ids")
+                let insert = try prepare(
+                    "INSERT OR IGNORE INTO removable_source_ids (id) VALUES (?)",
+                    operation: "准备移除来源授权"
+                )
+                for id in sourceIDs {
+                    sqlite3_reset(insert)
+                    sqlite3_clear_bindings(insert)
+                    bindText(id, to: 1, in: insert)
+                    guard sqlite3_step(insert) == SQLITE_DONE else {
+                        sqlite3_finalize(insert)
+                        throw DatabaseError.statementFailed("准备移除来源授权")
+                    }
+                }
+                sqlite3_finalize(insert)
+                try execute("DELETE FROM source_authorizations WHERE id IN (SELECT id FROM removable_source_ids)")
+                try execute("DELETE FROM removable_source_ids")
+            }
+            if candidateIDs != nil { try execute("DELETE FROM pending_source_cleanup_ids") }
+            try execute("COMMIT")
+            return sourceIDs
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    func fetchReferencedThumbnailIDs() throws -> Set<String> {
+        try prepareIfNeeded()
+        let statement = try prepare(
+            "SELECT thumbnail_id FROM videos WHERE thumbnail_id IS NOT NULL",
+            operation: "读取缩略图引用"
+        )
+        defer { sqlite3_finalize(statement) }
+        var identifiers = Set<String>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let identifier = text(at: 0, in: statement) { identifiers.insert(identifier) }
+        }
+        return identifiers
+    }
+
     func fetchVideoLocations() throws -> [VideoLocationRecord] {
         try prepareIfNeeded()
         let statement = try prepare(
@@ -973,6 +1058,311 @@ actor DatabaseStore {
         bindText(id, to: 1, in: statement)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         return try videoRecord(from: statement)
+    }
+
+    func removeVideos(ids: [String]) throws -> VideoRemovalSnapshot {
+        try prepareIfNeeded()
+        let uniqueIDs = Array(Set(ids))
+        guard uniqueIDs.isEmpty == false else {
+            return VideoRemovalSnapshot(videos: [], locations: [], tagRelations: [])
+        }
+
+        try execute("BEGIN IMMEDIATE")
+        do {
+            try execute("CREATE TEMP TABLE IF NOT EXISTS pending_video_removal_ids (id TEXT PRIMARY KEY)")
+            try execute("DELETE FROM pending_video_removal_ids")
+            let insertID = try prepare(
+                "INSERT OR IGNORE INTO pending_video_removal_ids (id) VALUES (?)",
+                operation: "准备移出视频"
+            )
+            for id in uniqueIDs {
+                sqlite3_reset(insertID)
+                sqlite3_clear_bindings(insertID)
+                bindText(id, to: 1, in: insertID)
+                guard sqlite3_step(insertID) == SQLITE_DONE else {
+                    sqlite3_finalize(insertID)
+                    throw DatabaseError.statementFailed("准备移出视频")
+                }
+            }
+            sqlite3_finalize(insertID)
+
+            let videoStatement = try prepare(
+                """
+                SELECT id, library_id, relative_path, volume_identifier, file_resource_identifier,
+                       filename, file_extension, file_size, creation_date, modification_date,
+                       duration, width, height, thumbnail_id, metadata_status, thumbnail_status,
+                       availability_status, first_indexed_at, updated_at, last_seen_scan_id,
+                       finder_tags_imported_at
+                FROM videos
+                WHERE id IN (SELECT id FROM pending_video_removal_ids)
+                ORDER BY first_indexed_at, id
+                """,
+                operation: "保存待移出视频"
+            )
+            var videos: [RemovedVideoRecord] = []
+            while sqlite3_step(videoStatement) == SQLITE_ROW {
+                guard let id = text(at: 0, in: videoStatement),
+                      let libraryID = text(at: 1, in: videoStatement),
+                      let relativePath = text(at: 2, in: videoStatement),
+                      let filename = text(at: 5, in: videoStatement),
+                      let fileExtension = text(at: 6, in: videoStatement),
+                      let metadataStatus = text(at: 14, in: videoStatement),
+                      let thumbnailStatus = text(at: 15, in: videoStatement),
+                      let availabilityStatus = text(at: 16, in: videoStatement) else {
+                    sqlite3_finalize(videoStatement)
+                    throw DatabaseError.statementFailed("保存待移出视频")
+                }
+                videos.append(RemovedVideoRecord(
+                    id: id,
+                    libraryID: libraryID,
+                    relativePath: relativePath,
+                    volumeIdentifier: data(at: 3, in: videoStatement),
+                    fileResourceIdentifier: data(at: 4, in: videoStatement),
+                    filename: filename,
+                    fileExtension: fileExtension,
+                    fileSize: sqlite3_column_int64(videoStatement, 7),
+                    creationDate: date(at: 8, in: videoStatement),
+                    modificationDate: date(at: 9, in: videoStatement),
+                    duration: sqlite3_column_type(videoStatement, 10) == SQLITE_NULL
+                        ? nil : sqlite3_column_double(videoStatement, 10),
+                    width: sqlite3_column_type(videoStatement, 11) == SQLITE_NULL
+                        ? nil : Int(sqlite3_column_int(videoStatement, 11)),
+                    height: sqlite3_column_type(videoStatement, 12) == SQLITE_NULL
+                        ? nil : Int(sqlite3_column_int(videoStatement, 12)),
+                    thumbnailID: text(at: 13, in: videoStatement),
+                    metadataStatus: metadataStatus,
+                    thumbnailStatus: thumbnailStatus,
+                    availabilityStatus: availabilityStatus,
+                    firstIndexedAt: Date(timeIntervalSince1970: sqlite3_column_double(videoStatement, 17)),
+                    updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(videoStatement, 18)),
+                    lastSeenScanID: text(at: 19, in: videoStatement),
+                    finderTagsImportedAt: date(at: 20, in: videoStatement)
+                ))
+            }
+            sqlite3_finalize(videoStatement)
+
+            let locationStatement = try prepare(
+                """
+                SELECT video_id, source_id, relative_path, last_verified_at, is_available,
+                       fallback_path_key
+                FROM video_locations
+                WHERE video_id IN (SELECT id FROM pending_video_removal_ids)
+                ORDER BY video_id, source_id, relative_path
+                """,
+                operation: "保存待移出视频位置"
+            )
+            var locations: [RemovedVideoLocation] = []
+            while sqlite3_step(locationStatement) == SQLITE_ROW {
+                guard let videoID = text(at: 0, in: locationStatement),
+                      let sourceID = text(at: 1, in: locationStatement),
+                      let relativePath = text(at: 2, in: locationStatement) else {
+                    sqlite3_finalize(locationStatement)
+                    throw DatabaseError.statementFailed("保存待移出视频位置")
+                }
+                locations.append(RemovedVideoLocation(
+                    videoID: videoID,
+                    sourceID: sourceID,
+                    relativePath: relativePath,
+                    lastVerifiedAt: Date(timeIntervalSince1970: sqlite3_column_double(locationStatement, 3)),
+                    isAvailable: sqlite3_column_int(locationStatement, 4) != 0,
+                    fallbackPathKey: data(at: 5, in: locationStatement)
+                ))
+            }
+            sqlite3_finalize(locationStatement)
+
+            let tagStatement = try prepare(
+                """
+                SELECT video_id, tag_id, created_at
+                FROM video_tags
+                WHERE video_id IN (SELECT id FROM pending_video_removal_ids)
+                ORDER BY video_id, tag_id
+                """,
+                operation: "保存待移出视频标签"
+            )
+            var tagRelations: [RemovedVideoTagRelation] = []
+            while sqlite3_step(tagStatement) == SQLITE_ROW {
+                guard let videoID = text(at: 0, in: tagStatement),
+                      let tagID = text(at: 1, in: tagStatement) else {
+                    sqlite3_finalize(tagStatement)
+                    throw DatabaseError.statementFailed("保存待移出视频标签")
+                }
+                tagRelations.append(RemovedVideoTagRelation(
+                    videoID: videoID,
+                    tagID: tagID,
+                    createdAt: Date(timeIntervalSince1970: sqlite3_column_double(tagStatement, 2))
+                ))
+            }
+            sqlite3_finalize(tagStatement)
+
+            let deleteStatement = try prepare(
+                "DELETE FROM videos WHERE id IN (SELECT id FROM pending_video_removal_ids)",
+                operation: "从资料库移出视频"
+            )
+            guard sqlite3_step(deleteStatement) == SQLITE_DONE else {
+                sqlite3_finalize(deleteStatement)
+                throw DatabaseError.statementFailed("从资料库移出视频")
+            }
+            sqlite3_finalize(deleteStatement)
+            try execute("DELETE FROM pending_video_removal_ids")
+            try execute("COMMIT")
+            return VideoRemovalSnapshot(videos: videos, locations: locations, tagRelations: tagRelations)
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    func restoreVideos(_ snapshot: VideoRemovalSnapshot) throws -> [String] {
+        try prepareIfNeeded()
+        guard snapshot.videos.isEmpty == false else { return [] }
+        try execute("BEGIN IMMEDIATE")
+        do {
+            let videoStatement = try prepare(
+                """
+                INSERT INTO videos (
+                    id, library_id, relative_path, volume_identifier, file_resource_identifier,
+                    filename, file_extension, file_size, creation_date, modification_date,
+                    duration, width, height, thumbnail_id, metadata_status, thumbnail_status,
+                    availability_status, first_indexed_at, updated_at, last_seen_scan_id,
+                    finder_tags_imported_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                operation: "恢复已移出视频"
+            )
+            var restoredVideoIDs: [String: String] = [:]
+            for video in snapshot.videos {
+                let locations = snapshot.locations.filter { $0.videoID == video.id }
+                if let existingVideoID = try existingVideoID(for: video, locations: locations) {
+                    restoredVideoIDs[video.id] = existingVideoID
+                    continue
+                }
+                sqlite3_reset(videoStatement)
+                sqlite3_clear_bindings(videoStatement)
+                bindText(video.id, to: 1, in: videoStatement)
+                bindText(video.libraryID, to: 2, in: videoStatement)
+                bindText(video.relativePath, to: 3, in: videoStatement)
+                bindData(video.volumeIdentifier, to: 4, in: videoStatement)
+                bindData(video.fileResourceIdentifier, to: 5, in: videoStatement)
+                bindText(video.filename, to: 6, in: videoStatement)
+                bindText(video.fileExtension, to: 7, in: videoStatement)
+                sqlite3_bind_int64(videoStatement, 8, video.fileSize)
+                bindDate(video.creationDate, to: 9, in: videoStatement)
+                bindDate(video.modificationDate, to: 10, in: videoStatement)
+                bindDouble(video.duration, to: 11, in: videoStatement)
+                bindInt(video.width, to: 12, in: videoStatement)
+                bindInt(video.height, to: 13, in: videoStatement)
+                bindOptionalText(video.thumbnailID, to: 14, in: videoStatement)
+                bindText(video.metadataStatus, to: 15, in: videoStatement)
+                bindText(video.thumbnailStatus, to: 16, in: videoStatement)
+                bindText(video.availabilityStatus, to: 17, in: videoStatement)
+                sqlite3_bind_double(videoStatement, 18, video.firstIndexedAt.timeIntervalSince1970)
+                sqlite3_bind_double(videoStatement, 19, video.updatedAt.timeIntervalSince1970)
+                bindOptionalText(video.lastSeenScanID, to: 20, in: videoStatement)
+                bindDate(video.finderTagsImportedAt, to: 21, in: videoStatement)
+                guard sqlite3_step(videoStatement) == SQLITE_DONE else {
+                    sqlite3_finalize(videoStatement)
+                    throw DatabaseError.statementFailed("恢复已移出视频")
+                }
+                restoredVideoIDs[video.id] = video.id
+            }
+            sqlite3_finalize(videoStatement)
+
+            let locationStatement = try prepare(
+                """
+                INSERT OR IGNORE INTO video_locations (
+                    video_id, source_id, relative_path, last_verified_at, is_available,
+                    fallback_path_key
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                operation: "恢复已移出视频位置"
+            )
+            for location in snapshot.locations {
+                guard let restoredVideoID = restoredVideoIDs[location.videoID] else { continue }
+                sqlite3_reset(locationStatement)
+                sqlite3_clear_bindings(locationStatement)
+                bindText(restoredVideoID, to: 1, in: locationStatement)
+                bindText(location.sourceID, to: 2, in: locationStatement)
+                bindText(location.relativePath, to: 3, in: locationStatement)
+                sqlite3_bind_double(locationStatement, 4, location.lastVerifiedAt.timeIntervalSince1970)
+                sqlite3_bind_int(locationStatement, 5, location.isAvailable ? 1 : 0)
+                bindData(location.fallbackPathKey, to: 6, in: locationStatement)
+                guard sqlite3_step(locationStatement) == SQLITE_DONE else {
+                    sqlite3_finalize(locationStatement)
+                    throw DatabaseError.statementFailed("恢复已移出视频位置")
+                }
+            }
+            sqlite3_finalize(locationStatement)
+
+            let tagStatement = try prepare(
+                "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) VALUES (?, ?, ?)",
+                operation: "恢复已移出视频标签"
+            )
+            for relation in snapshot.tagRelations {
+                guard let restoredVideoID = restoredVideoIDs[relation.videoID] else { continue }
+                sqlite3_reset(tagStatement)
+                sqlite3_clear_bindings(tagStatement)
+                bindText(restoredVideoID, to: 1, in: tagStatement)
+                bindText(relation.tagID, to: 2, in: tagStatement)
+                sqlite3_bind_double(tagStatement, 3, relation.createdAt.timeIntervalSince1970)
+                guard sqlite3_step(tagStatement) == SQLITE_DONE else {
+                    sqlite3_finalize(tagStatement)
+                    throw DatabaseError.statementFailed("恢复已移出视频标签")
+                }
+            }
+            sqlite3_finalize(tagStatement)
+            try execute("COMMIT")
+            return snapshot.videos.compactMap { restoredVideoIDs[$0.id] }
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    private func existingVideoID(
+        for removedVideo: RemovedVideoRecord,
+        locations: [RemovedVideoLocation]
+    ) throws -> String? {
+        if let volumeIdentifier = removedVideo.volumeIdentifier,
+           let fileResourceIdentifier = removedVideo.fileResourceIdentifier {
+            let statement = try prepare(
+                """
+                SELECT id FROM videos
+                WHERE library_id = ? AND volume_identifier = ? AND file_resource_identifier = ?
+                ORDER BY first_indexed_at
+                LIMIT 1
+                """,
+                operation: "识别已重新导入视频"
+            )
+            bindText(removedVideo.libraryID, to: 1, in: statement)
+            bindData(volumeIdentifier, to: 2, in: statement)
+            bindData(fileResourceIdentifier, to: 3, in: statement)
+            let videoID = sqlite3_step(statement) == SQLITE_ROW ? text(at: 0, in: statement) : nil
+            sqlite3_finalize(statement)
+            if let videoID { return videoID }
+            return nil
+        }
+
+        for location in locations {
+            let statement: OpaquePointer
+            if let fallbackPathKey = location.fallbackPathKey {
+                statement = try prepare(
+                    "SELECT video_id FROM video_locations WHERE fallback_path_key = ? LIMIT 1",
+                    operation: "按文件位置识别已重新导入视频"
+                )
+                bindData(fallbackPathKey, to: 1, in: statement)
+            } else {
+                statement = try prepare(
+                    "SELECT video_id FROM video_locations WHERE source_id = ? AND relative_path = ? LIMIT 1",
+                    operation: "按来源位置识别已重新导入视频"
+                )
+                bindText(location.sourceID, to: 1, in: statement)
+                bindText(location.relativePath, to: 2, in: statement)
+            }
+            let videoID = sqlite3_step(statement) == SQLITE_ROW ? text(at: 0, in: statement) : nil
+            sqlite3_finalize(statement)
+            if let videoID { return videoID }
+        }
+        return nil
     }
 
     func updateMediaInfo(videoID: String, result: MediaProcessingResult) throws -> VideoRecord? {
