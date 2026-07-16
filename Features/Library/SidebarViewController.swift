@@ -455,10 +455,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private func focusRootTagDraft() {
         guard pendingRootTagDraft != nil else { return }
         for row in 0..<outlineView.numberOfRows where outlineView.item(atRow: row) is SidebarDraftTagNode {
-            guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: true) as? SidebarItemCellView,
-                  let field = cell.textField else { return }
-            view.window?.makeFirstResponder(field)
-            field.selectText(nil)
+            outlineView.editColumn(0, row: row, with: nil, select: true)
             return
         }
     }
