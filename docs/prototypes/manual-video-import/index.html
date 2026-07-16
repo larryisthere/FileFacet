@@ -274,6 +274,31 @@
       background: var(--content);
     }
 
+    .drop-overlay {
+      position: absolute;
+      z-index: 12;
+      inset: 14px;
+      display: none;
+      place-items: center;
+      border: 2px dashed var(--accent);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--content) 84%, var(--accent) 16%);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.34), 0 12px 34px rgba(0,0,0,.1);
+      text-align: center;
+      pointer-events: none;
+    }
+
+    .drop-overlay.visible { display: grid; }
+    .drop-overlay.rejected {
+      border-color: #ff453a;
+      background: color-mix(in srgb, var(--content) 88%, #ff453a 12%);
+    }
+    .drop-copy { max-width: 360px; padding: 28px; }
+    .drop-symbol { margin-bottom: 12px; color: var(--accent); font-size: 34px; line-height: 1; }
+    .drop-overlay.rejected .drop-symbol { color: #ff453a; }
+    .drop-title { font-size: 18px; font-weight: 650; }
+    .drop-detail { margin-top: 7px; color: var(--secondary); line-height: 1.45; }
+
     .inline-status {
       position: relative;
       z-index: 2;
@@ -541,6 +566,13 @@
       </aside>
 
       <section class="content">
+        <div class="drop-overlay" id="dropOverlay" role="status" aria-live="polite">
+          <div class="drop-copy">
+            <div class="drop-symbol" id="dropSymbol">⇩</div>
+            <div class="drop-title" id="dropTitle">松开以导入视频</div>
+            <div class="drop-detail" id="dropDetail">视频将加入当前资料库，并在首次导入时迁移 Finder 标签。</div>
+          </div>
+        </div>
         <div class="inline-status" id="inlineStatus" role="status" aria-live="polite">
           <div class="status-copy"><div class="status-title" id="statusTitle">正在导入“项目 B”</div><div class="status-detail" id="statusDetail">正在发现视频…</div></div>
           <div class="progress-track" id="progressTrack"><div class="progress-value" id="progressValue"></div></div>
@@ -553,8 +585,8 @@
           <div class="empty-state" id="emptyState">
             <div class="empty-icon"><svg viewBox="0 0 24 24"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="M12 12v6M9 15h6"></path></svg></div>
             <h2>从菜单栏导入视频</h2>
-            <p>选择“文件 > 导入视频…”，Tag Manager 会导入文件夹及全部子文件夹中的视频。以后可以继续从其他位置添加。</p>
-            <span class="shortcut-hint">也可以使用 <kbd>⇧⌘I</kbd></span>
+            <p>选择“文件 > 导入视频…”，或直接将视频拖到中间区域。以后可以继续从其他位置添加。</p>
+            <span class="shortcut-hint">菜单快捷键 <kbd>⇧⌘I</kbd></span>
           </div>
         </div>
       </section>
@@ -604,6 +636,9 @@
     <button class="demo-button active" id="showLibrary">已有视频</button>
     <button class="demo-button" id="showEmpty">空资料库</button>
     <span class="demo-separator"></span>
+    <button class="demo-button" id="simulateValidDrop">拖入 3 个视频</button>
+    <button class="demo-button" id="simulateInvalidDrop">拖入无效文件</button>
+    <span class="demo-separator"></span>
     <button class="demo-button" id="simulateMove">模拟移动</button>
     <button class="demo-button" id="simulateDelete">模拟删除</button>
     <button class="demo-button" id="resetDemo">重置</button>
@@ -642,6 +677,13 @@
     const searchInput = document.getElementById("searchInput");
     const fileMenuButton = document.getElementById("fileMenuButton");
     const fileMenu = document.getElementById("fileMenu");
+    const content = document.querySelector(".content");
+    const dropOverlay = document.getElementById("dropOverlay");
+    const dropTitle = document.getElementById("dropTitle");
+    const dropDetail = document.getElementById("dropDetail");
+    const dropSymbol = document.getElementById("dropSymbol");
+    const supportedVideoExtensions = new Set(["mov", "mp4", "m4v", "avi", "mkv", "webm"]);
+    let dropDepth = 0;
 
     function renderVideos() {
       const query = searchInput.value.trim().toLocaleLowerCase();
@@ -731,6 +773,76 @@
         statusDetail.textContent = importProgress < 38 ? "正在发现视频…" : importProgress < 82 ? "正在核对已导入的视频…" : "正在保存新视频…";
         if (importProgress >= 100) finishImport();
       }, 300);
+    }
+
+    function showDropState(kind, count = 0) {
+      const rejected = kind === "rejected";
+      dropOverlay.classList.add("visible");
+      dropOverlay.classList.toggle("rejected", rejected);
+      dropSymbol.textContent = rejected ? "⊘" : "⇩";
+      dropTitle.textContent = rejected ? "没有可导入的视频" : `松开以导入 ${count || "这些"} 个视频`;
+      dropDetail.textContent = rejected
+        ? "请拖入受支持的视频文件；其他文件会被保留在原位置。"
+        : "视频将加入当前资料库，并在首次导入时迁移 Finder 标签。";
+    }
+
+    function hideDropState() {
+      dropOverlay.classList.remove("visible", "rejected");
+      dropDepth = 0;
+    }
+
+    function videoFilesFrom(dataTransfer) {
+      return [...(dataTransfer?.files ?? [])].filter(file => {
+        const extension = file.name.split(".").pop()?.toLocaleLowerCase() ?? "";
+        return supportedVideoExtensions.has(extension);
+      });
+    }
+
+    function beginDroppedImport(count) {
+      hideDropState();
+      clearInterval(importTimer);
+      importProgress = 8;
+      currentFolder = null;
+      progressValue.style.width = `${importProgress}%`;
+      progressTrack.hidden = false;
+      cancelImport.hidden = false;
+      dismissStatus.hidden = true;
+      statusTitle.textContent = `正在导入拖入的 ${count} 个视频`;
+      statusDetail.textContent = "正在核对已导入的视频…";
+      setStatusVisible(true);
+      importTimer = setInterval(() => {
+        importProgress = Math.min(100, importProgress + 18);
+        progressValue.style.width = `${importProgress}%`;
+        statusDetail.textContent = importProgress < 75 ? "正在核对已导入的视频…" : "正在保存新视频…";
+        if (importProgress >= 100) finishDroppedImport(count);
+      }, 260);
+    }
+
+    function finishDroppedImport(count) {
+      clearInterval(importTimer);
+      importTimer = null;
+      const styles = ["coast", "city", "studio"];
+      for (let index = 0; index < count; index += 1) {
+        const id = Math.max(0, ...videos.map(video => video.id)) + 1;
+        videos.unshift({
+          id,
+          name: `拖入的视频 ${index + 1}.mov`,
+          path: `拖入项目 / 视频 ${index + 1}.mov`,
+          duration: `00:${String(31 + index * 8).padStart(2, "0")}`,
+          style: styles[index % styles.length]
+        });
+      }
+      emptyMode = false;
+      selectedID = videos[0]?.id ?? null;
+      statusTitle.textContent = "已完成拖入导入";
+      statusDetail.textContent = `新增 ${count} 个 · 已存在 0 个 · 失败 0 个`;
+      progressTrack.hidden = true;
+      cancelImport.hidden = true;
+      dismissStatus.hidden = false;
+      document.getElementById("showEmpty").classList.remove("active");
+      document.getElementById("showLibrary").classList.add("active");
+      if (selectedID) selectVideo(selectedID);
+      else renderVideos();
     }
 
     function finishImport() {
@@ -826,6 +938,14 @@
     searchInput.addEventListener("input", renderVideos);
     document.getElementById("showLibrary").addEventListener("click", () => setMode("library"));
     document.getElementById("showEmpty").addEventListener("click", () => setMode("empty"));
+    document.getElementById("simulateValidDrop").addEventListener("click", () => {
+      showDropState("accepted", 3);
+      setTimeout(() => beginDroppedImport(3), 850);
+    });
+    document.getElementById("simulateInvalidDrop").addEventListener("click", () => {
+      showDropState("rejected");
+      setTimeout(hideDropState, 1500);
+    });
     document.getElementById("simulateMove").addEventListener("click", simulateMove);
     document.getElementById("simulateDelete").addEventListener("click", simulateDelete);
     document.getElementById("resetDemo").addEventListener("click", resetDemo);
@@ -834,6 +954,29 @@
       row.classList.add("selected");
     }));
     modalBackdrop.addEventListener("click", event => { if (event.target === modalBackdrop) hidePicker(); });
+    content.addEventListener("dragenter", event => {
+      event.preventDefault();
+      dropDepth += 1;
+      const files = videoFilesFrom(event.dataTransfer);
+      showDropState(files.length > 0 ? "accepted" : "rejected", files.length);
+    });
+    content.addEventListener("dragover", event => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = videoFilesFrom(event.dataTransfer).length > 0 ? "copy" : "none";
+    });
+    content.addEventListener("dragleave", () => {
+      dropDepth = Math.max(0, dropDepth - 1);
+      if (dropDepth === 0) hideDropState();
+    });
+    content.addEventListener("drop", event => {
+      event.preventDefault();
+      const files = videoFilesFrom(event.dataTransfer);
+      if (files.length > 0) beginDroppedImport(files.length);
+      else {
+        showDropState("rejected");
+        setTimeout(hideDropState, 1500);
+      }
+    });
     document.addEventListener("click", event => {
       if (!fileMenu.contains(event.target) && event.target !== fileMenuButton) closeFileMenu();
     });

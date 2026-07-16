@@ -3,7 +3,6 @@ import AppKit
 @MainActor
 final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate, NSToolbarItemValidation {
     private static let toolbarIdentifier = NSToolbar.Identifier("LibraryToolbar")
-    private static let cancelImportItemIdentifier = NSToolbarItem.Identifier("CancelLibraryImport")
     private static let searchItemIdentifier = NSToolbarItem.Identifier("LibrarySearch")
     private static let zoomItemIdentifier = NSToolbarItem.Identifier("LibraryZoom")
     private static let zoomOutItemIdentifier = NSToolbarItem.Identifier("LibraryZoomOut")
@@ -19,10 +18,10 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private let inspectorViewController: InspectorViewController
     private let sidebarViewController: SidebarViewController
     private let onSearchChanged: (String) -> Void
-    private let onCancelImport: () -> Void
     private var contextTitle = "全部视频"
     private var contextTagID: String?
     private var contextStatus: String?
+    private var isImporting = false
     private var visibleVideoCount = 0
     private var pendingVideoSelectionIDs: [String]?
     private var isPresentingSelectionAlert = false
@@ -38,12 +37,6 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private weak var contextTitleView: ToolbarTitleView?
     private weak var sidebarSplitViewItem: NSSplitViewItem?
     private weak var inspectorSplitViewItem: NSSplitViewItem?
-    private lazy var cancelImportButton: NSButton = {
-        let button = NSButton(title: "取消", target: self, action: #selector(cancelImport))
-        button.controlSize = .small
-        return button
-    }()
-
     private lazy var libraryToolbar: NSToolbar = {
         let toolbar = NSToolbar(identifier: Self.toolbarIdentifier)
         toolbar.delegate = self
@@ -54,6 +47,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
 
     init(
         onCancelImport: @escaping () -> Void,
+        onImportDroppedVideos: @escaping ([URL]) -> Void,
         onOpenVideo: @escaping (VideoRecord) -> Void,
         onRevealVideo: @escaping (VideoRecord) -> Void,
         onCopyPath: @escaping (VideoRecord) -> Void,
@@ -65,7 +59,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         onCreateTag: @escaping (String, String?) -> Void,
         onRenameTag: @escaping (TagRecord, String) -> Void,
         onDeleteTag: @escaping (TagRecord) -> Void,
-        onMoveTag: @escaping (TagRecord, String?, Int) -> Void,
+        onMoveTags: @escaping ([TagRecord], String?, Int) -> Void,
         onSetTagColor: @escaping (TagRecord, String?) -> Void,
         onMergeTag: @escaping (TagRecord, TagRecord) -> Void,
         onAssignVideos: @escaping (TagRecord, [String]) -> Void,
@@ -74,7 +68,6 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         loadTagStates: @escaping ([String], @escaping ([String: TagAssignmentState]) -> Void) -> Void
     ) {
         self.onSearchChanged = onSearchChanged
-        self.onCancelImport = onCancelImport
         let inspector = InspectorViewController(
             onApplyTagDraft: onApplyTagDraft,
             loadTagStates: loadTagStates,
@@ -87,7 +80,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             onCreateTag: onCreateTag,
             onRenameTag: onRenameTag,
             onDeleteTag: onDeleteTag,
-            onMoveTag: onMoveTag,
+            onMoveTags: onMoveTags,
             onSetColor: onSetTagColor,
             onMergeTag: onMergeTag,
             onAssignVideos: onAssignVideos
@@ -99,7 +92,9 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             onPreviewVideos: onPreviewVideos,
             onSelectionChanged: { [weak inspector] videos in inspector?.setSelection(videos) },
             thumbnailURL: thumbnailURL,
-            onAssignTagID: onAssignTagID
+            onAssignTagID: onAssignTagID,
+            onCancelImport: onCancelImport,
+            onImportDroppedVideos: onImportDroppedVideos
         )
         super.init(nibName: nil, bundle: nil)
         videoGridViewController.onSelectionChanged = { [weak self] videos in
@@ -263,14 +258,14 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     func setImportState(_ state: LibraryImportState) {
         switch state {
         case .idle:
-            setContextStatus(nil, canCancel: false)
+            isImporting = false
         case .importing:
-            setContextStatus("正在导入视频…", canCancel: true)
-        case .completed:
-            setContextStatus(nil, canCancel: false)
-        case let .failed(message):
-            setContextStatus(message, canCancel: false)
+            isImporting = true
+            clearSearchForImport()
+        case .completed, .cancelled, .failed:
+            isImporting = false
         }
+        videoGridViewController.setImportState(state)
         updateToolbarState()
     }
 
@@ -278,12 +273,12 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         isLibraryAvailable = false
         contextTitle = "全部视频"
         contextTagID = nil
-        setContextStatus(message, canCancel: false)
+        setContextStatus(message)
         updateToolbarState()
     }
 
     func setOperationError(_ message: String) {
-        setContextStatus(message, canCancel: false)
+        setContextStatus(message)
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -292,7 +287,6 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             .sidebarTrackingSeparator,
             Self.contextTitleItemIdentifier,
             .flexibleSpace,
-            Self.cancelImportItemIdentifier,
             Self.zoomItemIdentifier,
             .space,
             Self.searchItemIdentifier,
@@ -341,8 +335,6 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
                 isOn: inspectorSplitViewItem?.isCollapsed == false,
                 buttonStore: { [weak self] button in self?.inspectorToggleButton = button }
             )
-        case Self.cancelImportItemIdentifier:
-            return makeCancelImportToolbarItem(identifier: itemIdentifier)
         case Self.contextTitleItemIdentifier:
             return makeContextTitleToolbarItem(identifier: itemIdentifier)
         case Self.searchItemIdentifier:
@@ -432,14 +424,6 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         return group
     }
 
-    private func makeCancelImportToolbarItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = "取消导入"
-        item.paletteLabel = "取消导入"
-        item.view = cancelImportButton
-        return item
-    }
-
     private func makeContextTitleToolbarItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
         let titleView = ToolbarTitleView()
         contextTitleView = titleView
@@ -516,33 +500,24 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         }
     }
 
-    private func setContextStatus(_ message: String?, canCancel: Bool) {
+    private func setContextStatus(_ message: String?) {
         contextStatus = message
-        setCancelImportItemVisible(canCancel)
         updateWindowTitle()
-    }
-
-    private func setCancelImportItemVisible(_ isVisible: Bool) {
-        if let currentIndex = libraryToolbar.items.firstIndex(where: {
-            $0.itemIdentifier == Self.cancelImportItemIdentifier
-        }) {
-            if isVisible == false {
-                libraryToolbar.removeItem(at: currentIndex)
-            }
-            return
-        }
-
-        guard isVisible,
-              let zoomIndex = libraryToolbar.items.firstIndex(where: {
-                  $0.itemIdentifier == Self.zoomItemIdentifier
-              }) else { return }
-        libraryToolbar.insertItem(withItemIdentifier: Self.cancelImportItemIdentifier, at: zoomIndex)
     }
 
     private func setContextTitle(_ title: String, tagID: String?) {
         contextTitle = title
         contextTagID = tagID
+        if isImporting == false {
+            contextStatus = nil
+            videoGridViewController.clearFinishedImportState()
+        }
         updateWindowTitle()
+    }
+
+    private func clearSearchForImport() {
+        searchToolbarItem?.searchField.stringValue = ""
+        onSearchChanged("")
     }
 
     private func updateWindowTitle() {
@@ -563,10 +538,6 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
 
     @objc private func searchChanged(_ sender: NSSearchField) {
         onSearchChanged(sender.stringValue)
-    }
-
-    @objc private func cancelImport() {
-        onCancelImport()
     }
 
     @objc private func toggleSidebarFromToolbar(_ sender: NSButton) {

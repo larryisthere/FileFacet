@@ -2,9 +2,16 @@ import Foundation
 
 enum LibraryImportState: Equatable, Sendable {
     case idle
-    case importing
-    case completed
+    case importing(title: String, detail: String)
+    case completed(addedCount: Int, existingCount: Int, failedCount: Int)
+    case cancelled
     case failed(message: String)
+}
+
+private struct PendingImportSource {
+    let id: String
+    let url: URL
+    let bookmark: Data
 }
 
 @MainActor
@@ -104,16 +111,54 @@ final class LibraryAccessCoordinator {
     func importVideos() {
         guard let url = picker.chooseDirectory() else { return }
 
+        startImport(
+            urls: [url],
+            title: "正在导入“\(url.lastPathComponent)”",
+            detail: "正在发现视频…"
+        )
+    }
+
+    func importDroppedVideos(_ urls: [URL]) {
+        let videoURLs = urls
+            .filter(VideoFileDiscovery.isSupportedVideoURL)
+            .reduce(into: [URL]()) { result, url in
+                let standardizedURL = url.standardizedFileURL
+                if result.contains(where: { $0.standardizedFileURL == standardizedURL }) == false {
+                    result.append(standardizedURL)
+                }
+            }
+        guard videoURLs.isEmpty == false else {
+            onImportStateChanged?(.failed(
+                message: "没有可导入的视频。请拖入 MOV、MP4、M4V、AVI、MKV 或 WebM 文件。"
+            ))
+            return
+        }
+
+        startImport(
+            urls: videoURLs,
+            title: "正在导入拖入的 \(videoURLs.count) 个视频",
+            detail: "正在核对已导入的视频…"
+        )
+    }
+
+    private func startImport(urls: [URL], title: String, detail: String) {
+        let standardizedURLs = urls.map(\.standardizedFileURL)
+
         do {
-            let bookmark = try makeBookmark(for: url)
-            let standardizedURL = url.standardizedFileURL
-            let existingSourceID = sourceURLs.first { $0.value.standardizedFileURL == standardizedURL }?.key
-            let sourceID = existingSourceID ?? UUID().uuidString
-            try connect(sourceID: sourceID, url: standardizedURL)
+            let sources = try standardizedURLs.map { url in
+                let existingSourceID = sourceURLs.first {
+                    $0.value.standardizedFileURL == url
+                }?.key
+                let sourceID = existingSourceID ?? UUID().uuidString
+                let bookmark = try makeBookmark(for: url)
+                try connect(sourceID: sourceID, url: url)
+                return PendingImportSource(id: sourceID, url: url, bookmark: bookmark)
+            }
+            guard let initialSource = sources.first else { return }
             importTask?.cancel()
             importRevision += 1
             let revision = importRevision
-            onImportStateChanged?(.importing)
+            onImportStateChanged?(.importing(title: title, detail: detail))
             let discovery = self.discovery
             let database = self.database
             importTask = Task { [weak self] in
@@ -126,49 +171,61 @@ final class LibraryAccessCoordinator {
                         try await database.saveLibrary(LibraryRecord(
                             id: LibraryRecord.primaryID,
                             name: "全部视频",
-                            rootBookmarkData: bookmark,
+                            rootBookmarkData: initialSource.bookmark,
                             createdAt: Date(),
                             lastScanAt: nil
                         ))
                     }
-                    try await database.saveSourceAuthorization(SourceAuthorizationRecord(
-                        id: sourceID,
-                        libraryID: LibraryRecord.primaryID,
-                        displayName: standardizedURL.lastPathComponent,
-                        rootBookmarkData: bookmark,
-                        createdAt: Date()
-                    ))
-                    let discoveryTask = Task.detached(priority: .utility) {
-                        try discovery.discoverVideoResult(at: standardizedURL)
+                    var addedCount = 0
+                    var existingCount = 0
+                    var failedCount = 0
+                    var importedVideos: [VideoRecord] = []
+                    for source in sources {
+                        try Task.checkCancellation()
+                        try await database.saveSourceAuthorization(SourceAuthorizationRecord(
+                            id: source.id,
+                            libraryID: LibraryRecord.primaryID,
+                            displayName: source.url.lastPathComponent,
+                            rootBookmarkData: source.bookmark,
+                            createdAt: Date()
+                        ))
+                        let sourceURL = source.url
+                        let discoveryTask = Task.detached(priority: .utility) {
+                            try discovery.discoverVideoResult(at: sourceURL)
+                        }
+                        let discoveryResult = try await withTaskCancellationHandler {
+                            try await discoveryTask.value
+                        } onCancel: {
+                            discoveryTask.cancel()
+                        }
+                        try Task.checkCancellation()
+                        let result = try await database.importVideos(
+                            sourceID: source.id,
+                            discoveredVideos: discoveryResult.videos,
+                            discoveryFailedCount: discoveryResult.failedCount
+                        )
+                        addedCount += result.addedCount
+                        existingCount += result.existingCount
+                        failedCount += result.failedCount
+                        importedVideos.append(contentsOf: result.importedVideos)
                     }
-                    let discoveryResult = try await withTaskCancellationHandler {
-                        try await discoveryTask.value
-                    } onCancel: {
-                        discoveryTask.cancel()
-                    }
-                    try Task.checkCancellation()
-                    let result = try await database.importVideos(
-                        sourceID: sourceID,
-                        discoveredVideos: discoveryResult.videos,
-                        discoveryFailedCount: discoveryResult.failedCount
-                    )
                     try await refreshTags(libraryID: LibraryRecord.primaryID)
                     try await refreshResolvedVideoURLs()
                     try await refreshVisibleVideosNow()
                     tagStateRevision += 1
                     undoManager.removeAllActions()
-                    startMediaProcessing(videos: result.importedVideos)
+                    startMediaProcessing(videos: importedVideos)
                     guard importRevision == revision else { return }
-                    onImportStateChanged?(.completed)
-                    onOperationError?(
-                        "导入完成：新增 \(result.addedCount) 个，已存在 \(result.existingCount) 个，失败 \(result.failedCount) 个。"
-                    )
-                    AppLogger.library.notice("Manual import completed with \(result.addedCount, privacy: .public) new videos")
+                    onImportStateChanged?(.completed(
+                        addedCount: addedCount,
+                        existingCount: existingCount,
+                        failedCount: failedCount
+                    ))
+                    AppLogger.library.notice("Manual import completed with \(addedCount, privacy: .public) new videos")
                 } catch is CancellationError {
                     await refreshAfterInterruptedImportInFreshTask()
                     guard importRevision == revision else { return }
-                    onImportStateChanged?(.idle)
-                    onOperationError?("已取消导入，已经完整加入的视频会保留。")
+                    onImportStateChanged?(.cancelled)
                 } catch {
                     AppLogger.library.error("Manual import failed with category: \(String(describing: type(of: error)), privacy: .public)")
                     await refreshAfterInterruptedImportInFreshTask()
@@ -178,7 +235,7 @@ final class LibraryAccessCoordinator {
             }
         } catch {
             AppLogger.library.error("Import authorization failed with category: \(String(describing: type(of: error)), privacy: .public)")
-            onOperationError?("无法获得该文件夹的持续访问权限。")
+            onImportStateChanged?(.failed(message: "无法获得所选内容的持续访问权限。"))
         }
     }
 
@@ -242,8 +299,11 @@ final class LibraryAccessCoordinator {
         mutateTags(actionName: "删除标签") { database in try await database.deleteTag(id: tag.id) }
     }
 
-    func moveTag(_ tag: TagRecord, parentID: String?, sortOrder: Int) {
-        mutateTags(actionName: "移动标签") { database in try await database.moveTag(id: tag.id, parentID: parentID, sortOrder: sortOrder) }
+    func moveTags(_ tags: [TagRecord], parentID: String?, sortOrder: Int) {
+        let tagIDs = tags.map(\.id)
+        mutateTags(actionName: tags.count > 1 ? "移动多个标签" : "移动标签") { database in
+            try await database.moveTags(ids: tagIDs, parentID: parentID, sortOrder: sortOrder)
+        }
     }
 
     func setTagColor(_ tag: TagRecord, color: String?) {

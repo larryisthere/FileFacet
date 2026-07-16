@@ -29,6 +29,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
 
     private lazy var libraryViewController = LibrarySplitViewController(
         onCancelImport: { [weak self] in self?.libraryAccessCoordinator?.cancelImport() },
+        onImportDroppedVideos: { [weak self] urls in self?.libraryAccessCoordinator?.importDroppedVideos(urls) },
         onOpenVideo: { [weak self] video in self?.openVideo(video) },
         onRevealVideo: { [weak self] video in self?.revealVideo(video) },
         onCopyPath: { [weak self] video in self?.copyPath(video) },
@@ -40,7 +41,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         onCreateTag: { [weak self] name, parentID in self?.libraryAccessCoordinator?.createTag(name: name, parentID: parentID) },
         onRenameTag: { [weak self] tag, name in self?.libraryAccessCoordinator?.renameTag(tag, name: name) },
         onDeleteTag: { [weak self] tag in self?.libraryAccessCoordinator?.deleteTag(tag) },
-        onMoveTag: { [weak self] tag, parentID, order in self?.libraryAccessCoordinator?.moveTag(tag, parentID: parentID, sortOrder: order) },
+        onMoveTags: { [weak self] tags, parentID, order in self?.libraryAccessCoordinator?.moveTags(tags, parentID: parentID, sortOrder: order) },
         onSetTagColor: { [weak self] tag, color in self?.libraryAccessCoordinator?.setTagColor(tag, color: color) },
         onMergeTag: { [weak self] source, target in self?.libraryAccessCoordinator?.mergeTag(source, into: target) },
         onAssignVideos: { [weak self] tag, videoIDs in self?.libraryAccessCoordinator?.setTagAssignment(tag, videoIDs: videoIDs, enabled: true) },

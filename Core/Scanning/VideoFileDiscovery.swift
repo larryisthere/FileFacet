@@ -16,9 +16,13 @@ struct VideoDiscoveryResult: Equatable, Sendable {
 }
 
 struct VideoFileDiscovery: VideoFileDiscovering {
-    private static let supportedExtensions: Set<String> = [
+    static let supportedExtensions: Set<String> = [
         "avi", "m4v", "mkv", "mov", "mp4", "webm",
     ]
+
+    static func isSupportedVideoURL(_ url: URL) -> Bool {
+        supportedExtensions.contains(url.pathExtension.lowercased())
+    }
 
     func discoverVideoResult(at rootURL: URL) throws -> VideoDiscoveryResult {
         let keys: [URLResourceKey] = [
@@ -34,6 +38,22 @@ struct VideoFileDiscovery: VideoFileDiscovering {
             .fileResourceIdentifierKey,
             .tagNamesKey,
         ]
+        let rootTypeValues = try rootURL.resourceValues(forKeys: [.isRegularFileKey])
+        if rootTypeValues.isRegularFile == true {
+            guard Self.isSupportedVideoURL(rootURL) else {
+                return VideoDiscoveryResult(videos: [], failedCount: 0)
+            }
+            let rootValues = try rootURL.resourceValues(forKeys: Set(keys))
+            return VideoDiscoveryResult(
+                videos: [discoveredVideo(
+                    at: rootURL,
+                    relativePath: "",
+                    values: rootValues
+                )],
+                failedCount: 0
+            )
+        }
+
         let enumerationStatus = EnumerationStatus()
         guard let enumerator = FileManager.default.enumerator(
             at: rootURL,
@@ -78,20 +98,11 @@ struct VideoFileDiscovery: VideoFileDiscovering {
             let relativePath = fileComponents.dropFirst(rootComponents.count).joined(separator: "/")
             guard relativePath.isEmpty == false else { continue }
 
-            discovered.append(
-                DiscoveredVideo(
-                    relativePath: relativePath,
-                    filename: fileURL.lastPathComponent,
-                    fileExtension: fileExtension,
-                    fileSize: Int64(values.fileSize ?? 0),
-                    creationDate: values.creationDate,
-                    modificationDate: values.contentModificationDate,
-                    volumeIdentifier: encodeIdentifier(values.volumeIdentifier),
-                    fileResourceIdentifier: encodeIdentifier(values.fileResourceIdentifier),
-                    finderTags: (values.tagNames ?? []).filter { $0.isEmpty == false },
-                    fallbackPathKey: fallbackPathKey(for: fileURL)
-                )
-            )
+            discovered.append(discoveredVideo(
+                at: fileURL,
+                relativePath: relativePath,
+                values: values
+            ))
         }
 
         return VideoDiscoveryResult(
@@ -99,6 +110,25 @@ struct VideoFileDiscovery: VideoFileDiscovering {
                 $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending
             },
             failedCount: enumerationStatus.failedCount
+        )
+    }
+
+    private func discoveredVideo(
+        at fileURL: URL,
+        relativePath: String,
+        values: URLResourceValues
+    ) -> DiscoveredVideo {
+        DiscoveredVideo(
+            relativePath: relativePath,
+            filename: fileURL.lastPathComponent,
+            fileExtension: fileURL.pathExtension.lowercased(),
+            fileSize: Int64(values.fileSize ?? 0),
+            creationDate: values.creationDate,
+            modificationDate: values.contentModificationDate,
+            volumeIdentifier: encodeIdentifier(values.volumeIdentifier),
+            fileResourceIdentifier: encodeIdentifier(values.fileResourceIdentifier),
+            finderTags: (values.tagNames ?? []).filter { $0.isEmpty == false },
+            fallbackPathKey: fallbackPathKey(for: fileURL)
         )
     }
 

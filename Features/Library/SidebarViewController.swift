@@ -14,7 +14,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private let onCreateTag: (String, String?) -> Void
     private let onRenameTag: (TagRecord, String) -> Void
     private let onDeleteTag: (TagRecord) -> Void
-    private let onMoveTag: (TagRecord, String?, Int) -> Void
+    private let onMoveTags: ([TagRecord], String?, Int) -> Void
     private let onSetColor: (TagRecord, String?) -> Void
     private let onMergeTag: (TagRecord, TagRecord) -> Void
     private let onAssignVideos: (TagRecord, [String]) -> Void
@@ -33,7 +33,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         onCreateTag: @escaping (String, String?) -> Void,
         onRenameTag: @escaping (TagRecord, String) -> Void,
         onDeleteTag: @escaping (TagRecord) -> Void,
-        onMoveTag: @escaping (TagRecord, String?, Int) -> Void,
+        onMoveTags: @escaping ([TagRecord], String?, Int) -> Void,
         onSetColor: @escaping (TagRecord, String?) -> Void,
         onMergeTag: @escaping (TagRecord, TagRecord) -> Void,
         onAssignVideos: @escaping (TagRecord, [String]) -> Void
@@ -43,7 +43,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         self.onCreateTag = onCreateTag
         self.onRenameTag = onRenameTag
         self.onDeleteTag = onDeleteTag
-        self.onMoveTag = onMoveTag
+        self.onMoveTags = onMoveTags
         self.onSetColor = onSetColor
         self.onMergeTag = onMergeTag
         self.onAssignVideos = onAssignVideos
@@ -297,8 +297,18 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
         guard let tag = item as? TagNode else { return nil }
+        let draggedTags: [TagRecord]
+        if let row = rowForTag(id: tag.tag.id), outlineView.selectedRowIndexes.contains(row) {
+            draggedTags = topLevelTags(
+                from: outlineView.selectedRowIndexes.compactMap { selectedRow in
+                    (outlineView.item(atRow: selectedRow) as? TagNode)?.tag
+                }
+            )
+        } else {
+            draggedTags = [tag.tag]
+        }
         let pasteboardItem = NSPasteboardItem()
-        pasteboardItem.setString(tag.tag.id, forType: Self.tagPasteboardType)
+        pasteboardItem.setString(draggedTags.map(\.id).joined(separator: "\n"), forType: Self.tagPasteboardType)
         return pasteboardItem
     }
 
@@ -308,8 +318,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
            index == NSOutlineViewDropOnItemIndex {
             return .copy
         }
-        if info.draggingPasteboard.availableType(from: [Self.tagPasteboardType]) != nil,
-           item is TagNode || (item as? SidebarGroupNode)?.title == "标签" { return .move }
+        if let rawTagIDs = info.draggingPasteboard.string(forType: Self.tagPasteboardType),
+           item is TagNode || (item as? SidebarGroupNode)?.title == "标签" {
+            let tagIDs = Set(rawTagIDs.split(separator: "\n").map(String.init))
+            let parentID = (item as? TagNode)?.tag.id
+            if canMoveTags(tagIDs, toParentID: parentID) { return .move }
+        }
         return []
     }
 
@@ -320,10 +334,44 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             onAssignVideos(target.tag, rawVideoIDs.split(separator: "\n").map(String.init))
             return true
         }
-        guard let tagID = info.draggingPasteboard.string(forType: Self.tagPasteboardType),
-              let tag = tags.first(where: { $0.id == tagID }) else { return false }
+        guard let rawTagIDs = info.draggingPasteboard.string(forType: Self.tagPasteboardType) else { return false }
+        let tagIDs = Set(rawTagIDs.split(separator: "\n").map(String.init))
         let parentID = (item as? TagNode)?.tag.id
-        onMoveTag(tag, parentID, max(0, index))
+        guard canMoveTags(tagIDs, toParentID: parentID) else { return false }
+        let draggedTags = topLevelTags(from: tagsInOutlineOrder().filter { tagIDs.contains($0.id) })
+        guard draggedTags.isEmpty == false else { return false }
+        onMoveTags(draggedTags, parentID, max(0, index))
+        return true
+    }
+
+    private func tagsInOutlineOrder() -> [TagRecord] {
+        (0..<outlineView.numberOfRows).compactMap { row in
+            (outlineView.item(atRow: row) as? TagNode)?.tag
+        }
+    }
+
+    private func topLevelTags(from candidates: [TagRecord]) -> [TagRecord] {
+        let candidateIDs = Set(candidates.map(\.id))
+        let tagsByID = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+        return candidates.filter { tag in
+            var ancestorID = tag.parentID
+            while let currentID = ancestorID {
+                if candidateIDs.contains(currentID) { return false }
+                ancestorID = tagsByID[currentID]?.parentID
+            }
+            return true
+        }
+    }
+
+    private func canMoveTags(_ tagIDs: Set<String>, toParentID parentID: String?) -> Bool {
+        guard tagIDs.isEmpty == false else { return false }
+        let tagsByID = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+        guard tagIDs.allSatisfy({ tagsByID[$0] != nil }) else { return false }
+        var ancestorID = parentID
+        while let currentID = ancestorID {
+            if tagIDs.contains(currentID) { return false }
+            ancestorID = tagsByID[currentID]?.parentID
+        }
         return true
     }
 

@@ -1133,120 +1133,109 @@ actor DatabaseStore {
     }
 
     func moveTag(id: String, parentID: String?, sortOrder: Int) throws {
+        try moveTags(ids: [id], parentID: parentID, sortOrder: sortOrder)
+    }
+
+    func moveTags(ids: [String], parentID: String?, sortOrder: Int) throws {
         try prepareIfNeeded()
-        guard id != parentID else { throw DatabaseError.statementFailed("移动标签") }
-        if let parentID {
-            let cycle = try prepare(
-                """
-                WITH RECURSIVE descendants(id) AS (
-                    SELECT id FROM tags WHERE parent_id = ?
-                    UNION ALL SELECT tags.id FROM tags JOIN descendants ON tags.parent_id = descendants.id
-                ) SELECT 1 FROM descendants WHERE id = ? LIMIT 1
-                """,
-                operation: "移动标签"
-            )
-            bindText(id, to: 1, in: cycle)
-            bindText(parentID, to: 2, in: cycle)
-            let createsCycle = sqlite3_step(cycle) == SQLITE_ROW
-            sqlite3_finalize(cycle)
-            guard createsCycle == false else { throw DatabaseError.statementFailed("移动标签") }
+        let uniqueIDs = ids.reduce(into: [String]()) { result, id in
+            if result.contains(id) == false { result.append(id) }
         }
-        let lookup = try prepare("SELECT library_id, parent_id, sort_order FROM tags WHERE id = ?", operation: "移动标签")
-        bindText(id, to: 1, in: lookup)
-        guard sqlite3_step(lookup) == SQLITE_ROW, let libraryID = text(at: 0, in: lookup) else {
-            sqlite3_finalize(lookup)
+        guard uniqueIDs.isEmpty == false else { return }
+
+        let allTags = try fetchTags(libraryID: LibraryRecord.primaryID)
+        let tagsByID = Dictionary(uniqueKeysWithValues: allTags.map { ($0.id, $0) })
+        guard uniqueIDs.allSatisfy({ tagsByID[$0] != nil }) else {
             throw DatabaseError.statementFailed("移动标签")
         }
-        let oldParentID = text(at: 1, in: lookup)
-        let oldSortOrder = Int(sqlite3_column_int(lookup, 2))
-        sqlite3_finalize(lookup)
-        let targetOrder = max(0, sortOrder)
+
+        let requestedIDSet = Set(uniqueIDs)
+        let topLevelIDs = uniqueIDs.filter { id in
+            var ancestorID = tagsByID[id]?.parentID
+            while let currentID = ancestorID {
+                if requestedIDSet.contains(currentID) { return false }
+                ancestorID = tagsByID[currentID]?.parentID
+            }
+            return true
+        }
+        let movingIDSet = Set(topLevelIDs)
+        guard movingIDSet.isEmpty == false else { return }
+
+        if let parentID {
+            guard tagsByID[parentID] != nil else { throw DatabaseError.statementFailed("移动标签") }
+            var ancestorID: String? = parentID
+            while let currentID = ancestorID {
+                if movingIDSet.contains(currentID) { throw DatabaseError.statementFailed("移动标签") }
+                ancestorID = tagsByID[currentID]?.parentID
+            }
+        }
+
+        let movingTags = topLevelIDs.compactMap { tagsByID[$0] }
+        let removedBeforeTarget = movingTags.filter {
+            $0.parentID == parentID && $0.sortOrder < sortOrder
+        }.count
+        let destinationSiblings = allTags
+            .filter { $0.parentID == parentID && movingIDSet.contains($0.id) == false }
+            .sorted { lhs, rhs in
+                lhs.sortOrder == rhs.sortOrder
+                    ? lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                    : lhs.sortOrder < rhs.sortOrder
+            }
+        let insertionIndex = min(
+            destinationSiblings.count,
+            max(0, sortOrder - removedBeforeTarget)
+        )
+        var destinationIDs = destinationSiblings.map(\.id)
+        destinationIDs.insert(contentsOf: topLevelIDs, at: insertionIndex)
+
+        var affectedOldParents: [String?] = []
+        for oldParentID in movingTags.map(\.parentID) where oldParentID != parentID {
+            if affectedOldParents.contains(where: { $0 == oldParentID }) == false {
+                affectedOldParents.append(oldParentID)
+            }
+        }
 
         try execute("BEGIN IMMEDIATE")
         do {
-            if oldParentID == parentID {
-                if targetOrder > oldSortOrder {
-                    try shiftTagOrders(
-                        libraryID: libraryID,
-                        parentID: parentID,
-                        condition: "sort_order > ? AND sort_order <= ?",
-                        values: [oldSortOrder, targetOrder],
-                        delta: -1,
-                        excludingID: id
-                    )
-                } else if targetOrder < oldSortOrder {
-                    try shiftTagOrders(
-                        libraryID: libraryID,
-                        parentID: parentID,
-                        condition: "sort_order >= ? AND sort_order < ?",
-                        values: [targetOrder, oldSortOrder],
-                        delta: 1,
-                        excludingID: id
-                    )
-                }
-            } else {
-                try shiftTagOrders(
-                    libraryID: libraryID,
-                    parentID: oldParentID,
-                    condition: "sort_order > ?",
-                    values: [oldSortOrder],
-                    delta: -1,
-                    excludingID: id
-                )
-                try shiftTagOrders(
-                    libraryID: libraryID,
-                    parentID: parentID,
-                    condition: "sort_order >= ?",
-                    values: [targetOrder],
-                    delta: 1,
-                    excludingID: id
-                )
-            }
-
             let statement = try prepare(
                 "UPDATE tags SET parent_id = ?, sort_order = ?, updated_at = ? WHERE id = ?",
                 operation: "移动标签"
             )
-            bindOptionalText(parentID, to: 1, in: statement)
-            sqlite3_bind_int64(statement, 2, Int64(targetOrder))
-            sqlite3_bind_double(statement, 3, Date().timeIntervalSince1970)
-            bindText(id, to: 4, in: statement)
-            guard sqlite3_step(statement) == SQLITE_DONE else {
-                sqlite3_finalize(statement)
-                throw DatabaseError.statementFailed("移动标签")
+            defer { sqlite3_finalize(statement) }
+
+            func updateTag(id: String, parentID: String?, sortOrder: Int) throws {
+                sqlite3_reset(statement)
+                sqlite3_clear_bindings(statement)
+                bindOptionalText(parentID, to: 1, in: statement)
+                sqlite3_bind_int64(statement, 2, Int64(sortOrder))
+                sqlite3_bind_double(statement, 3, Date().timeIntervalSince1970)
+                bindText(id, to: 4, in: statement)
+                guard sqlite3_step(statement) == SQLITE_DONE else {
+                    throw DatabaseError.statementFailed("移动标签")
+                }
             }
-            sqlite3_finalize(statement)
+
+            for oldParentID in affectedOldParents {
+                let siblingIDs = allTags
+                    .filter { $0.parentID == oldParentID && movingIDSet.contains($0.id) == false }
+                    .sorted { lhs, rhs in
+                        lhs.sortOrder == rhs.sortOrder
+                            ? lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                            : lhs.sortOrder < rhs.sortOrder
+                    }
+                    .map(\.id)
+                for (order, id) in siblingIDs.enumerated() {
+                    try updateTag(id: id, parentID: oldParentID, sortOrder: order)
+                }
+            }
+            for (order, id) in destinationIDs.enumerated() {
+                try updateTag(id: id, parentID: parentID, sortOrder: order)
+            }
             try execute("COMMIT")
         } catch {
             try? execute("ROLLBACK")
             throw error
         }
-    }
-
-    private func shiftTagOrders(
-        libraryID: String,
-        parentID: String?,
-        condition: String,
-        values: [Int],
-        delta: Int,
-        excludingID: String
-    ) throws {
-        let statement = try prepare(
-            """
-            UPDATE tags SET sort_order = sort_order + ?
-            WHERE library_id = ? AND parent_id IS ? AND id != ? AND \(condition)
-            """,
-            operation: "调整标签顺序"
-        )
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_int(statement, 1, Int32(delta))
-        bindText(libraryID, to: 2, in: statement)
-        bindOptionalText(parentID, to: 3, in: statement)
-        bindText(excludingID, to: 4, in: statement)
-        for (index, value) in values.enumerated() {
-            sqlite3_bind_int(statement, Int32(index + 5), Int32(value))
-        }
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("调整标签顺序") }
     }
 
     func mergeTag(sourceID: String, targetID: String) throws {
