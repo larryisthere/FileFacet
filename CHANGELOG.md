@@ -6,8 +6,8 @@
 
 ### 变更
 
-- 产品名称及应用文件名更新为 FileFacet，为未来支持更多文件类型保留清晰的扩展空间。
-- 补充 MIT License、公开构建说明、隐私边界、安全报告入口和 GitHub Release 流程。
+- 以 MIT License 开放源代码，并补充公开构建说明、隐私边界和安全报告入口。
+- 增加 GitHub Actions 构建检查与 GitHub Release 发布流程。
 
 ## [1.0.0] - 2026-07-16
 
