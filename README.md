@@ -55,7 +55,7 @@ xcodebuild \
 
 ## Release
 
-版本历史见 [CHANGELOG.md](CHANGELOG.md)，正式发布见 [GitHub Releases](https://github.com/larryisthere/FileFacet/releases)。公开安装包需要 Developer ID 签名和 Apple 公证；当前 Release 页面提供 GitHub 自动生成的源码归档。
+版本历史见 [CHANGELOG.md](CHANGELOG.md)，正式发布见 [GitHub Releases](https://github.com/larryisthere/FileFacet/releases)。Release 页面提供经过 Developer ID 签名和 Apple 公证的 Universal App，以及 GitHub 自动生成的源码归档。
 
 ## License
 

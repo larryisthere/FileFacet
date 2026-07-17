@@ -64,7 +64,7 @@ export GITHUB_REPOSITORY="owner/repository"
 bundle exec fastlane mac github_release
 ```
 
-该 lane 只允许从无未提交改动且当前提交已存在于目标 GitHub 仓库的工作区发布。流程会执行 Developer ID 签名检查、Release 构建、公证、stapling、ZIP 与 SHA-256 生成，从 `CHANGELOG.md` 提取目标版本区块，并创建明确指向当前提交的 `v<版本>` GitHub Release。需要覆盖 tag 时可设置 `RELEASE_TAG`。
+该 lane 只允许从无未提交改动且当前提交已存在于目标 GitHub 仓库的工作区发布。流程使用 Manual signing 指定 Developer ID Application 身份，关闭开发调试 entitlement 注入并加入可信时间戳，然后执行签名检查、Release 构建、公证、stapling、ZIP 与 SHA-256 生成，从 `CHANGELOG.md` 提取目标版本区块，并创建明确指向当前提交的 `v<版本>` GitHub Release。需要覆盖 tag 时可设置 `RELEASE_TAG`。
 
 如果当前机器尚未配置 `Developer ID Application` 与公证凭证，可以先在 GitHub 创建仅包含发布说明和源码归档的 Release。开发签名的本地 App 不应作为公开安装包上传。
 
