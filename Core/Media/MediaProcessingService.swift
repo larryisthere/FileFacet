@@ -1,7 +1,7 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import ImageIO
-import QuickLookThumbnailing
+@preconcurrency import QuickLookThumbnailing
 import UniformTypeIdentifiers
 
 struct MediaProcessingResult: Sendable {
