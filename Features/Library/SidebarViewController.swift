@@ -19,7 +19,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private let onMergeTag: (TagRecord, TagRecord) -> Void
     private let onAssignVideos: (TagRecord, [String]) -> Void
     private var isRestoringSelection = false
-    private var isTagGroupExpanded = true
+    private var tagGroupExpansionPreference = true
     private var pendingRootTagDraft: SidebarDraftTagNode?
     private var isResolvingRootTagDraft = false
     private var editingTagID: String?
@@ -131,7 +131,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
         if item == nil { return groups.count }
-        if let group = item as? SidebarGroupNode { return group.children.count }
+        if let group = item as? SidebarGroupNode {
+            if group.title == "标签", tagGroupExpansionPreference == false { return 0 }
+            return group.children.count
+        }
         if let tag = item as? TagNode { return tag.children.count }
         return 0
     }
@@ -205,7 +208,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 let identifier = NSUserInterfaceItemIdentifier("SidebarTagGroupCell")
                 let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? SidebarTagGroupCellView
                     ?? makeTagGroupCell(identifier: identifier)
-                cell.configure(expanded: isTagGroupExpanded)
+                cell.configure(expanded: tagGroupExpansionPreference)
                 cell.toggleButton.target = self
                 cell.toggleButton.action = #selector(toggleTagGroup(_:))
                 cell.addButton.target = self
@@ -462,17 +465,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         groups = [library, SidebarGroupNode(title: "标签", children: tagChildren)]
     }
 
-    private var tagGroup: SidebarGroupNode? {
-        groups.first { $0.title == "标签" }
-    }
-
     private func restoreExpansionState() {
         for group in groups {
-            if group.title == "标签", isTagGroupExpanded == false {
-                outlineView.collapseItem(group, collapseChildren: true)
-            } else {
+            if group.title != "标签" || tagGroupExpansionPreference {
                 outlineView.expandItem(group, expandChildren: true)
             }
+            updateTagGroupCell(for: group)
         }
     }
 
@@ -491,7 +489,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         }
         let selection = selectedItemKeys()
         pendingRootTagDraft = SidebarDraftTagNode()
-        isTagGroupExpanded = true
+        tagGroupExpansionPreference = true
         rebuildNodes()
         loadViewIfNeeded()
         outlineView.reloadData()
@@ -509,18 +507,32 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     @objc private func toggleTagGroup(_ sender: Any?) {
-        if isTagGroupExpanded {
-            if pendingRootTagDraft != nil { view.window?.makeFirstResponder(outlineView) }
-            isTagGroupExpanded = false
-            guard let currentTagGroup = tagGroup else { return }
-            outlineView.collapseItem(currentTagGroup, collapseChildren: true)
-            outlineView.reloadItem(currentTagGroup, reloadChildren: false)
-        } else {
-            isTagGroupExpanded = true
-            guard let currentTagGroup = tagGroup else { return }
-            outlineView.expandItem(currentTagGroup, expandChildren: true)
-            outlineView.reloadItem(currentTagGroup, reloadChildren: false)
+        guard let currentTagGroup = displayedTagGroup else { return }
+        if tagGroupExpansionPreference, pendingRootTagDraft != nil {
+            view.window?.makeFirstResponder(outlineView)
         }
+        tagGroupExpansionPreference.toggle()
+        outlineView.reloadItem(currentTagGroup, reloadChildren: true)
+        if tagGroupExpansionPreference {
+            outlineView.expandItem(currentTagGroup, expandChildren: true)
+        }
+        updateTagGroupCell(for: currentTagGroup)
+    }
+
+    private var displayedTagGroup: SidebarGroupNode? {
+        for row in 0..<outlineView.numberOfRows {
+            guard let group = outlineView.item(atRow: row) as? SidebarGroupNode else { continue }
+            if group.title == "标签" { return group }
+        }
+        return nil
+    }
+
+    private func updateTagGroupCell(for group: SidebarGroupNode) {
+        let row = outlineView.row(forItem: group)
+        guard row >= 0,
+              let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                as? SidebarTagGroupCellView else { return }
+        cell.configure(expanded: tagGroupExpansionPreference)
     }
 
     @objc private func beginCreatingRootTagFromButton(_ sender: Any?) {
@@ -587,7 +599,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         editingTagID = tag.id
         editingTagName = tag.name
         hasEditedTagName = false
-        isTagGroupExpanded = true
+        tagGroupExpansionPreference = true
         restoreExpansionState()
 
         if let row = rowForTag(id: tag.id) {
