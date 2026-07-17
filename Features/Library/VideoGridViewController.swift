@@ -419,8 +419,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
             ? "从资料库移除 \(selected.count) 个视频？"
             : "从资料库移除这个视频？"
         alert.informativeText = selected.count > 1
-            ? "这些视频会从 Video Tag Manager 及其标签中移除，Mac 上的原视频仍会保留。"
-            : "视频会从 Video Tag Manager 及其标签中移除，Mac 上的原视频仍会保留。"
+            ? "这些视频会从 FileFacet 及其标签中移除，Mac 上的原视频仍会保留。"
+            : "视频会从 FileFacet 及其标签中移除，Mac 上的原视频仍会保留。"
         alert.addButton(withTitle: "移除")
         alert.addButton(withTitle: "取消")
         alert.buttons.first?.hasDestructiveAction = true

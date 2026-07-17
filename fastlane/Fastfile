@@ -1,6 +1,7 @@
 require "digest"
 require "fileutils"
 require "shellwords"
+require "xcodeproj"
 
 ENV["FASTLANE_OPT_OUT_USAGE"] = "1"
 ENV["FASTLANE_SKIP_UPDATE_CHECK"] = "1"
@@ -10,8 +11,8 @@ default_platform(:mac)
 REPO_ROOT = File.expand_path("..", __dir__)
 PROJECT = File.join(REPO_ROOT, "VideoTagManager.xcodeproj")
 SCHEME = "VideoTagManager"
-PRODUCT_NAME = "VideoTagManager"
-DISPLAY_NAME = "Video Tag Manager"
+PRODUCT_NAME = "FileFacet"
+DISPLAY_NAME = "FileFacet"
 
 def shell_escape(value)
   Shellwords.escape(value.to_s)
@@ -57,6 +58,32 @@ end
 def release_identifier
   settings = release_build_settings
   "#{settings['MARKETING_VERSION']}-#{settings['CURRENT_PROJECT_VERSION']}"
+end
+
+def prepare_release_versions!(marketing_version)
+  project = Xcodeproj::Project.open(PROJECT)
+  target = project.targets.find { |candidate| candidate.name == SCHEME }
+  UI.user_error!("找不到 App Target：#{SCHEME}") unless target
+
+  current_build = target.build_configurations.filter_map do |configuration|
+    Integer(configuration.build_settings["CURRENT_PROJECT_VERSION"], exception: false)
+  end.max || 0
+  next_build = current_build + 1
+
+  target.build_configurations.each do |configuration|
+    configuration.build_settings["CURRENT_PROJECT_VERSION"] = next_build.to_s
+    configuration.build_settings["MARKETING_VERSION"] = marketing_version
+  end
+  project.save
+
+  generator_path = File.join(REPO_ROOT, "tool", "generate_xcode_project.rb")
+  generator = File.read(generator_path)
+  build_updated = generator.sub!(/settings\["CURRENT_PROJECT_VERSION"\] = "\d+"/, "settings[\"CURRENT_PROJECT_VERSION\"] = \"#{next_build}\"")
+  version_updated = generator.sub!(/settings\["MARKETING_VERSION"\] = "[^"]+"/, "settings[\"MARKETING_VERSION\"] = \"#{marketing_version}\"")
+  UI.user_error!("工程生成脚本中缺少版本配置") unless build_updated && version_updated
+  File.write(generator_path, generator)
+
+  next_build
 end
 
 def release_root(channel)
@@ -114,7 +141,7 @@ end
 def package_app!(app_path, output_directory)
   FileUtils.mkdir_p(output_directory)
   settings = release_build_settings
-  base_name = "Video-Tag-Manager-#{settings['MARKETING_VERSION']}-#{settings['CURRENT_PROJECT_VERSION']}-macOS-universal"
+  base_name = "FileFacet-#{settings['MARKETING_VERSION']}-#{settings['CURRENT_PROJECT_VERSION']}-macOS-universal"
   zip_path = File.join(output_directory, "#{base_name}.zip")
   checksum_path = "#{zip_path}.sha256"
   FileUtils.rm_f([zip_path, checksum_path])
@@ -132,6 +159,17 @@ def require_environment!(*names)
 end
 
 platform :mac do
+  desc "准备正式版本并将 Build 号递增一次"
+  lane :prepare_release do |options|
+    require_clean_release_source!
+    version = options[:version].to_s.strip
+    UI.user_error!("请提供版本号，例如：version:1.0.2") if version.empty?
+
+    next_build = prepare_release_versions!(version)
+    UI.success("已准备 FileFacet #{version} (#{next_build})")
+    UI.important("请更新 CHANGELOG、完成验收并提交版本改动后，再执行正式发布 lane")
+  end
+
   desc "构建供当前开发 Mac 本地使用的签名 Universal Release"
   lane :local_release do
     output_directory = release_root("local")
@@ -193,7 +231,7 @@ platform :mac do
       "gh release create #{shell_escape(tag)} #{shell_escape(zip_path)} #{shell_escape(checksum_path)} " \
       "--repo #{shell_escape(ENV.fetch('GITHUB_REPOSITORY'))} " \
       "--target #{shell_escape(release_commit)} " \
-      "--title #{shell_escape("Video Tag Manager #{settings['MARKETING_VERSION']}")} " \
+      "--title #{shell_escape("FileFacet #{settings['MARKETING_VERSION']}")} " \
       "--notes-file #{shell_escape(notes_path)}"
     )
   end
@@ -218,14 +256,14 @@ platform :mac do
       clean: true,
       export_method: "app-store",
       output_directory: output_directory,
-      output_name: "VideoTagManager.pkg",
+      output_name: "FileFacet.pkg",
       export_options: {
         signingStyle: "automatic",
         teamID: release_build_settings["DEVELOPMENT_TEAM"]
       },
       xcargs: "-allowProvisioningUpdates"
     )
-    pkg_path = File.join(output_directory, "VideoTagManager.pkg")
+    pkg_path = File.join(output_directory, "FileFacet.pkg")
     UI.user_error!("找不到 App Store 包：#{pkg_path}") unless File.file?(pkg_path)
     upload_to_app_store(
       api_key: api_key,

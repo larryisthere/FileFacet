@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "17F946906C98A5F616DE5E00"
-               BuildableName = "VideoTagManager.app"
+               BuildableName = "FileFacet.app"
                BlueprintName = "VideoTagManager"
                ReferencedContainer = "container:VideoTagManager.xcodeproj">
             </BuildableReference>
@@ -45,7 +45,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "17F946906C98A5F616DE5E00"
-            BuildableName = "VideoTagManager.app"
+            BuildableName = "FileFacet.app"
             BlueprintName = "VideoTagManager"
             ReferencedContainer = "container:VideoTagManager.xcodeproj">
          </BuildableReference>
@@ -78,7 +78,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "17F946906C98A5F616DE5E00"
-            BuildableName = "VideoTagManager.app"
+            BuildableName = "FileFacet.app"
             BlueprintName = "VideoTagManager"
             ReferencedContainer = "container:VideoTagManager.xcodeproj">
          </BuildableReference>
@@ -95,7 +95,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "17F946906C98A5F616DE5E00"
-            BuildableName = "VideoTagManager.app"
+            BuildableName = "FileFacet.app"
             BlueprintName = "VideoTagManager"
             ReferencedContainer = "container:VideoTagManager.xcodeproj">
          </BuildableReference>

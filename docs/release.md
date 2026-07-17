@@ -15,6 +15,16 @@ Xcode 当前配置：
 - 版本：由 Xcode 的 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION` 统一提供
 - App Sandbox、用户所选文件只读权限、App-scoped Bookmark 和 Hardened Runtime 保持启用
 
+## 准备正式版本
+
+每个正式发布周期先在干净工作区执行一次：
+
+```bash
+bundle exec fastlane mac prepare_release version:1.0.2
+```
+
+该 lane 会将 `MARKETING_VERSION` 更新为指定版本，并将 `CURRENT_PROJECT_VERSION` 递增一次，同时同步 Xcode 工程和工程生成脚本。随后更新 `CHANGELOG.md`、完成验收并提交版本改动。GitHub 与 App Store 发布同一版本时共用这个 Build 号；`local_release` 不消耗 Build 号。
+
 账号、API Key、GitHub Token 和公证凭证只保存在本机钥匙串或环境变量中，禁止写入仓库。
 
 ## 本地 Release
@@ -37,7 +47,7 @@ bundle exec fastlane mac local_release
 4. 将公证凭证存入钥匙串：
 
 ```bash
-xcrun notarytool store-credentials "VideoTagManager-Notary" \
+xcrun notarytool store-credentials "FileFacet-Notary" \
   --key-id "$APP_STORE_CONNECT_KEY_ID" \
   --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
   --key "$APP_STORE_CONNECT_KEY_PATH"
@@ -49,12 +59,14 @@ xcrun notarytool store-credentials "VideoTagManager-Notary" \
 
 ```bash
 export DEVELOPER_ID_APPLICATION="Developer ID Application: Your Name (TEAMID)"
-export NOTARYTOOL_KEYCHAIN_PROFILE="VideoTagManager-Notary"
+export NOTARYTOOL_KEYCHAIN_PROFILE="FileFacet-Notary"
 export GITHUB_REPOSITORY="owner/repository"
 bundle exec fastlane mac github_release
 ```
 
 该 lane 只允许从无未提交改动且当前提交已存在于目标 GitHub 仓库的工作区发布。流程会执行 Developer ID 签名检查、Release 构建、公证、stapling、ZIP 与 SHA-256 生成，从 `CHANGELOG.md` 提取目标版本区块，并创建明确指向当前提交的 `v<版本>` GitHub Release。需要覆盖 tag 时可设置 `RELEASE_TAG`。
+
+如果当前机器尚未配置 `Developer ID Application` 与公证凭证，可以先在 GitHub 创建仅包含发布说明和源码归档的 Release。开发签名的本地 App 不应作为公开安装包上传。
 
 ## Mac App Store
 

@@ -57,7 +57,7 @@
 
 /* Begin PBXFileReference section */
 		00218ADF00AE850CA7FEA287 /* VideoTagManagerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VideoTagManagerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		01EE661DF4D0B2DE750D896A /* VideoTagManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VideoTagManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		01EE661DF4D0B2DE750D896A /* FileFacet.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FileFacet.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		11D83A96E7A2BC52803CC7D9 /* PreferencesStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PreferencesStore.swift; path = Preferences/PreferencesStore.swift; sourceTree = "<group>"; };
 		15D2DC162E023FE6C61C744E /* LibraryRecord.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LibraryRecord.swift; path = Database/LibraryRecord.swift; sourceTree = "<group>"; };
 		1C41AD9187D543FB0D85B6AD /* SettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SettingsView.swift; path = Settings/SettingsView.swift; sourceTree = "<group>"; };
@@ -134,7 +134,7 @@
 		1A2A067EFF624CFD47B33B2B /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				01EE661DF4D0B2DE750D896A /* VideoTagManager.app */,
+				01EE661DF4D0B2DE750D896A /* FileFacet.app */,
 				00218ADF00AE850CA7FEA287 /* VideoTagManagerTests.xctest */,
 			);
 			name = Products;
@@ -251,7 +251,7 @@
 			);
 			name = VideoTagManager;
 			productName = VideoTagManager;
-			productReference = 01EE661DF4D0B2DE750D896A /* VideoTagManager.app */;
+			productReference = 01EE661DF4D0B2DE750D896A /* FileFacet.app */;
 			productType = "com.apple.product-type.application";
 		};
 		24ED2A4FCC6EEE5349142A89 /* VideoTagManagerTests */ = {
@@ -452,21 +452,21 @@
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/VideoTagManager.app/Contents/MacOS/VideoTagManager";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FileFacet.app/Contents/MacOS/FileFacet";
 			};
 			name = Debug;
 		};
 		A30660DAE2201C663F21C60E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				APP_DISPLAY_NAME = "Video Tag Manager";
+				APP_DISPLAY_NAME = FileFacet;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Config/VideoTagManager.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = Q554G4S79A;
 				ENABLE_APP_SANDBOX = YES;
@@ -478,9 +478,9 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.larryisthere.video-tag-manager";
-				PRODUCT_NAME = VideoTagManager;
+				PRODUCT_NAME = FileFacet;
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
@@ -502,21 +502,21 @@
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/VideoTagManager.app/Contents/MacOS/VideoTagManager";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FileFacet.app/Contents/MacOS/FileFacet";
 			};
 			name = Release;
 		};
 		EF4C5F106D68F9D52B7924F9 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				APP_DISPLAY_NAME = "Video Tag Manager";
+				APP_DISPLAY_NAME = FileFacet;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Config/VideoTagManager.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = Q554G4S79A;
 				ENABLE_APP_SANDBOX = YES;
@@ -528,9 +528,9 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.larryisthere.video-tag-manager";
-				PRODUCT_NAME = VideoTagManager;
+				PRODUCT_NAME = FileFacet;
 				SDKROOT = macosx;
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 6.0;

@@ -1,0 +1,23 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build FileFacet
+        run: >-
+          xcodebuild
+          -project VideoTagManager.xcodeproj
+          -scheme VideoTagManager
+          -configuration Debug
+          -derivedDataPath .build/DerivedData
+          CODE_SIGNING_ALLOWED=NO
+          build

@@ -1,5 +1,5 @@
 import XCTest
-@testable import VideoTagManager
+@testable import FileFacet
 
 final class MediaProcessingServiceTests: XCTestCase {
     func testInvalidMediaReturnsFailureWithoutLosingVideoIdentity() async throws {

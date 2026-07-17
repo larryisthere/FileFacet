@@ -1,5 +1,5 @@
 import XCTest
-@testable import VideoTagManager
+@testable import FileFacet
 
 final class SidebarModelTests: XCTestCase {
     func testLibraryFiltersPreserveAssociatedTagIdentity() {

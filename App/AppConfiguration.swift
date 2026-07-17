@@ -1,7 +1,7 @@
 import Foundation
 
 enum AppConfiguration {
-    static let internalName = "VideoTagManager"
+    static let internalName = "FileFacet"
     static let bundleIdentifier = "com.larryisthere.video-tag-manager"
     static let minimumSystemVersion = "14.0"
 

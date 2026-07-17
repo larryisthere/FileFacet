@@ -58,20 +58,20 @@ end
 
 app_target.build_configurations.each do |configuration|
   settings = configuration.build_settings
-  settings["APP_DISPLAY_NAME"] = "Video Tag Manager"
+  settings["APP_DISPLAY_NAME"] = "FileFacet"
   settings["CODE_SIGN_ENTITLEMENTS"] = "Config/VideoTagManager.entitlements"
   settings["CODE_SIGN_STYLE"] = "Automatic"
   settings["COMBINE_HIDPI_IMAGES"] = "YES"
-  settings["CURRENT_PROJECT_VERSION"] = "1"
+  settings["CURRENT_PROJECT_VERSION"] = "2"
   settings["ASSETCATALOG_COMPILER_APPICON_NAME"] = "AppIcon"
   settings["ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME"] = "AccentColor"
   settings["ENABLE_APP_SANDBOX"] = "YES"
   settings["ENABLE_HARDENED_RUNTIME"] = "YES"
   settings["GENERATE_INFOPLIST_FILE"] = "NO"
   settings["INFOPLIST_FILE"] = "Config/Info.plist"
-  settings["MARKETING_VERSION"] = "1.0.0"
+  settings["MARKETING_VERSION"] = "1.0.1"
   settings["PRODUCT_BUNDLE_IDENTIFIER"] = "com.larryisthere.video-tag-manager"
-  settings["PRODUCT_NAME"] = "VideoTagManager"
+  settings["PRODUCT_NAME"] = "FileFacet"
   settings["SDKROOT"] = "macosx"
 end
 
@@ -83,7 +83,7 @@ test_target.build_configurations.each do |configuration|
   settings["PRODUCT_BUNDLE_IDENTIFIER"] = "com.larryisthere.video-tag-manager.tests"
   settings["PRODUCT_NAME"] = "VideoTagManagerTests"
   settings["SDKROOT"] = "macosx"
-  settings["TEST_HOST"] = "$(BUILT_PRODUCTS_DIR)/VideoTagManager.app/Contents/MacOS/VideoTagManager"
+  settings["TEST_HOST"] = "$(BUILT_PRODUCTS_DIR)/FileFacet.app/Contents/MacOS/FileFacet"
 end
 
 project.save

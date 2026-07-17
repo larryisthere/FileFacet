@@ -2,7 +2,8 @@
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="VideoTagManager"
+APP_NAME="FileFacet"
+SCHEME="VideoTagManager"
 BUNDLE_ID="com.larryisthere.video-tag-manager"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DERIVED_DATA="$ROOT_DIR/.build/DerivedData"
@@ -35,7 +36,7 @@ EXTERNAL_INSTANCE_PID="$(find_external_instance)"
 
 xcodebuild \
   -project "$ROOT_DIR/VideoTagManager.xcodeproj" \
-  -scheme "$APP_NAME" \
+  -scheme "$SCHEME" \
   -configuration Debug \
   -destination "platform=macOS,arch=arm64" \
   -derivedDataPath "$DERIVED_DATA" \

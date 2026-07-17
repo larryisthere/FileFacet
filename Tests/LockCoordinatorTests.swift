@@ -1,5 +1,5 @@
 import XCTest
-@testable import VideoTagManager
+@testable import FileFacet
 
 @MainActor
 final class LockCoordinatorTests: XCTestCase {

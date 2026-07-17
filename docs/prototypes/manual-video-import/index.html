@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Video Tag Manager · 手动导入原型</title>
+  <title>FileFacet · 手动导入原型</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -580,13 +580,13 @@
 <body>
   <header class="app-menubar" aria-label="应用菜单栏">
     <div class="menu-item-wrap">
-      <button class="menubar-button app-name" id="appMenuButton" aria-haspopup="menu" aria-expanded="false">Video Tag Manager</button>
+      <button class="menubar-button app-name" id="appMenuButton" aria-haspopup="menu" aria-expanded="false">FileFacet</button>
       <div class="menu-popover" id="appMenu" role="menu" hidden>
-        <button class="menu-command" id="aboutMenuItem" role="menuitem"><span>关于 Video Tag Manager</span></button>
+        <button class="menu-command" id="aboutMenuItem" role="menuitem"><span>关于 FileFacet</span></button>
         <div class="menu-divider"></div>
         <button class="menu-command" id="settingsMenuItem" role="menuitem"><span>设置…</span><span class="menu-shortcut">⌘,</span></button>
         <div class="menu-divider"></div>
-        <button class="menu-command" role="menuitem"><span>退出 Video Tag Manager</span><span class="menu-shortcut">⌘Q</span></button>
+        <button class="menu-command" role="menuitem"><span>退出 FileFacet</span><span class="menu-shortcut">⌘Q</span></button>
       </div>
     </div>
     <div class="menu-item-wrap">
@@ -603,7 +603,7 @@
     <button class="menubar-button">帮助</button>
   </header>
   <main class="desktop">
-    <section class="window" aria-label="Video Tag Manager 原型窗口">
+    <section class="window" aria-label="FileFacet 原型窗口">
       <header class="titlebar">
         <div class="titlebar-left">
           <div class="traffic" aria-hidden="true"><span class="red"></span><span class="yellow"></span><span class="green"></span></div>
@@ -727,7 +727,7 @@
             <p class="settings-panel-intro">查看当前安装版本和运行要求。</p>
             <div class="about-lockup">
               <div class="about-icon"><svg viewBox="0 0 24 24"><path d="M4 7.5h6l2 2h8v8.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2z"></path><path d="m9 12 2 2 4-4"></path></svg></div>
-              <div><div class="about-name">Video Tag Manager</div><div class="about-version">版本 1.0.0（构建 1）</div></div>
+              <div><div class="about-name">FileFacet</div><div class="about-version">版本 1.0.1（构建 2）</div></div>
             </div>
             <div class="settings-group">
               <div class="settings-row about-fact"><div class="settings-row-title">最低系统要求</div><div>macOS 14 Sonoma</div></div>
@@ -773,7 +773,7 @@
         <div class="sheet confirm-sheet">
           <div class="sheet-title">
             <h2 id="removalTitle">从资料库移除这个视频？</h2>
-            <p id="removalDetail">视频会从 Video Tag Manager 及其标签中移除，Mac 上的原视频仍会保留。</p>
+            <p id="removalDetail">视频会从 FileFacet 及其标签中移除，Mac 上的原视频仍会保留。</p>
           </div>
           <div class="sheet-footer"><button class="small-button" id="cancelRemoval">取消</button><button class="small-button destructive" id="confirmRemoval">移除</button></div>
         </div>
@@ -940,8 +940,8 @@
         ? `从资料库移除 ${pendingRemovalIDs.length} 个视频？`
         : "从资料库移除这个视频？";
       document.getElementById("removalDetail").textContent = pendingRemovalIDs.length > 1
-        ? "这些视频会从 Video Tag Manager 及其标签中移除，Mac 上的原视频仍会保留。"
-        : "视频会从 Video Tag Manager 及其标签中移除，Mac 上的原视频仍会保留。";
+        ? "这些视频会从 FileFacet 及其标签中移除，Mac 上的原视频仍会保留。"
+        : "视频会从 FileFacet 及其标签中移除，Mac 上的原视频仍会保留。";
       removalBackdrop.classList.add("visible");
     }
 

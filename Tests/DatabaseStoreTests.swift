@@ -1,6 +1,6 @@
 import XCTest
 import SQLite3
-@testable import VideoTagManager
+@testable import FileFacet
 
 final class DatabaseStoreTests: XCTestCase {
     func testMigrationCreatesCurrentSchema() async throws {

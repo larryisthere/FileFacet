@@ -9,7 +9,7 @@
 
 建议首版只使用系统框架与系统 SQLite，不引入第三方运行时依赖。这样有利于控制安装包体积、启动速度、隐私边界和长期维护成本。
 
-内部代号与仓库目录使用 `video_tag_manager`。当前开发显示名为 “Video Tag Manager”，正式产品名可以在后续发布前集中修改。最低支持 macOS 14 Sonoma。
+产品名称为 “FileFacet”。内部代号与仓库目录继续使用 `video_tag_manager`。最低支持 macOS 14 Sonoma。
 
 ## 2. 已确认的本机开发条件
 
@@ -328,7 +328,7 @@ launching → locked → authenticating → unlocked
 ### 已确认
 
 1. 内部代号和仓库目录使用 `video_tag_manager`。
-2. 当前开发显示名为 “Video Tag Manager”，正式产品名支持后续集中修改。
+2. 产品名称为 “FileFacet”。
 3. 最低支持 macOS 14 Sonoma。
 4. 删除父标签时删除整棵子树，只删除标签关系，并提供确认与撤销。
 5. 标签合并时把视频关系、子标签和 Finder 来源映射迁移到目标标签。

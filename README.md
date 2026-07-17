@@ -1,45 +1,66 @@
-# video_tag_manager
+# FileFacet
 
-`video_tag_manager` 是项目内部代号和仓库目录名。当前开发显示名为 “Video Tag Manager”，正式产品名可以在后续发布前集中修改。
+FileFacet 是一款 AppKit-first 的原生 macOS 本地文件标签管理器。当前版本专注于视频，未来可以扩展到更多文件类型。
 
-这是一个 AppKit-first 的原生 macOS 视频标签管理器。用户可以反复导入不同文件夹中的视频，也可以把多个视频、多个文件夹或两者组合直接拖入中部区域，在统一资料库中建立独立于 Finder 的层级标签索引，并使用系统默认播放器打开视频。
+用户可以从不同文件夹反复导入视频，或将多个视频、多个文件夹及混合内容直接拖入应用，在统一资料库中建立独立于 Finder 的层级标签索引。FileFacet 只读取原始视频，不会移动、重命名、修改或删除它们。
 
-## 当前基线
+## 功能
 
-- 当前版本：1.0.0
-- 最低系统版本：macOS 14 Sonoma
-- UI：AppKit 主窗口，SwiftUI 辅助界面
-- 数据库：系统 SQLite3
-- 文件访问：Security-Scoped Bookmark，只读
-- 媒体信息：AVFoundation
-- 文件监听：FSEvents
-- 身份验证：LocalAuthentication
-- 网络：默认无网络请求
+- 层级标签、批量三态编辑、双向拖拽、合并、颜色和单步撤销
+- 跨文件夹统一资料库、稳定文件身份判重和移动位置维护
+- Finder 标签首次入库时单向导入
+- 文件名搜索、父标签递归筛选、多标签 AND、未打标签与最近添加
+- AVFoundation 媒体信息、缩略图、Quick Look、默认播放器和 Finder 定位
+- 可选应用锁、隐私遮罩、闲置锁定和系统身份验证
+- Security-Scoped Bookmark 只读访问与后台 FSEvents 维护
 
-## 工程入口
+## 隐私
 
-- Xcode 工程：`VideoTagManager.xcodeproj`
-- Scheme：`VideoTagManager`
-- 本地运行：`./script/build_and_run.sh`
-- 产品需求：`docs/product/mvp-requirements.md`
-- 架构决策：`docs/architecture/0001-appkit-first.md`
+- 默认不发起网络请求
+- 标签、文件索引、访问授权和缩略图保存在本机
+- 不记录或上传完整文件路径、文件名、标签内容和 Bookmark 数据
+- 原始视频始终保持只读
 
-## 当前实现进度
+数据库继续使用稳定的 Bundle ID `com.larryisthere.video-tag-manager`，因此从旧产品名升级到 FileFacet 时会保留已有资料库和标签。
 
-MVP 阶段 0–5 的核心工程已经建立，当前能力包括：
+## 系统要求
 
-- 可选应用锁默认关闭；启用后支持系统身份验证、切换应用隐私遮罩、睡眠/锁屏强制锁定和闲置锁定时间。
-- “文件 > 导入视频…”与 `⇧⌘I` 可递归导入文件夹；中部区域支持直接拖入多个视频、多个文件夹或混合内容，并为文件夹或文件保存对应的 Security-Scoped Bookmark。
-- 导入阶段、批次进度、取消操作和结果显示在中部标题下方；批次内自动合并父子重叠来源，单个输入失败时继续处理其余项目。
-- SQLite Schema 7、稳定文件身份与标准化 URL 哈希回退判重、跨来源移动位置更新、确认删除清理，以及 Finder 导入标签顶级平铺迁移。
-- AVFoundation 媒体信息、UUID 缩略图、2GB 磁盘缓存清理、AppKit 视频网格和 Inspector。
-- 层级标签、批量三态编辑、双向拖拽、合并、颜色和单步 Command-Z 撤销。
-- 可通过视频右键菜单末项或 `Command-Delete` 将单个或多个视频移出资料库；确认提示保留原视频，操作支持单步撤回。
-- Finder 标签在视频首次入库时单向导入、文件名搜索、父标签递归筛选、多标签 AND、未打标签和最近添加。
-- FSEvents 仅静默维护已有视频；同一目录的文件来源共享监听，来源中新出现的视频始终需要用户再次手动导入。
+- macOS 14 Sonoma 或更高版本
+- Xcode 16 或兼容的更新版本
+- Ruby 与 Bundler，仅在使用 Fastlane 发布流程时需要
 
-自动化与人工验收边界记录在 `docs/product/mvp-acceptance.md`。
+## 构建
 
-## 修改正式显示名
+```bash
+xcodebuild \
+  -project VideoTagManager.xcodeproj \
+  -scheme VideoTagManager \
+  -configuration Debug \
+  -derivedDataPath .build/DerivedData \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
 
-显示名集中在 Xcode build setting `APP_DISPLAY_NAME`。内部 Swift module、target、scheme、仓库目录和 Bundle Identifier 可以继续保持稳定。
+本地开发运行脚本为 `./script/build_and_run.sh`。脚本会构建、签名并启动应用，请先在 Xcode 中配置自己的开发签名。
+
+## 项目结构
+
+- `App/`：应用生命周期与窗口协调
+- `Core/`：数据库、文件授权、扫描、媒体与安全服务
+- `Features/`：资料库、设置与应用锁界面
+- `Tests/`：核心模型和服务自动化测试
+- `docs/product/`：当前需求与验收记录
+- `docs/architecture/`：已接受的架构决策
+- `docs/release.md`：本地、GitHub 与 App Store 发布流程
+
+自动化检查只验证其中写明的断言。产品逻辑、交互和 UI 以用户验收结果为准。
+
+## Release
+
+版本历史见 [CHANGELOG.md](CHANGELOG.md)，正式发布见 [GitHub Releases](https://github.com/larryisthere/FileFacet/releases)。公开安装包需要 Developer ID 签名和 Apple 公证；缺少经过验证的安装包时，Release 页面只提供 GitHub 自动生成的源码归档。
+
+## License
+
+FileFacet 使用 [MIT License](LICENSE)。
+
+贡献说明与安全报告方式分别见 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [SECURITY.md](SECURITY.md)。
