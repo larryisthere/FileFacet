@@ -30,8 +30,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     private var selectionAnchorVideoID: String?
 
     private let emptyState = NSStackView()
-    private let emptyTitleLabel = NSTextField(labelWithString: "从菜单栏导入视频")
-    private let emptyDetailLabel = NSTextField(wrappingLabelWithString: "选择“文件 > 导入视频…”或使用 ⇧⌘I，也可以直接拖入视频或文件夹。")
+    private let emptyTitleLabel = NSTextField(labelWithString: "导入视频与文件夹")
+    private let emptyDetailLabel = NSTextField(wrappingLabelWithString: "选择“文件 > 导入视频与文件夹…”或使用 ⇧⌘I，也可以直接拖入视频或文件夹。")
     init(
         onOpenVideo: @escaping (VideoRecord) -> Void,
         onRevealVideo: @escaping (VideoRecord) -> Void,
@@ -349,8 +349,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
 
     private func updateEmptyState() {
         emptyState.isHidden = videos.isEmpty == false
-        emptyTitleLabel.stringValue = "从菜单栏导入视频"
-        emptyDetailLabel.stringValue = "选择“文件 > 导入视频…”、使用 ⇧⌘I，或直接将视频、文件夹拖到这里。"
+        emptyTitleLabel.stringValue = "导入视频与文件夹"
+        emptyDetailLabel.stringValue = "选择“文件 > 导入视频与文件夹…”、使用 ⇧⌘I，或直接将视频、文件夹拖到这里。"
     }
 
     private func openVideo(at indexPath: IndexPath) {

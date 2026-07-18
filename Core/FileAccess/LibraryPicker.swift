@@ -1,17 +1,21 @@
 import AppKit
+import UniformTypeIdentifiers
 
 @MainActor
 struct LibraryPicker {
-    func chooseDirectory() -> URL? {
+    func chooseImportItems() -> [URL]? {
         let panel = NSOpenPanel()
-        panel.title = "选择包含视频的文件夹"
-        panel.message = "将递归导入所选文件夹及子文件夹中的视频。"
+        panel.title = "选择要导入的视频和文件夹"
+        panel.message = "可选择多个视频、多个文件夹或两者组合；文件夹会递归导入。"
         panel.prompt = "导入"
-        panel.canChooseFiles = false
+        panel.canChooseFiles = true
         panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canCreateDirectories = false
         panel.resolvesAliases = true
-        return panel.runModal() == .OK ? panel.url : nil
+        panel.allowedContentTypes = VideoFileDiscovery.supportedExtensions
+            .sorted()
+            .compactMap { UTType(filenameExtension: $0) }
+        return panel.runModal() == .OK ? panel.urls : nil
     }
 }

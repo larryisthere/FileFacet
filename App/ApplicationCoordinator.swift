@@ -364,7 +364,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         let fileMenuItem = NSMenuItem()
         let fileMenu = NSMenu(title: "文件")
         let importItem = NSMenuItem(
-            title: "导入视频…",
+            title: "导入视频与文件夹…",
             action: #selector(importVideos),
             keyEquivalent: "i"
         )

@@ -27,6 +27,39 @@ private struct LibraryImportRequest {
     let folderCount: Int
 }
 
+private enum LibraryImportEntryPoint: Equatable {
+    case picker
+    case drop
+
+    var emptyMessage: String {
+        switch self {
+        case .picker: "没有可导入的内容。请选择受支持的视频文件或普通文件夹。"
+        case .drop: "没有可导入的内容。请拖入受支持的视频文件或普通文件夹。"
+        }
+    }
+
+    var completionTitle: String {
+        switch self {
+        case .picker: "已完成导入"
+        case .drop: "已完成拖入导入"
+        }
+    }
+
+    func title(for plan: VideoImportPlan) -> String {
+        if self == .picker, plan.roots.count == 1, let root = plan.roots.first {
+            return "正在导入“\(root.url.lastPathComponent)”"
+        }
+        let source = self == .picker ? "选中的" : "拖入的"
+        if plan.fileCount > 0, plan.folderCount > 0 {
+            return "正在导入\(source) \(plan.acceptedInputCount) 个项目"
+        }
+        if plan.folderCount > 0 {
+            return "正在导入\(source) \(plan.folderCount) 个文件夹"
+        }
+        return "正在导入\(source) \(plan.fileCount) 个视频"
+    }
+}
+
 private struct PendingImportSource {
     let id: String
     let url: URL
@@ -171,44 +204,32 @@ final class LibraryAccessCoordinator {
     }
 
     func importVideos() {
-        guard let url = picker.chooseDirectory() else { return }
-        guard let root = VideoFileDiscovery.importRoot(for: url) else {
-            onImportStateChanged?(.failed(message: "无法读取所选文件夹。"))
-            return
-        }
-        runImport(LibraryImportRequest(
-            roots: [root],
-            title: "正在导入“\(url.lastPathComponent)”",
-            completionTitle: "已完成导入“\(url.lastPathComponent)”",
-            initialDetail: "正在扫描文件夹…",
-            inputCount: 1,
-            folderCount: 1
-        ))
+        guard let urls = picker.chooseImportItems() else { return }
+        importItems(urls, entryPoint: .picker)
     }
 
     func importDroppedItems(_ urls: [URL]) {
+        importItems(urls, entryPoint: .drop)
+    }
+
+    private func importItems(_ urls: [URL], entryPoint: LibraryImportEntryPoint) {
         let plan = VideoFileDiscovery.importPlan(for: urls)
         guard plan.roots.isEmpty == false else {
-            onImportStateChanged?(.failed(
-                message: "没有可导入的内容。请拖入视频文件或普通文件夹。"
-            ))
+            onImportStateChanged?(.failed(message: entryPoint.emptyMessage))
             return
         }
-        let title: String
-        if plan.fileCount > 0, plan.folderCount > 0 {
-            title = "正在导入拖入的 \(plan.acceptedInputCount) 个项目"
-        } else if plan.folderCount > 0 {
-            title = "正在导入拖入的 \(plan.folderCount) 个文件夹"
+        let initialDetail: String
+        if plan.collapsedInputCount > 0 {
+            initialDetail = "已合并 \(plan.collapsedInputCount) 个重叠项目，正在处理第 1 / \(plan.roots.count) 个项目…"
+        } else if plan.roots.count == 1, let root = plan.roots.first {
+            initialDetail = root.kind == .directory ? "正在扫描文件夹…" : "正在核对视频…"
         } else {
-            title = "正在导入拖入的 \(plan.fileCount) 个视频"
+            initialDetail = "正在处理第 1 / \(plan.roots.count) 个项目…"
         }
-        let initialDetail = plan.collapsedInputCount > 0
-            ? "已合并 \(plan.collapsedInputCount) 个重叠项目，正在处理第 1 / \(plan.roots.count) 个项目…"
-            : "正在处理第 1 / \(plan.roots.count) 个项目…"
         runImport(LibraryImportRequest(
             roots: plan.roots,
-            title: title,
-            completionTitle: "已完成拖入导入",
+            title: entryPoint.title(for: plan),
+            completionTitle: entryPoint.completionTitle,
             initialDetail: initialDetail,
             inputCount: plan.roots.count,
             folderCount: plan.roots.filter { $0.kind == .directory }.count
