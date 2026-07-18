@@ -1,5 +1,34 @@
 import Foundation
 
+enum TagSortMode: String, CaseIterable {
+    case custom
+    case name
+    case count
+
+    var title: String {
+        switch self {
+        case .custom: "自定义"
+        case .name: "按名称"
+        case .count: "按数量 ↓"
+        }
+    }
+
+    func orders(_ left: TagRecord, before right: TagRecord) -> Bool {
+        switch self {
+        case .custom:
+            if left.sortOrder != right.sortOrder { return left.sortOrder < right.sortOrder }
+        case .name:
+            break
+        case .count:
+            if left.videoCount != right.videoCount { return left.videoCount > right.videoCount }
+        }
+
+        let nameOrder = left.name.localizedStandardCompare(right.name)
+        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+        return left.id < right.id
+    }
+}
+
 enum LibraryFilter: Equatable, Sendable {
     case all
     case untagged

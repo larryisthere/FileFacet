@@ -4,6 +4,7 @@ import AppKit
 final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate, NSTextFieldDelegate {
     static let tagPasteboardType = NSPasteboard.PasteboardType("com.larryisthere.video-tag-manager.tag-id")
     static let videoPasteboardType = NSPasteboard.PasteboardType("com.larryisthere.video-tag-manager.video-ids")
+    private static let tagSortModeDefaultsKey = "sidebar.tagSortMode"
 
     private let outlineView = NSOutlineView()
     private var tags: [TagRecord] = []
@@ -26,6 +27,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var editingTagName: String?
     private var hasEditedTagName = false
     private var isResolvingTagRename = false
+    private var tagSortMode: TagSortMode
 
     init(
         onFilterChanged: @escaping (LibraryFilter) -> Void,
@@ -47,6 +49,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         self.onSetColor = onSetColor
         self.onMergeTag = onMergeTag
         self.onAssignVideos = onAssignVideos
+        tagSortMode = UserDefaults.standard.string(forKey: Self.tagSortModeDefaultsKey)
+            .flatMap(TagSortMode.init(rawValue:)) ?? .custom
         super.init(nibName: nil, bundle: nil)
         rebuildNodes()
     }
@@ -211,6 +215,13 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 cell.configure(expanded: tagGroupExpansionPreference)
                 cell.toggleButton.target = self
                 cell.toggleButton.action = #selector(toggleTagGroup(_:))
+                cell.sortButton.target = self
+                cell.sortButton.action = #selector(showTagSortMenu(_:))
+                cell.sortButton.toolTip = "排序标签：\(tagSortMode.title)"
+                cell.sortButton.setAccessibilityLabel("排序标签，当前为\(tagSortMode.title)")
+                cell.sortButton.contentTintColor = tagSortMode == .custom
+                    ? .secondaryLabelColor
+                    : .controlAccentColor
                 cell.addButton.target = self
                 cell.addButton.action = #selector(beginCreatingRootTagFromButton(_:))
                 return cell
@@ -325,7 +336,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
            item is TagNode || (item as? SidebarGroupNode)?.title == "标签" {
             let tagIDs = Set(rawTagIDs.split(separator: "\n").map(String.init))
             let parentID = (item as? TagNode)?.tag.id
-            if canMoveTags(tagIDs, toParentID: parentID) { return .move }
+            if canMoveTags(tagIDs, toParentID: parentID),
+               canDropTagsInCurrentSortMode(tagIDs, toParentID: parentID) {
+                return .move
+            }
         }
         return []
     }
@@ -340,10 +354,17 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         guard let rawTagIDs = info.draggingPasteboard.string(forType: Self.tagPasteboardType) else { return false }
         let tagIDs = Set(rawTagIDs.split(separator: "\n").map(String.init))
         let parentID = (item as? TagNode)?.tag.id
-        guard canMoveTags(tagIDs, toParentID: parentID) else { return false }
-        let draggedTags = topLevelTags(from: tagsInOutlineOrder().filter { tagIDs.contains($0.id) })
+        guard canMoveTags(tagIDs, toParentID: parentID),
+              canDropTagsInCurrentSortMode(tagIDs, toParentID: parentID) else { return false }
+        let dragOrder = tagSortMode == .custom
+            ? tagsInOutlineOrder()
+            : tags.sorted { TagSortMode.custom.orders($0, before: $1) }
+        let draggedTags = topLevelTags(from: dragOrder.filter { tagIDs.contains($0.id) })
         guard draggedTags.isEmpty == false else { return false }
-        onMoveTags(draggedTags, parentID, max(0, index))
+        let sortOrder = tagSortMode == .custom
+            ? max(0, index)
+            : tags.filter { $0.parentID == parentID && tagIDs.contains($0.id) == false }.count
+        onMoveTags(draggedTags, parentID, sortOrder)
         return true
     }
 
@@ -376,6 +397,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             ancestorID = tagsByID[currentID]?.parentID
         }
         return true
+    }
+
+    private func canDropTagsInCurrentSortMode(_ tagIDs: Set<String>, toParentID parentID: String?) -> Bool {
+        guard tagSortMode != .custom else { return true }
+        let tagsByID = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
+        return tagIDs.allSatisfy { tagsByID[$0]?.parentID != parentID }
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -459,10 +486,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             if let parentID = tag.parentID, let parent = nodes[parentID] { parent.children.append(node) }
             else { roots.append(node) }
         }
+        sortTagNodes(&roots)
         var tagChildren: [Any] = roots
         if let pendingRootTagDraft { tagChildren.insert(pendingRootTagDraft, at: 0) }
         if tagChildren.isEmpty { tagChildren = [SidebarPlaceholderNode(title: "尚无标签")] }
         groups = [library, SidebarGroupNode(title: "标签", children: tagChildren)]
+    }
+
+    private func sortTagNodes(_ nodes: inout [TagNode]) {
+        nodes.sort { tagSortMode.orders($0.tag, before: $1.tag) }
+        for node in nodes { sortTagNodes(&node.children) }
     }
 
     private func restoreExpansionState() {
@@ -537,6 +570,57 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     @objc private func beginCreatingRootTagFromButton(_ sender: Any?) {
         beginCreatingRootTag()
+    }
+
+    @objc private func showTagSortMenu(_ sender: NSButton) {
+        let menu = NSMenu(title: "标签排序")
+        for mode in TagSortMode.allCases {
+            let item = NSMenuItem(title: mode.title, action: #selector(selectTagSortMode(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.rawValue
+            item.state = mode == tagSortMode ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: menu.items.first(where: { $0.state == .on }), at: .zero, in: sender)
+    }
+
+    @objc private func selectTagSortMode(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let mode = TagSortMode(rawValue: rawValue),
+              mode != tagSortMode else { return }
+        let selection = selectedItemKeys()
+        let expandedTagIDs = currentExpandedTagIDs()
+        tagSortMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: Self.tagSortModeDefaultsKey)
+        rebuildNodes()
+        outlineView.reloadData()
+        restoreExpansionState(expandedTagIDs: expandedTagIDs)
+        restoreSelection(selection)
+    }
+
+    private func currentExpandedTagIDs() -> Set<String> {
+        Set((0..<outlineView.numberOfRows).compactMap { row in
+            guard let node = outlineView.item(atRow: row) as? TagNode,
+                  outlineView.isItemExpanded(node) else { return nil }
+            return node.tag.id
+        })
+    }
+
+    private func restoreExpansionState(expandedTagIDs: Set<String>) {
+        for group in groups {
+            if group.title != "标签" || tagGroupExpansionPreference {
+                outlineView.expandItem(group)
+            }
+            restoreExpansionState(in: group.children, expandedTagIDs: expandedTagIDs)
+            updateTagGroupCell(for: group)
+        }
+    }
+
+    private func restoreExpansionState(in items: [Any], expandedTagIDs: Set<String>) {
+        for case let node as TagNode in items {
+            if expandedTagIDs.contains(node.tag.id) { outlineView.expandItem(node) }
+            restoreExpansionState(in: node.children, expandedTagIDs: expandedTagIDs)
+        }
     }
 
     @objc private func commitRootTagDraft(_ sender: NSTextField) {
@@ -953,14 +1037,34 @@ private final class SidebarTagGroupCellView: NSTableCellView {
         return button
     }()
 
+    let sortButton: NSButton = {
+        let image = NSImage(
+            systemSymbolName: "line.3.horizontal.decrease",
+            accessibilityDescription: "排序标签"
+        )?.withSymbolConfiguration(.init(pointSize: 12, weight: .medium)) ?? NSImage()
+        let button = NSButton(image: image, target: nil, action: nil)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.title = ""
+        button.imagePosition = .imageOnly
+        button.bezelStyle = .accessoryBarAction
+        button.isBordered = false
+        button.contentTintColor = .secondaryLabelColor
+        return button
+    }()
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         addSubview(toggleButton)
+        addSubview(sortButton)
         addSubview(addButton)
         NSLayoutConstraint.activate([
             toggleButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
             toggleButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            toggleButton.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: -4),
+            toggleButton.trailingAnchor.constraint(equalTo: sortButton.leadingAnchor, constant: -4),
+            sortButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            sortButton.widthAnchor.constraint(equalToConstant: Self.trailingColumnWidth),
+            sortButton.heightAnchor.constraint(equalToConstant: 22),
+            sortButton.trailingAnchor.constraint(equalTo: addButton.leadingAnchor),
             addButton.trailingAnchor.constraint(
                 equalTo: trailingAnchor,
                 constant: -Self.trailingInset
