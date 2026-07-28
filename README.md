@@ -1,33 +1,142 @@
-# FileFacet
+# FileFacet — Local-first Video Tagging for macOS
 
-FileFacet 是一款 AppKit-first 的原生 macOS 本地文件标签管理器。当前版本专注于视频，未来可以扩展到更多文件类型。
+<p align="center">
+  <img src="Resources/Assets.xcassets/AppIcon.appiconset/app-icon-256@2x.png" width="128" alt="FileFacet macOS video tag manager app icon">
+</p>
 
-用户可以通过菜单选择或直接拖入多个视频、多个文件夹及混合内容，在统一资料库中建立独立于 Finder 的层级标签索引。FileFacet 只读取原始视频，不会移动、重命名、修改或删除它们。
+English | [简体中文](README.zh-CN.md)
 
-## 功能
+FileFacet is a native, local-first macOS video tag manager for organizing videos across multiple folders with hierarchical tags. Your original files stay in place and remain read-only.
 
-- 层级标签、批量三态编辑、双向拖拽、合并、颜色和单步撤销
-- 跨文件夹统一资料库、稳定文件身份判重和移动位置维护
-- Finder 标签首次入库时单向导入
-- 文件名搜索、父标签递归筛选、多标签 AND、未打标签与最近添加
-- AVFoundation 媒体信息、缩略图、Quick Look、默认播放器和 Finder 定位
-- 可选应用锁、隐私遮罩、闲置锁定和系统身份验证
-- Security-Scoped Bookmark 只读访问与后台 FSEvents 维护
+[Download the latest release](https://github.com/larryisthere/FileFacet/releases/latest) · [Browse all releases](https://github.com/larryisthere/FileFacet/releases)
 
-## 隐私
+> The current release uses a Simplified Chinese interface. English localization is planned.
 
-- 默认不发起网络请求
-- 标签、文件索引、访问授权和缩略图保存在本机
-- 不记录或上传完整文件路径、文件名、标签内容和 Bookmark 数据
-- 原始视频始终保持只读
+## Who FileFacet is for
 
-## 系统要求
+FileFacet is designed for people who keep videos locally and want a flexible way to organize them without changing their folder structure:
 
-- macOS 14 Sonoma 或更高版本
-- Xcode 16 或兼容的更新版本
-- Ruby 与 Bundler，仅在使用 Fastlane 发布流程时需要
+- Creators managing footage across projects and storage locations
+- People organizing personal or private video collections
+- Anyone who needs tags for people, sources, purposes, status, or other overlapping categories
+- Mac users who want an app-specific hierarchy beyond Finder's flat tags
 
-## 构建
+## Why FileFacet
+
+- **One library across folders** — import individual videos, multiple folders, or a mixture of both into one searchable library.
+- **Hierarchical video tags** — build multi-level tag trees, batch-edit assignments, merge tags, add colors, and organize tags with drag and drop.
+- **Files stay where they are** — FileFacet reads original videos without moving, renaming, modifying, or deleting them.
+- **Local-first and private** — the library index, tags, access permissions, and thumbnails stay on your Mac. FileFacet makes no network requests by default.
+- **Native macOS workflow** — use Quick Look, open videos in your default player, reveal files in Finder, and protect the library with optional system authentication.
+
+If FileFacet fits your workflow, [star the repository](https://github.com/larryisthere/FileFacet) to support its development and find it again.
+
+## How it works
+
+1. Choose **File > Import Videos and Folders…** or drag videos and folders into FileFacet.
+2. FileFacet recursively discovers supported videos and adds them to a unified library.
+3. Existing Finder tags are imported once when a video first enters the library.
+4. Create hierarchical tags, apply them to one or many videos, and filter the library by tag or filename.
+5. Preview with Quick Look, open a video in your default player, or reveal it in Finder.
+
+Repeated imports are safe: the same file keeps a single library record, including when parent folders, child folders, and individual videos overlap.
+
+## Features
+
+### Organize
+
+- Multi-level tags with custom order, name sorting, and video-count sorting
+- Single- and multi-video tagging with selected, unselected, and mixed states
+- Drag videos onto tags or tags onto videos
+- Tag creation, renaming, reparenting, merging, colors, and single-step undo
+- One-time Finder tag import into independent FileFacet tags
+
+### Find and browse
+
+- Filename search
+- Recursive parent-tag filtering
+- Multi-tag AND filtering
+- Untagged and recently added collections
+- Video thumbnails, duration, dimensions, and file information
+- Quick Look, default-player playback, Finder reveal, and path copying
+
+### Protect your library
+
+- Optional app lock using macOS system authentication
+- Privacy shield when the library is locked
+- Configurable idle locking
+- Local storage for the index, tags, bookmarks, and thumbnails
+- Read-only access to original videos
+
+### Keep locations current
+
+- Stable file identity prevents duplicate records across imported sources
+- Background maintenance follows supported moves and renames
+- Missing and deleted files are reconciled without changing the originals
+
+## Download and install
+
+### Requirements
+
+- macOS 14 Sonoma or later
+- Apple silicon or Intel Mac
+- Simplified Chinese interface in the current release
+
+### Installation
+
+1. Open the [latest GitHub Release](https://github.com/larryisthere/FileFacet/releases/latest).
+2. Download the `FileFacet-<version>-<build>-macOS-universal.zip` asset.
+3. Unzip it and move `FileFacet.app` to your Applications folder.
+4. Open FileFacet and import the videos or folders you want to organize.
+
+Public release builds are Universal Apps signed with Developer ID and notarized by Apple. Each release also includes a SHA-256 checksum.
+
+## Supported video formats
+
+- MP4
+- MOV
+- M4V
+- MKV
+- AVI
+- WebM
+
+Media playback and preview availability can depend on the codecs supported by the installed macOS version and the user's selected apps.
+
+## Privacy and file safety
+
+- FileFacet makes no network requests by default.
+- Tags, the file index, access permissions, and thumbnails are stored locally.
+- Logs exclude full file paths, filenames, tag contents, and bookmark data.
+- Original videos are opened with read-only access.
+- Removing a video from the FileFacet library leaves the original file untouched.
+
+The optional app lock protects access to FileFacet. It does not encrypt the original video files.
+
+## Frequently asked questions
+
+### Does FileFacet move or modify my videos?
+
+No. FileFacet indexes videos in their existing locations and keeps read-only access to the originals.
+
+### Does FileFacet write to Finder tags?
+
+No. Finder tags are read once when a video first enters the library. Imported tags then become independent FileFacet tags, so later edits in either system do not change the other.
+
+### Can I import from multiple folders?
+
+Yes. Videos, folders, and mixed selections share one library, tag tree, search scope, and filtering space.
+
+### Does FileFacet upload library data?
+
+No. FileFacet makes no network requests by default, and library data stays on the Mac.
+
+### What happens when a video moves?
+
+FileFacet uses file identity and authorized source locations to maintain the library record when supported moves or renames are detected.
+
+## Build from source
+
+Building FileFacet requires Xcode 16 or a compatible newer version.
 
 ```bash
 xcodebuild \
@@ -39,26 +148,28 @@ xcodebuild \
   build
 ```
 
-本地开发运行脚本为 `./script/build_and_run.sh`。脚本会构建、签名并启动应用，请先在 Xcode 中配置自己的开发签名。
+The local development script is `./script/build_and_run.sh`. It builds, signs, and launches the app, so configure your development signing in Xcode before using it.
 
-## 项目结构
+Ruby and Bundler are only required for the Fastlane release workflow documented in [docs/release.md](docs/release.md).
 
-- `App/`：应用生命周期与窗口协调
-- `Core/`：数据库、文件授权、扫描、媒体与安全服务
-- `Features/`：资料库、设置与应用锁界面
-- `Tests/`：核心模型和服务自动化测试
-- `docs/product/`：当前需求与验收记录
-- `docs/architecture/`：已接受的架构决策
-- `docs/release.md`：本地、GitHub 与 App Store 发布流程
+## Project structure
 
-自动化检查只验证其中写明的断言。产品逻辑、交互和 UI 以用户验收结果为准。
+- `App/` — application lifecycle and window coordination
+- `Core/` — database, file access, scanning, media, and security services
+- `Features/` — library, settings, and app-lock interfaces
+- `Tests/` — automated checks for core models and services
+- `docs/product/` — current requirements and acceptance records
+- `docs/architecture/` — accepted architecture decisions
+- `docs/release.md` — local, GitHub, and App Store release workflows
 
-## Release
+Automated checks validate only their stated assertions. Product logic, interaction, and UI remain subject to user acceptance.
 
-版本历史见 [CHANGELOG.md](CHANGELOG.md)，正式发布见 [GitHub Releases](https://github.com/larryisthere/FileFacet/releases)。Release 页面提供经过 Developer ID 签名和 Apple 公证的 Universal App，以及 GitHub 自动生成的源码归档。
+## Contributing and security
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+
+Report vulnerabilities privately by following [SECURITY.md](SECURITY.md).
 
 ## License
 
-FileFacet 使用 [MIT License](LICENSE)。
-
-贡献说明与安全报告方式分别见 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [SECURITY.md](SECURITY.md)。
+FileFacet is available under the [MIT License](LICENSE).
