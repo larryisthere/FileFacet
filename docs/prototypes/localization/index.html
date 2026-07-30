@@ -1,0 +1,1399 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FileFacet · Localization review prototype</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --desktop: #d6dbe1;
+      --window: rgba(246, 246, 247, 0.96);
+      --toolbar: rgba(245, 245, 246, 0.92);
+      --sidebar: rgba(231, 232, 234, 0.94);
+      --content: #f7f7f7;
+      --inspector: #f1f1f2;
+      --text: #1f2328;
+      --secondary: #6e747c;
+      --tertiary: #90959c;
+      --line: rgba(60, 60, 67, 0.18);
+      --line-strong: rgba(60, 60, 67, 0.29);
+      --accent: #0a84ff;
+      --accent-soft: rgba(10, 132, 255, 0.14);
+      --danger: #d7352a;
+      --success: #21883f;
+      --warning: #9b5c00;
+      --shadow: 0 28px 74px rgba(25, 31, 40, 0.26), 0 2px 10px rgba(25, 31, 40, 0.14);
+      --radius: 14px;
+      font-family: BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --desktop: #17191c;
+        --window: rgba(43, 43, 46, 0.97);
+        --toolbar: rgba(44, 44, 47, 0.94);
+        --sidebar: rgba(36, 37, 40, 0.96);
+        --content: #1d1e20;
+        --inspector: #27282b;
+        --text: #f2f2f4;
+        --secondary: #afb2b7;
+        --tertiary: #858990;
+        --line: rgba(235, 235, 245, 0.14);
+        --line-strong: rgba(235, 235, 245, 0.25);
+        --accent-soft: rgba(10, 132, 255, 0.22);
+        --danger: #ff6961;
+        --success: #43b75f;
+        --warning: #e8a64a;
+        --shadow: 0 28px 80px rgba(0, 0, 0, 0.58), 0 2px 10px rgba(0, 0, 0, 0.42);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+
+    html, body {
+      min-width: 860px;
+      min-height: 720px;
+      margin: 0;
+      color: var(--text);
+      background: var(--desktop);
+      font-size: 13px;
+    }
+
+    body {
+      background:
+        radial-gradient(circle at 10% 5%, rgba(255,255,255,.58), transparent 31%),
+        linear-gradient(145deg, rgba(186, 202, 219, .44), rgba(220, 222, 225, .16));
+    }
+
+    button, input { font: inherit; }
+    button { color: inherit; cursor: default; }
+    svg { display: block; }
+
+    .review-shell {
+      min-height: 100vh;
+      padding: 20px 24px 34px;
+    }
+
+    .review-head {
+      display: grid;
+      grid-template-columns: minmax(250px, 1fr) auto;
+      align-items: end;
+      gap: 24px;
+      width: min(1260px, 100%);
+      margin: 0 auto 14px;
+    }
+
+    .review-title {
+      margin: 0 0 4px;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: -.01em;
+    }
+
+    .review-subtitle {
+      max-width: 690px;
+      margin: 0;
+      color: var(--secondary);
+      line-height: 1.45;
+    }
+
+    .fallback-pill {
+      display: inline-flex;
+      margin-left: 8px;
+      padding: 2px 7px;
+      border: 1px solid rgba(155, 92, 0, .35);
+      border-radius: 999px;
+      color: var(--warning);
+      background: rgba(232, 166, 74, .12);
+      font-size: 11px;
+      font-weight: 600;
+      vertical-align: 1px;
+    }
+
+    .control-deck {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px 12px;
+    }
+
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .control-label {
+      color: var(--secondary);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .segmented {
+      display: inline-flex;
+      padding: 2px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(127,127,127,.09);
+    }
+
+    .segmented button {
+      min-height: 24px;
+      padding: 2px 9px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      font-size: 12px;
+    }
+
+    .segmented button[aria-pressed="true"] {
+      background: color-mix(in srgb, var(--window) 95%, white 5%);
+      box-shadow: 0 1px 3px rgba(0,0,0,.16), inset 0 0 0 .5px rgba(255,255,255,.32);
+      font-weight: 600;
+    }
+
+    .prototype-stage {
+      position: relative;
+      width: min(1260px, 100%);
+      height: min(760px, calc(100vh - 134px));
+      min-height: 590px;
+      margin: 0 auto;
+      transition: width 180ms ease;
+    }
+
+    .prototype-stage.compact { width: min(960px, 100%); }
+
+    .app-window {
+      position: relative;
+      display: grid;
+      grid-template-columns: 218px minmax(420px, 1fr) 276px;
+      grid-template-rows: 52px minmax(0, 1fr);
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.55);
+      border-radius: var(--radius);
+      background: var(--window);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(28px) saturate(1.32);
+    }
+
+    .prototype-stage.compact .app-window {
+      grid-template-columns: 196px minmax(360px, 1fr) 248px;
+    }
+
+    .titlebar {
+      grid-column: 1 / 4;
+      display: grid;
+      grid-template-columns: 218px minmax(420px, 1fr) 276px;
+      border-bottom: 1px solid var(--line);
+      background: var(--toolbar);
+    }
+
+    .prototype-stage.compact .titlebar {
+      grid-template-columns: 196px minmax(360px, 1fr) 248px;
+    }
+
+    .title-left,
+    .title-center,
+    .title-right {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 8px;
+      padding: 0 11px;
+    }
+
+    .title-left { border-right: 1px solid var(--line); }
+    .title-right { justify-content: flex-end; border-left: 1px solid var(--line); }
+
+    .traffic { display: flex; gap: 8px; margin-right: 8px; }
+    .traffic span {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      box-shadow: inset 0 0 0 .5px rgba(0,0,0,.16);
+    }
+    .traffic .red { background: #ff5f57; }
+    .traffic .yellow { background: #febc2e; }
+    .traffic .green { background: #28c840; }
+
+    .icon-button {
+      display: inline-grid;
+      width: 29px;
+      height: 28px;
+      flex: 0 0 auto;
+      place-items: center;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+    }
+
+    .icon-button:hover { background: rgba(127,127,127,.14); }
+    .icon-button:active { background: rgba(127,127,127,.23); }
+    .icon-button svg,
+    .row-icon,
+    .search svg {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .context-block { min-width: 0; }
+    .context-title {
+      overflow: hidden;
+      margin: 0;
+      font-size: 13px;
+      font-weight: 650;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .context-subtitle {
+      margin-top: 1px;
+      overflow: hidden;
+      color: var(--secondary);
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .toolbar-spacer { flex: 1; }
+
+    .search {
+      display: flex;
+      width: min(188px, 22vw);
+      height: 28px;
+      align-items: center;
+      gap: 6px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--secondary);
+      background: rgba(127,127,127,.1);
+    }
+    .search input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      color: var(--text);
+      background: transparent;
+    }
+    .search input::placeholder { color: var(--tertiary); }
+
+    .sidebar {
+      grid-column: 1;
+      grid-row: 2;
+      min-height: 0;
+      overflow: auto;
+      padding: 10px 8px 16px;
+      border-right: 1px solid var(--line);
+      background: var(--sidebar);
+    }
+
+    .section-head {
+      display: flex;
+      height: 27px;
+      align-items: center;
+      gap: 5px;
+      padding: 8px 8px 3px;
+      color: var(--secondary);
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .section-head .spacer { flex: 1; }
+    .section-head button {
+      display: grid;
+      width: 22px;
+      height: 20px;
+      place-items: center;
+      border: 0;
+      border-radius: 4px;
+      color: var(--secondary);
+      background: transparent;
+    }
+    .section-head button:hover { background: rgba(127,127,127,.14); }
+
+    .source-row {
+      display: grid;
+      min-height: 28px;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      border-radius: 6px;
+    }
+    .source-row.selected {
+      background: var(--accent-soft);
+      color: color-mix(in srgb, var(--accent) 78%, var(--text));
+    }
+    .source-row .label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .source-row .count {
+      color: var(--secondary);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+    .indent-1 { padding-left: 25px; }
+    .indent-2 { padding-left: 42px; }
+
+    .tag-dot {
+      width: 9px;
+      height: 9px;
+      margin-left: 3px;
+      border-radius: 50%;
+      background: #ff9f0a;
+      box-shadow: inset 0 0 0 .5px rgba(0,0,0,.12);
+    }
+    .tag-dot.blue { background: #0a84ff; }
+    .tag-dot.green { background: #30d158; }
+    .tag-dot.red { background: #ff453a; }
+
+    .content {
+      position: relative;
+      grid-column: 2;
+      grid-row: 2;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      background: var(--content);
+    }
+
+    .status-strip {
+      display: grid;
+      min-height: 58px;
+      grid-template-columns: 24px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--content) 88%, var(--accent-soft));
+    }
+    .status-strip.error {
+      background: color-mix(in srgb, var(--content) 90%, rgba(215,53,42,.14));
+    }
+    .status-icon {
+      display: grid;
+      width: 24px;
+      height: 24px;
+      place-items: center;
+      border-radius: 50%;
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .status-strip.error .status-icon {
+      color: var(--danger);
+      background: rgba(215,53,42,.12);
+    }
+    .status-title { font-weight: 650; }
+    .status-detail { margin-top: 2px; color: var(--secondary); font-size: 11px; line-height: 1.35; }
+    .status-action {
+      min-height: 25px;
+      padding: 3px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: var(--window);
+    }
+
+    .progress-track {
+      height: 3px;
+      background: rgba(127,127,127,.15);
+    }
+    .progress-fill {
+      width: 62%;
+      height: 100%;
+      background: var(--accent);
+      animation: progressPulse 1.8s ease-in-out infinite alternate;
+    }
+    @keyframes progressPulse {
+      from { opacity: .58; }
+      to { opacity: 1; }
+    }
+
+    .grid-scroll {
+      height: 100%;
+      overflow: auto;
+      padding: 18px;
+    }
+    .status-strip:not([hidden]) + .progress-track + .grid-scroll,
+    .status-strip:not([hidden]) + .grid-scroll {
+      height: calc(100% - 58px);
+    }
+    .status-strip:not([hidden]) + .progress-track + .grid-scroll {
+      height: calc(100% - 61px);
+    }
+
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(138px, 1fr));
+      gap: 17px 14px;
+    }
+
+    .video-card {
+      min-width: 0;
+      padding: 4px;
+      border: 2px solid transparent;
+      border-radius: 9px;
+    }
+    .video-card.selected {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .thumbnail {
+      position: relative;
+      aspect-ratio: 16 / 10;
+      overflow: hidden;
+      border-radius: 6px;
+      background: #26303a;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.18);
+    }
+    .thumbnail::before,
+    .thumbnail::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+    }
+    .thumbnail::before {
+      width: 82%;
+      height: 82%;
+      right: -19%;
+      bottom: -38%;
+      background: rgba(255,255,255,.17);
+    }
+    .thumbnail::after {
+      width: 46%;
+      height: 46%;
+      left: -9%;
+      top: -12%;
+      background: rgba(10,132,255,.36);
+    }
+    .thumbnail.warm { background: #6b3a25; }
+    .thumbnail.warm::after { background: rgba(255,159,10,.44); }
+    .thumbnail.green { background: #254538; }
+    .thumbnail.green::after { background: rgba(48,209,88,.32); }
+    .thumbnail.slate { background: #39414b; }
+    .duration {
+      position: absolute;
+      right: 5px;
+      bottom: 5px;
+      z-index: 2;
+      padding: 1px 4px;
+      border-radius: 4px;
+      color: white;
+      background: rgba(0,0,0,.68);
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    .video-name {
+      overflow: hidden;
+      margin: 6px 2px 0;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .video-meta { margin: 2px 2px 0; color: var(--secondary); font-size: 10px; }
+
+    .empty-state {
+      display: grid;
+      height: 100%;
+      place-content: center;
+      justify-items: center;
+      padding: 42px;
+      text-align: center;
+    }
+    .empty-icon {
+      display: grid;
+      width: 64px;
+      height: 64px;
+      margin-bottom: 14px;
+      place-items: center;
+      border-radius: 16px;
+      color: var(--secondary);
+      background: rgba(127,127,127,.1);
+    }
+    .empty-icon svg { width: 32px; height: 32px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+    .empty-state h2 { margin: 0; font-size: 16px; }
+    .empty-state p { max-width: 410px; margin: 8px 0 0; color: var(--secondary); line-height: 1.48; }
+    .shortcut {
+      display: inline-block;
+      margin-top: 13px;
+      padding: 3px 7px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: rgba(127,127,127,.08);
+      font-size: 11px;
+    }
+
+    .inspector {
+      grid-column: 3;
+      grid-row: 2;
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      border-left: 1px solid var(--line);
+      background: var(--inspector);
+    }
+    .inspector-body { flex: 1; min-height: 0; overflow: auto; padding: 15px; }
+    .inspector-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      margin-bottom: 12px;
+      padding: 2px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(127,127,127,.09);
+    }
+    .inspector-tabs button {
+      height: 24px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+    }
+    .inspector-tabs button.active {
+      background: var(--window);
+      box-shadow: 0 1px 3px rgba(0,0,0,.13);
+      font-weight: 600;
+    }
+    .inspector-search {
+      width: 100%;
+      height: 28px;
+      margin-bottom: 13px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      outline: 0;
+      color: var(--text);
+      background: rgba(127,127,127,.08);
+    }
+    .selection-heading { margin: 2px 0 12px; font-size: 14px; font-weight: 650; }
+    .tag-check {
+      display: grid;
+      min-height: 30px;
+      grid-template-columns: 16px 10px minmax(0,1fr);
+      align-items: center;
+      gap: 7px;
+      padding: 4px 3px;
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+    }
+    .check {
+      display: grid;
+      width: 15px;
+      height: 15px;
+      place-items: center;
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      color: white;
+      background: transparent;
+      font-size: 10px;
+    }
+    .check.on { border-color: var(--accent); background: var(--accent); }
+    .check.mixed { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+    .tag-check.indent { padding-left: 17px; }
+    .details { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 9px 12px; }
+    .details dt { color: var(--secondary); }
+    .details dd { overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; }
+    .filename { margin: 0 0 15px; overflow-wrap: anywhere; font-size: 14px; font-weight: 650; }
+
+    .draft-actions {
+      padding: 11px 15px 14px;
+      border-top: 1px solid var(--line);
+      background: color-mix(in srgb, var(--inspector) 92%, var(--window));
+    }
+    .draft-summary { min-height: 32px; color: var(--secondary); font-size: 11px; line-height: 1.35; }
+    .button-row { display: flex; justify-content: flex-end; gap: 8px; }
+    .mac-button {
+      min-height: 26px;
+      padding: 3px 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: var(--window);
+    }
+    .mac-button.primary { border-color: var(--accent); color: white; background: var(--accent); }
+
+    .settings {
+      grid-column: 1 / 4;
+      grid-row: 2;
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+      min-height: 0;
+      background: var(--content);
+    }
+    .settings-nav {
+      padding: 12px 9px;
+      border-right: 1px solid var(--line);
+      background: var(--sidebar);
+    }
+    .settings-detail { overflow: auto; padding: 36px 44px; }
+    .settings-detail h1 { margin: 0 0 22px; font-size: 23px; }
+    .form-group {
+      max-width: 650px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--window);
+    }
+    .form-row {
+      display: grid;
+      min-height: 48px;
+      grid-template-columns: minmax(160px, 1fr) auto;
+      align-items: center;
+      gap: 24px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .form-row:last-child { border-bottom: 0; }
+    .toggle {
+      width: 34px;
+      height: 20px;
+      padding: 2px;
+      border: 0;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+    .toggle::after {
+      content: "";
+      display: block;
+      width: 16px;
+      height: 16px;
+      margin-left: 14px;
+      border-radius: 50%;
+      background: white;
+      box-shadow: 0 1px 3px rgba(0,0,0,.26);
+    }
+    .select-like {
+      min-width: 128px;
+      padding: 4px 24px 4px 9px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: var(--window);
+    }
+    .form-note { max-width: 650px; margin: 10px 2px; color: var(--secondary); line-height: 1.45; }
+    .about-block { display: flex; align-items: center; gap: 18px; margin-bottom: 26px; }
+    .about-block img { width: 66px; height: 66px; border-radius: 14px; }
+    .about-block h2 { margin: 0 0 4px; font-size: 20px; }
+    .about-block p { margin: 0; color: var(--secondary); }
+
+    .alert-backdrop {
+      position: absolute;
+      z-index: 20;
+      inset: 52px 0 0;
+      display: grid;
+      place-items: center;
+      background: rgba(20,22,26,.2);
+      backdrop-filter: blur(2px);
+    }
+
+    .menu-popover {
+      position: absolute;
+      z-index: 24;
+      top: 43px;
+      left: 84px;
+      width: 286px;
+      padding: 5px;
+      border: 1px solid rgba(255,255,255,.46);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--window) 97%, transparent);
+      box-shadow: 0 16px 38px rgba(0,0,0,.28), 0 2px 7px rgba(0,0,0,.14);
+      backdrop-filter: blur(26px) saturate(1.3);
+    }
+    .menu-command {
+      display: grid;
+      width: 100%;
+      min-height: 25px;
+      grid-template-columns: minmax(0,1fr) auto;
+      align-items: center;
+      gap: 18px;
+      padding: 3px 9px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      text-align: left;
+    }
+    .menu-command:hover { color: white; background: var(--accent); }
+    .menu-command span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .menu-shortcut { color: var(--secondary); font-variant-numeric: tabular-nums; }
+    .menu-command:hover .menu-shortcut { color: rgba(255,255,255,.85); }
+    .menu-divider { height: 1px; margin: 4px 6px; background: var(--line); }
+
+    .lock-state {
+      grid-column: 1 / 4;
+      grid-row: 2;
+      display: grid;
+      place-content: center;
+      justify-items: center;
+      padding: 48px;
+      text-align: center;
+      background: var(--content);
+    }
+    .lock-state .empty-icon { color: var(--accent); background: var(--accent-soft); }
+    .lock-state h1 { margin: 0; font-size: 20px; }
+    .lock-state p { max-width: 460px; margin: 8px 0 20px; color: var(--secondary); line-height: 1.48; }
+    .alert {
+      width: min(420px, calc(100% - 48px));
+      padding: 22px;
+      border: 1px solid rgba(255,255,255,.52);
+      border-radius: 13px;
+      background: color-mix(in srgb, var(--window) 97%, transparent);
+      box-shadow: 0 24px 54px rgba(0,0,0,.32);
+    }
+    .alert h2 { margin: 0 0 7px; font-size: 15px; }
+    .alert p { margin: 0; color: var(--secondary); line-height: 1.45; }
+    .alert .button-row { margin-top: 20px; }
+
+    .review-note {
+      position: absolute;
+      right: 18px;
+      bottom: 16px;
+      z-index: 30;
+      max-width: 310px;
+      padding: 9px 11px;
+      border: 1px solid rgba(155,92,0,.27);
+      border-radius: 8px;
+      color: var(--warning);
+      background: color-mix(in srgb, var(--window) 91%, rgba(232,166,74,.18));
+      box-shadow: 0 8px 20px rgba(0,0,0,.12);
+      font-size: 11px;
+      line-height: 1.4;
+      pointer-events: none;
+    }
+
+    @media (max-height: 790px) {
+      .review-shell { padding-top: 12px; }
+      .prototype-stage { height: calc(100vh - 112px); }
+      .review-subtitle { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true">
+    <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+    <symbol id="i-inspector" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></symbol>
+    <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9h4M3 15h4M17 9h4M17 15h4"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M4 5h7l9 9-6 6-9-9Z"/><circle cx="8.5" cy="8.5" r="1"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10H3Z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-sort" viewBox="0 0 24 24"><path d="M8 7h9M8 12h7M8 17h5M5 6v12"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 3.5 19h17Z"/><path d="M12 9v4M12 16h.01"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V8a4 4 0 0 1 8 0v2"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+  </svg>
+
+  <main class="review-shell">
+    <header class="review-head">
+      <div>
+        <h1 class="review-title">FileFacet · Localization review</h1>
+        <p class="review-subtitle">
+          Review language coverage, English text expansion, plural behavior, fallback and the main user-visible states.
+          Controls in this header belong to the prototype only.
+          <span id="fallbackPill" class="fallback-pill" hidden>English fallback</span>
+        </p>
+      </div>
+
+      <div class="control-deck" aria-label="Prototype controls">
+        <div class="control-group">
+          <span class="control-label">Language</span>
+          <div class="segmented" id="localeControl">
+            <button data-locale="en" aria-pressed="true">English</button>
+            <button data-locale="zh" aria-pressed="false">简体中文</button>
+            <button data-locale="fallback" aria-pressed="false">Fallback</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <span class="control-label">State</span>
+          <div class="segmented" id="sceneControl">
+            <button data-scene="library" aria-pressed="true">Library</button>
+            <button data-scene="empty" aria-pressed="false">Empty</button>
+            <button data-scene="import" aria-pressed="false">Import</button>
+            <button data-scene="tags" aria-pressed="false">Tags</button>
+            <button data-scene="menu" aria-pressed="false">Menu</button>
+            <button data-scene="error" aria-pressed="false">Error</button>
+            <button data-scene="settings" aria-pressed="false">Settings</button>
+            <button data-scene="lock" aria-pressed="false">Lock</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <span class="control-label">Width</span>
+          <div class="segmented" id="widthControl">
+            <button data-width="wide" aria-pressed="true">Wide</button>
+            <button data-width="compact" aria-pressed="false">Compact</button>
+          </div>
+        </div>
+        <div class="control-group">
+          <span class="control-label">Plural</span>
+          <div class="segmented" id="countControl">
+            <button data-count="0" aria-pressed="false">0</button>
+            <button data-count="1" aria-pressed="false">1</button>
+            <button data-count="2" aria-pressed="true">2</button>
+            <button data-count="4" aria-pressed="false">4</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <section class="prototype-stage" id="prototypeStage">
+      <div class="app-window">
+        <header class="titlebar">
+          <div class="title-left">
+            <div class="traffic" aria-hidden="true">
+              <span class="red"></span><span class="yellow"></span><span class="green"></span>
+            </div>
+            <button class="icon-button" aria-label="Toggle sidebar"><svg><use href="#i-sidebar"/></svg></button>
+          </div>
+
+          <div class="title-center">
+            <button class="icon-button" id="backButton" hidden aria-label="Back"><svg><use href="#i-back"/></svg></button>
+            <div class="context-block">
+              <p class="context-title" data-i18n="library.allVideos">All Videos</p>
+              <div class="context-subtitle" id="contextCount">24 videos</div>
+            </div>
+            <div class="toolbar-spacer"></div>
+            <label class="search" id="searchBox">
+              <svg><use href="#i-search"/></svg>
+              <input data-i18n-placeholder="search.filename" placeholder="Search filenames">
+            </label>
+            <button class="icon-button" id="zoomOut" aria-label="Decrease thumbnail size">−</button>
+            <button class="icon-button" id="zoomIn" aria-label="Increase thumbnail size">+</button>
+          </div>
+
+          <div class="title-right">
+            <button class="icon-button" aria-label="Toggle inspector"><svg><use href="#i-inspector"/></svg></button>
+          </div>
+        </header>
+
+        <aside class="sidebar" id="sidebar">
+          <div class="section-head" data-i18n="sidebar.library">Library</div>
+          <div class="source-row selected">
+            <svg class="row-icon"><use href="#i-film"/></svg>
+            <span class="label" data-i18n="library.allVideos">All Videos</span>
+            <span class="count">24</span>
+          </div>
+          <div class="source-row">
+            <svg class="row-icon"><use href="#i-clock"/></svg>
+            <span class="label" data-i18n="library.recent">Recently Added</span>
+            <span class="count">8</span>
+          </div>
+          <div class="source-row">
+            <svg class="row-icon"><use href="#i-tag"/></svg>
+            <span class="label" data-i18n="library.untagged">Untagged</span>
+            <span class="count">3</span>
+          </div>
+
+          <div class="section-head">
+            <span data-i18n="sidebar.tags">Tags</span>
+            <span class="spacer"></span>
+            <button aria-label="Sort tags"><svg class="row-icon"><use href="#i-sort"/></svg></button>
+            <button aria-label="New tag"><svg class="row-icon"><use href="#i-plus"/></svg></button>
+          </div>
+          <div class="source-row">
+            <span></span><span class="label">Projects</span><span class="count">11</span>
+          </div>
+          <div class="source-row indent-1">
+            <span class="tag-dot blue"></span><span class="label">Product demos</span><span class="count">5</span>
+          </div>
+          <div class="source-row indent-1">
+            <span class="tag-dot"></span><span class="label">Interviews</span><span class="count">6</span>
+          </div>
+          <div class="source-row">
+            <span></span><span class="label">Personal</span><span class="count">9</span>
+          </div>
+          <div class="source-row indent-1">
+            <span class="tag-dot green"></span><span class="label">Travel</span><span class="count">7</span>
+          </div>
+          <div class="source-row indent-1">
+            <span class="tag-dot red"></span><span class="label">Private</span><span class="count">2</span>
+          </div>
+        </aside>
+
+        <section class="content" id="libraryContent">
+          <div class="status-strip" id="importStatus" hidden>
+            <div class="status-icon"><svg class="row-icon"><use href="#i-folder"/></svg></div>
+            <div>
+              <div class="status-title" data-i18n="import.title">Importing selected items</div>
+              <div class="status-detail" data-i18n="import.detail">Scanning item 2 of 3… 18 videos found.</div>
+            </div>
+            <button class="status-action" data-i18n="action.cancel">Cancel</button>
+          </div>
+          <div class="progress-track" id="importProgress" hidden><div class="progress-fill"></div></div>
+
+          <div class="status-strip error" id="errorStatus" hidden>
+            <div class="status-icon"><svg class="row-icon"><use href="#i-alert"/></svg></div>
+            <div>
+              <div class="status-title" data-i18n="error.title">The import could not be completed</div>
+              <div class="status-detail" data-i18n="error.detail">Videos already added remain in your library. Check access and try the remaining items again.</div>
+            </div>
+            <button class="status-action" data-i18n="action.retry">Try Again</button>
+          </div>
+
+          <div class="grid-scroll" id="gridScroll">
+            <div class="video-grid" id="videoGrid">
+              <article class="video-card selected">
+                <div class="thumbnail"><span class="duration">08:42</span></div>
+                <div class="video-name">Design review — July.mov</div>
+                <div class="video-meta">3840 × 2160 · 2.1 GB</div>
+              </article>
+              <article class="video-card selected">
+                <div class="thumbnail warm"><span class="duration">03:16</span></div>
+                <div class="video-name">Market interview 04.mp4</div>
+                <div class="video-meta">1920 × 1080 · 684 MB</div>
+              </article>
+              <article class="video-card">
+                <div class="thumbnail green"><span class="duration">12:09</span></div>
+                <div class="video-name">Coastline morning.m4v</div>
+                <div class="video-meta">3840 × 2160 · 3.8 GB</div>
+              </article>
+              <article class="video-card">
+                <div class="thumbnail slate"><span class="duration">01:58</span></div>
+                <div class="video-name">Material test 07.mov</div>
+                <div class="video-meta">1920 × 1080 · 412 MB</div>
+              </article>
+              <article class="video-card">
+                <div class="thumbnail warm"><span class="duration">22:41</span></div>
+                <div class="video-name">Workshop complete session.mp4</div>
+                <div class="video-meta">2560 × 1440 · 4.4 GB</div>
+              </article>
+              <article class="video-card">
+                <div class="thumbnail green"><span class="duration">05:25</span></div>
+                <div class="video-name">Family trip selection.mov</div>
+                <div class="video-meta">3840 × 2160 · 1.9 GB</div>
+              </article>
+              <article class="video-card">
+                <div class="thumbnail slate"><span class="duration">00:47</span></div>
+                <div class="video-name">Launch detail close-up.mp4</div>
+                <div class="video-meta">1920 × 1080 · 186 MB</div>
+              </article>
+              <article class="video-card">
+                <div class="thumbnail"><span class="duration">09:10</span></div>
+                <div class="video-name">Research notes capture.mov</div>
+                <div class="video-meta">2560 × 1440 · 1.2 GB</div>
+              </article>
+            </div>
+          </div>
+
+          <div class="empty-state" id="emptyState" hidden>
+            <div class="empty-icon"><svg><use href="#i-film"/></svg></div>
+            <h2 data-i18n="empty.title">Import videos and folders</h2>
+            <p data-i18n="empty.detail">Choose File > Import Videos and Folders…, press ⇧⌘I, or drag videos and folders into this window.</p>
+            <span class="shortcut">⇧⌘I</span>
+          </div>
+        </section>
+
+        <aside class="inspector" id="inspector">
+          <div class="inspector-body">
+            <div class="inspector-tabs">
+              <button class="active" data-panel="tags" data-i18n="inspector.tags">Tags</button>
+              <button data-panel="details" data-i18n="inspector.details">Details</button>
+            </div>
+
+            <div id="tagPanel">
+              <input class="inspector-search" data-i18n-placeholder="tag.search" placeholder="Search or create a tag">
+              <div class="selection-heading" id="selectionHeading">2 videos selected</div>
+              <div class="tag-check"><span class="check on">✓</span><span class="tag-dot blue"></span><span>Product demos</span></div>
+              <div class="tag-check"><span class="check mixed">−</span><span class="tag-dot"></span><span>Interviews</span></div>
+              <div class="tag-check"><span class="check"></span><span></span><span>Personal</span></div>
+              <div class="tag-check indent"><span class="check"></span><span class="tag-dot green"></span><span>Travel</span></div>
+              <div class="tag-check indent"><span class="check"></span><span class="tag-dot red"></span><span>Private</span></div>
+            </div>
+
+            <div id="detailPanel" hidden>
+              <p class="filename">Design review — July.mov</p>
+              <dl class="details">
+                <dt data-i18n="detail.format">Format</dt><dd>MOV</dd>
+                <dt data-i18n="detail.size">Size</dt><dd>2.1 GB</dd>
+                <dt data-i18n="detail.duration">Duration</dt><dd>08:42</dd>
+                <dt data-i18n="detail.resolution">Resolution</dt><dd>3840 × 2160</dd>
+                <dt data-i18n="detail.created">Created</dt><dd>Jul 26, 2026 at 10:18 AM</dd>
+                <dt data-i18n="detail.modified">Modified</dt><dd>Jul 29, 2026 at 7:42 PM</dd>
+                <dt data-i18n="detail.path">Full Path</dt><dd>/Volumes/Media/Projects/Design review — July.mov</dd>
+              </dl>
+            </div>
+          </div>
+
+          <footer class="draft-actions" id="draftActions">
+            <div class="draft-summary" data-i18n="tag.draft">Add 1 tag and remove 1 tag. Changes have not been applied.</div>
+            <div class="button-row">
+              <button class="mac-button" data-i18n="action.cancel">Cancel</button>
+              <button class="mac-button primary" data-i18n="action.apply">Apply</button>
+            </div>
+          </footer>
+        </aside>
+
+        <section class="settings" id="settingsView" hidden>
+          <nav class="settings-nav">
+            <div class="source-row selected" data-settings-section="privacy">
+              <svg class="row-icon"><use href="#i-lock"/></svg>
+              <span class="label" data-i18n="settings.privacy">Privacy</span>
+            </div>
+            <div class="source-row" data-settings-section="about">
+              <svg class="row-icon"><use href="#i-info"/></svg>
+              <span class="label" data-i18n="settings.about">About</span>
+            </div>
+          </nav>
+
+          <div class="settings-detail" id="privacySettings">
+            <h1 data-i18n="settings.privacy">Privacy</h1>
+            <div class="form-group">
+              <div class="form-row">
+                <span data-i18n="settings.enableLock">Enable App Lock</span>
+                <button class="toggle" aria-label="Enable App Lock"></button>
+              </div>
+              <div class="form-row">
+                <span data-i18n="settings.lockAfter">Lock After Inactivity</span>
+                <button class="select-like" data-i18n="settings.fiveMinutes">5 Minutes</button>
+              </div>
+            </div>
+            <p class="form-note" data-i18n="settings.lockNote">When enabled, use Touch ID or your Mac login password to authenticate. Video and tag information is always hidden when the app switches away.</p>
+          </div>
+
+          <div class="settings-detail" id="aboutSettings" hidden>
+            <h1 data-i18n="settings.about">About</h1>
+            <div class="about-block">
+              <img src="../../../Resources/AppIconSource.png" alt="">
+              <div><h2>FileFacet</h2><p data-i18n="about.version">Version 1.0.2 (Build 3)</p></div>
+            </div>
+            <div class="form-group">
+              <div class="form-row"><span data-i18n="about.minimum">Minimum System Requirement</span><span>macOS 14.0</span></div>
+              <div class="form-row"><span data-i18n="about.data">Data and Videos</span><span data-i18n="about.local">Stored locally · Original videos are read-only</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="lock-state" id="lockState" hidden>
+          <div class="empty-icon"><svg><use href="#i-lock"/></svg></div>
+          <h1 data-i18n="lock.title">FileFacet is Locked</h1>
+          <p data-i18n="lock.detail">Continue with Touch ID or your Mac login password to view videos and tags.</p>
+          <button class="mac-button primary" data-i18n="lock.action">Unlock</button>
+        </section>
+
+        <div class="menu-popover" id="fileMenuPopover" hidden>
+          <button class="menu-command"><span data-i18n="menu.import">Import Videos and Folders…</span><span class="menu-shortcut">⇧⌘I</span></button>
+          <button class="menu-command"><span data-i18n="menu.newTag">New Tag…</span><span class="menu-shortcut">⇧⌘N</span></button>
+          <div class="menu-divider"></div>
+          <button class="menu-command"><span data-i18n="menu.close">Close Window</span><span class="menu-shortcut">⌘W</span></button>
+        </div>
+
+        <div class="alert-backdrop" id="alertBackdrop" hidden>
+          <section class="alert" role="alertdialog" aria-modal="true">
+            <h2 data-i18n="error.dialogTitle">The selected items could not be accessed</h2>
+            <p data-i18n="error.dialogDetail">FileFacet could not retain permission to read these items. Choose the videos or folders again and confirm access.</p>
+            <div class="button-row">
+              <button class="mac-button" data-i18n="action.cancel">Cancel</button>
+              <button class="mac-button primary" data-i18n="action.chooseAgain">Choose Again</button>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="review-note" id="reviewNote">
+        Prototype-only controls sit above the window. The released app follows the macOS language setting and keeps the existing three-column workflow.
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const copy = {
+      en: {
+        "sidebar.library": "Library",
+        "sidebar.tags": "Tags",
+        "library.allVideos": "All Videos",
+        "library.recent": "Recently Added",
+        "library.untagged": "Untagged",
+        "search.filename": "Search filenames",
+        "import.title": "Importing selected items",
+        "import.detail": "Scanning item 2 of 3… 18 videos found.",
+        "error.title": "The import could not be completed",
+        "error.detail": "Videos already added remain in your library. Check access and try the remaining items again.",
+        "empty.title": "Import videos and folders",
+        "empty.detail": "Choose File > Import Videos and Folders…, press ⇧⌘I, or drag videos and folders into this window.",
+        "inspector.tags": "Tags",
+        "inspector.details": "Details",
+        "tag.search": "Search or create a tag",
+        "tag.draft": "Add 1 tag and remove 1 tag. Changes have not been applied.",
+        "detail.format": "Format",
+        "detail.size": "Size",
+        "detail.duration": "Duration",
+        "detail.resolution": "Resolution",
+        "detail.created": "Created",
+        "detail.modified": "Modified",
+        "detail.path": "Full Path",
+        "settings.privacy": "Privacy",
+        "settings.about": "About",
+        "settings.enableLock": "Enable App Lock",
+        "settings.lockAfter": "Lock After Inactivity",
+        "settings.fiveMinutes": "5 Minutes",
+        "settings.lockNote": "When enabled, use Touch ID or your Mac login password to authenticate. Video and tag information is always hidden when the app switches away.",
+        "lock.title": "FileFacet is Locked",
+        "lock.detail": "Continue with Touch ID or your Mac login password to view videos and tags.",
+        "lock.action": "Unlock",
+        "menu.import": "Import Videos and Folders…",
+        "menu.newTag": "New Tag…",
+        "menu.close": "Close Window",
+        "about.version": "Version 1.0.2 (Build 3)",
+        "about.minimum": "Minimum System Requirement",
+        "about.data": "Data and Videos",
+        "about.local": "Stored locally · Original videos are read-only",
+        "error.dialogTitle": "The selected items could not be accessed",
+        "error.dialogDetail": "FileFacet could not retain permission to read these items. Choose the videos or folders again and confirm access.",
+        "action.cancel": "Cancel",
+        "action.retry": "Try Again",
+        "action.apply": "Apply",
+        "action.chooseAgain": "Choose Again"
+      },
+      zh: {
+        "sidebar.library": "资料库",
+        "sidebar.tags": "标签",
+        "library.allVideos": "全部视频",
+        "library.recent": "最近添加",
+        "library.untagged": "未打标签",
+        "search.filename": "搜索文件名",
+        "import.title": "正在导入所选项目",
+        "import.detail": "正在扫描第 2 / 3 个项目…已发现 18 个视频。",
+        "error.title": "视频导入未完成",
+        "error.detail": "已经加入的视频会保留。请检查访问权限，然后重试剩余项目。",
+        "empty.title": "导入视频与文件夹",
+        "empty.detail": "选择“文件 > 导入视频与文件夹…”、使用 ⇧⌘I，或直接将视频、文件夹拖到这里。",
+        "inspector.tags": "标签",
+        "inspector.details": "详情",
+        "tag.search": "搜索或新建标签",
+        "tag.draft": "添加 1 个标签并移除 1 个标签，尚未应用。",
+        "detail.format": "格式",
+        "detail.size": "大小",
+        "detail.duration": "时长",
+        "detail.resolution": "分辨率",
+        "detail.created": "创建时间",
+        "detail.modified": "修改时间",
+        "detail.path": "完整路径",
+        "settings.privacy": "隐私",
+        "settings.about": "关于",
+        "settings.enableLock": "启用应用锁",
+        "settings.lockAfter": "闲置后锁定",
+        "settings.fiveMinutes": "5 分钟",
+        "settings.lockNote": "开启时使用 Touch ID 或 Mac 登录密码验证。应用切换时始终隐藏窗口中的视频与标签信息。",
+        "lock.title": "FileFacet 已锁定",
+        "lock.detail": "通过 Touch ID 或 Mac 登录密码继续查看视频与标签。",
+        "lock.action": "解锁",
+        "menu.import": "导入视频与文件夹…",
+        "menu.newTag": "新建标签…",
+        "menu.close": "关闭窗口",
+        "about.version": "版本 1.0.2（构建 3）",
+        "about.minimum": "最低系统要求",
+        "about.data": "数据与视频",
+        "about.local": "本地保存 · 原视频只读",
+        "error.dialogTitle": "无法访问所选项目",
+        "error.dialogDetail": "FileFacet 无法保留这些项目的读取权限。请重新选择视频或文件夹并确认访问。",
+        "action.cancel": "取消",
+        "action.retry": "重试",
+        "action.apply": "应用",
+        "action.chooseAgain": "重新选择"
+      }
+    };
+
+    const state = {
+      locale: "en",
+      scene: "library",
+      width: "wide",
+      count: 2,
+      panel: "tags",
+      settingsSection: "privacy"
+    };
+
+    const stage = document.getElementById("prototypeStage");
+    const fallbackPill = document.getElementById("fallbackPill");
+    const libraryContent = document.getElementById("libraryContent");
+    const sidebar = document.getElementById("sidebar");
+    const inspector = document.getElementById("inspector");
+    const settingsView = document.getElementById("settingsView");
+    const videoGrid = document.getElementById("videoGrid");
+    const gridScroll = document.getElementById("gridScroll");
+    const emptyState = document.getElementById("emptyState");
+    const importStatus = document.getElementById("importStatus");
+    const importProgress = document.getElementById("importProgress");
+    const errorStatus = document.getElementById("errorStatus");
+    const alertBackdrop = document.getElementById("alertBackdrop");
+    const backButton = document.getElementById("backButton");
+    const searchBox = document.getElementById("searchBox");
+    const zoomOut = document.getElementById("zoomOut");
+    const zoomIn = document.getElementById("zoomIn");
+    const draftActions = document.getElementById("draftActions");
+    const reviewNote = document.getElementById("reviewNote");
+    const fileMenuPopover = document.getElementById("fileMenuPopover");
+    const lockState = document.getElementById("lockState");
+
+    function activeLocale() {
+      return state.locale === "zh" ? "zh" : "en";
+    }
+
+    function selectedVideoCopy(count) {
+      if (activeLocale() === "zh") return `已选择 ${count} 个视频`;
+      return count === 1 ? "1 video selected" : `${count} videos selected`;
+    }
+
+    function libraryCountCopy(count) {
+      if (activeLocale() === "zh") return `${count} 个视频`;
+      return count === 1 ? "1 video" : `${count} videos`;
+    }
+
+    function applyCopy() {
+      const localeCopy = copy[activeLocale()];
+      document.documentElement.lang = activeLocale() === "zh" ? "zh-CN" : "en";
+      document.querySelectorAll("[data-i18n]").forEach((element) => {
+        const value = localeCopy[element.dataset.i18n];
+        if (value) element.textContent = value;
+      });
+      document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => {
+        const value = localeCopy[element.dataset.i18nPlaceholder];
+        if (value) element.placeholder = value;
+      });
+      document.getElementById("selectionHeading").textContent = selectedVideoCopy(state.count);
+      document.getElementById("contextCount").textContent = libraryCountCopy(24);
+      fallbackPill.hidden = state.locale !== "fallback";
+    }
+
+    function applyScene() {
+      const settings = state.scene === "settings";
+      const empty = state.scene === "empty";
+      const importing = state.scene === "import";
+      const tags = state.scene === "tags";
+      const menu = state.scene === "menu";
+      const error = state.scene === "error";
+      const lock = state.scene === "lock";
+
+      libraryContent.hidden = settings || lock;
+      sidebar.hidden = settings || lock;
+      inspector.hidden = settings || empty || lock;
+      settingsView.hidden = !settings;
+      lockState.hidden = !lock;
+      fileMenuPopover.hidden = !menu;
+      videoGrid.hidden = empty;
+      gridScroll.hidden = empty;
+      emptyState.hidden = !empty;
+      importStatus.hidden = !importing;
+      importProgress.hidden = !importing;
+      errorStatus.hidden = !error;
+      alertBackdrop.hidden = !error;
+      draftActions.hidden = !tags;
+      backButton.hidden = !settings;
+      searchBox.hidden = settings || empty || lock;
+      zoomOut.hidden = settings || empty || lock;
+      zoomIn.hidden = settings || empty || lock;
+
+      document.querySelector(".context-title").textContent = settings
+        ? copy[activeLocale()]["settings.privacy"]
+        : lock
+          ? "FileFacet"
+          : copy[activeLocale()]["library.allVideos"];
+      document.getElementById("contextCount").hidden = settings || lock;
+
+      if (tags) {
+        state.panel = "tags";
+        renderInspectorPanel();
+      }
+
+      reviewNote.textContent = settings
+        ? "Settings verifies long English form labels and explanatory copy. The language switch remains outside the app."
+        : lock
+          ? "The locked state removes video, filename and tag content from the whole window before authentication."
+          : menu
+            ? "The File menu verifies command length and shortcut alignment in both supported languages."
+            : error
+              ? "The error state keeps the outcome, retained data and recovery action visible in both languages."
+              : "Prototype-only controls sit above the window. The released app follows the macOS language setting and keeps the existing three-column workflow.";
+    }
+
+    function renderInspectorPanel() {
+      const tags = state.panel === "tags";
+      document.getElementById("tagPanel").hidden = !tags;
+      document.getElementById("detailPanel").hidden = tags;
+      document.querySelectorAll("[data-panel]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.panel === state.panel);
+      });
+    }
+
+    function renderSettingsSection() {
+      const privacy = state.settingsSection === "privacy";
+      document.getElementById("privacySettings").hidden = !privacy;
+      document.getElementById("aboutSettings").hidden = privacy;
+      document.querySelectorAll("[data-settings-section]").forEach((row) => {
+        row.classList.toggle("selected", row.dataset.settingsSection === state.settingsSection);
+      });
+      document.querySelector(".context-title").textContent = copy[activeLocale()][privacy ? "settings.privacy" : "settings.about"];
+    }
+
+    function render() {
+      stage.classList.toggle("compact", state.width === "compact");
+      applyCopy();
+      applyScene();
+      renderInspectorPanel();
+      if (state.scene === "settings") renderSettingsSection();
+    }
+
+    function wireSegmented(controlId, stateKey, dataKey) {
+      document.getElementById(controlId).addEventListener("click", (event) => {
+        const button = event.target.closest("button");
+        if (!button) return;
+        state[stateKey] = button.dataset[dataKey];
+        button.parentElement.querySelectorAll("button").forEach((item) => {
+          item.setAttribute("aria-pressed", String(item === button));
+        });
+        render();
+      });
+    }
+
+    wireSegmented("localeControl", "locale", "locale");
+    wireSegmented("sceneControl", "scene", "scene");
+    wireSegmented("widthControl", "width", "width");
+
+    document.getElementById("countControl").addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      state.count = Number(button.dataset.count);
+      button.parentElement.querySelectorAll("button").forEach((item) => {
+        item.setAttribute("aria-pressed", String(item === button));
+      });
+      applyCopy();
+    });
+
+    document.querySelectorAll("[data-panel]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.panel = button.dataset.panel;
+        renderInspectorPanel();
+      });
+    });
+
+    document.querySelectorAll("[data-settings-section]").forEach((row) => {
+      row.addEventListener("click", () => {
+        state.settingsSection = row.dataset.settingsSection;
+        renderSettingsSection();
+      });
+    });
+
+    backButton.addEventListener("click", () => {
+      state.scene = "library";
+      document.querySelectorAll("#sceneControl button").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.scene === "library"));
+      });
+      render();
+    });
+
+    alertBackdrop.addEventListener("click", (event) => {
+      if (event.target === alertBackdrop) alertBackdrop.hidden = true;
+    });
+
+    render();
+  </script>
+</body>
+</html>

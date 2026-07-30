@@ -136,7 +136,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
         if item == nil { return groups.count }
         if let group = item as? SidebarGroupNode {
-            if group.title == "标签", tagGroupExpansionPreference == false { return 0 }
+            if group.kind == .tags, tagGroupExpansionPreference == false { return 0 }
             return group.children.count
         }
         if let tag = item as? TagNode { return tag.children.count }
@@ -157,7 +157,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     func outlineView(_ outlineView: NSOutlineView, shouldShowOutlineCellForItem item: Any) -> Bool {
         guard let group = item as? SidebarGroupNode else { return true }
-        return group.title != "标签"
+        return group.kind != .tags
     }
 
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
@@ -196,7 +196,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             return
         }
         if selectedTags.count > 1 {
-            onSelectionTitleChanged("已选 \(selectedTags.count) 个标签", nil)
+            onSelectionTitleChanged(String(localized: .selectionTagCount(selectedTags.count)), nil)
             onFilterChanged(.tags(selectedTags.map(\.id)))
             return
         }
@@ -208,7 +208,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         if let group = item as? SidebarGroupNode {
-            if group.title == "标签" {
+            if group.kind == .tags {
                 let identifier = NSUserInterfaceItemIdentifier("SidebarTagGroupCell")
                 let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? SidebarTagGroupCellView
                     ?? makeTagGroupCell(identifier: identifier)
@@ -217,8 +217,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 cell.toggleButton.action = #selector(toggleTagGroup(_:))
                 cell.sortButton.target = self
                 cell.sortButton.action = #selector(showTagSortMenu(_:))
-                cell.sortButton.toolTip = "排序标签：\(tagSortMode.title)"
-                cell.sortButton.setAccessibilityLabel("排序标签，当前为\(tagSortMode.title)")
+                cell.sortButton.toolTip = String(localized: .tagSortTooltip(tagSortMode.title))
+                cell.sortButton.setAccessibilityLabel(
+                    String(localized: .tagSortVoiceover(tagSortMode.title))
+                )
                 cell.sortButton.contentTintColor = tagSortMode == .custom
                     ? .secondaryLabelColor
                     : .controlAccentColor
@@ -285,7 +287,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         } else if item is SidebarDraftTagNode {
             cell.textField?.identifier = SidebarInlineTagTextField.draftIdentifier
             cell.textField?.stringValue = ""
-            cell.textField?.placeholderString = "新标签"
+            cell.textField?.placeholderString = String(localized: .tagCreateTitle)
             cell.textField?.isEditable = true
             cell.textField?.isSelectable = true
             cell.textField?.isBordered = true
@@ -298,7 +300,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             (cell.textField as? SidebarInlineTagTextField)?.onCancel = { [weak self] in
                 self?.cancelRootTagDraft()
             }
-            cell.imageView?.image = tagDotSymbol(description: "新标签")
+            cell.imageView?.image = tagDotSymbol(description: String(localized: .tagCreateTitle))
             cell.imageView?.imageAlignment = .alignRight
             cell.imageView?.contentTintColor = .controlAccentColor
         } else if let placeholder = item as? SidebarPlaceholderNode {
@@ -333,7 +335,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             return .copy
         }
         if let rawTagIDs = info.draggingPasteboard.string(forType: Self.tagPasteboardType),
-           item is TagNode || (item as? SidebarGroupNode)?.title == "标签" {
+           item is TagNode || (item as? SidebarGroupNode)?.kind == .tags {
             let tagIDs = Set(rawTagIDs.split(separator: "\n").map(String.init))
             let parentID = (item as? TagNode)?.tag.id
             if canMoveTags(tagIDs, toParentID: parentID),
@@ -409,24 +411,28 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         menu.removeAllItems()
         guard let tag = clickedTag() else {
             guard canCreateRootTagFromContextMenu else { return }
-            let item = NSMenuItem(title: "新建标签…", action: #selector(createRootTag), keyEquivalent: "")
+            let item = NSMenuItem(
+                title: String(localized: .tagActionCreateMenu),
+                action: #selector(createRootTag),
+                keyEquivalent: ""
+            )
             item.target = self
             menu.addItem(item)
             return
         }
         let createChildItem = NSMenuItem(
-            title: "新建子标签…",
+            title: String(localized: .tagActionCreateChild),
             action: #selector(createTag),
             keyEquivalent: ""
         )
         let renameItem = NSMenuItem(
-            title: "重命名…",
+            title: String(localized: .tagActionRenameMenu),
             action: #selector(renameTag(_:)),
             keyEquivalent: ""
         )
         renameItem.representedObject = TagActionContext(tag: tag)
         let deleteItem = NSMenuItem(
-            title: "删除…",
+            title: String(localized: .tagActionDeleteMenu),
             action: #selector(deleteTag),
             keyEquivalent: ""
         )
@@ -436,13 +442,22 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         }
         menu.addItem(.separator())
         let colorMenu = NSMenu()
-        for (title, value) in [("无", ""), ("红", "red"), ("橙", "orange"), ("黄", "yellow"), ("绿", "green"), ("蓝", "blue"), ("紫", "purple")] {
+        let colorOptions = [
+            (String(localized: .colorNone), ""),
+            (String(localized: .colorRed), "red"),
+            (String(localized: .colorOrange), "orange"),
+            (String(localized: .colorYellow), "yellow"),
+            (String(localized: .colorGreen), "green"),
+            (String(localized: .colorBlue), "blue"),
+            (String(localized: .colorPurple), "purple"),
+        ]
+        for (title, value) in colorOptions {
             let item = NSMenuItem(title: title, action: #selector(setColor(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = TagActionContext(tag: tag, value: value)
             colorMenu.addItem(item)
         }
-        let colorItem = NSMenuItem(title: "颜色", action: nil, keyEquivalent: "")
+        let colorItem = NSMenuItem(title: String(localized: .tagActionColor), action: nil, keyEquivalent: "")
         colorItem.submenu = colorMenu
         menu.addItem(colorItem)
         let mergeMenu = NSMenu()
@@ -452,28 +467,32 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             item.representedObject = TagActionContext(tag: tag, target: target)
             mergeMenu.addItem(item)
         }
-        let mergeItem = NSMenuItem(title: "合并到", action: nil, keyEquivalent: "")
+        let mergeItem = NSMenuItem(
+            title: String(localized: .tagActionMergeInto),
+            action: nil,
+            keyEquivalent: ""
+        )
         mergeItem.submenu = mergeMenu
         mergeItem.isEnabled = mergeMenu.items.isEmpty == false
         menu.addItem(mergeItem)
     }
 
     private func rebuildNodes() {
-        let library = SidebarGroupNode(title: "资料库", children: [
+        let library = SidebarGroupNode(kind: .library, title: String(localized: .libraryGroup), children: [
             SidebarFilterNode(
-                title: "全部视频",
+                title: String(localized: .libraryAllVideos),
                 systemImageName: "film",
                 filter: .all,
                 videoCount: filterCounts.all
             ),
             SidebarFilterNode(
-                title: "最近添加",
+                title: String(localized: .libraryRecent),
                 systemImageName: "clock",
                 filter: .recent,
                 videoCount: filterCounts.recent
             ),
             SidebarFilterNode(
-                title: "未打标签",
+                title: String(localized: .libraryUntagged),
                 systemImageName: "tag.slash",
                 filter: .untagged,
                 videoCount: filterCounts.untagged
@@ -489,8 +508,13 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         sortTagNodes(&roots)
         var tagChildren: [Any] = roots
         if let pendingRootTagDraft { tagChildren.insert(pendingRootTagDraft, at: 0) }
-        if tagChildren.isEmpty { tagChildren = [SidebarPlaceholderNode(title: "尚无标签")] }
-        groups = [library, SidebarGroupNode(title: "标签", children: tagChildren)]
+        if tagChildren.isEmpty {
+            tagChildren = [SidebarPlaceholderNode(title: String(localized: .sidebarNoTags))]
+        }
+        groups = [
+            library,
+            SidebarGroupNode(kind: .tags, title: String(localized: .sidebarTags), children: tagChildren),
+        ]
     }
 
     private func sortTagNodes(_ nodes: inout [TagNode]) {
@@ -500,7 +524,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     private func restoreExpansionState() {
         for group in groups {
-            if group.title != "标签" || tagGroupExpansionPreference {
+            if group.kind != .tags || tagGroupExpansionPreference {
                 outlineView.expandItem(group, expandChildren: true)
             }
             updateTagGroupCell(for: group)
@@ -555,7 +579,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var displayedTagGroup: SidebarGroupNode? {
         for row in 0..<outlineView.numberOfRows {
             guard let group = outlineView.item(atRow: row) as? SidebarGroupNode else { continue }
-            if group.title == "标签" { return group }
+            if group.kind == .tags { return group }
         }
         return nil
     }
@@ -573,7 +597,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     @objc private func showTagSortMenu(_ sender: NSButton) {
-        let menu = NSMenu(title: "标签排序")
+        let menu = NSMenu(title: String(localized: .tagSortMenu))
         for mode in TagSortMode.allCases {
             let item = NSMenuItem(title: mode.title, action: #selector(selectTagSortMode(_:)), keyEquivalent: "")
             item.target = self
@@ -608,7 +632,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     private func restoreExpansionState(expandedTagIDs: Set<String>) {
         for group in groups {
-            if group.title != "标签" || tagGroupExpansionPreference {
+            if group.kind != .tags || tagGroupExpansionPreference {
                 outlineView.expandItem(group)
             }
             restoreExpansionState(in: group.children, expandedTagIDs: expandedTagIDs)
@@ -716,7 +740,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard cleanName.isEmpty == false else {
-            keepTagRenameActive(message: "标签名称不能为空")
+            keepTagRenameActive(message: String(localized: .tagValidationEmpty))
             return
         }
         let hasSiblingWithSameName = tags.contains { candidate in
@@ -728,7 +752,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 ) == .orderedSame
         }
         guard hasSiblingWithSameName == false else {
-            keepTagRenameActive(message: "同一级中已有同名标签")
+            keepTagRenameActive(message: String(localized: .tagValidationDuplicate))
             return
         }
 
@@ -846,14 +870,17 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var canCreateRootTagFromContextMenu: Bool {
         guard outlineView.clickedRow >= 0 else { return true }
         if let group = outlineView.item(atRow: outlineView.clickedRow) as? SidebarGroupNode {
-            return group.title == "标签"
+            return group.kind == .tags
         }
         return outlineView.item(atRow: outlineView.clickedRow) is SidebarPlaceholderNode
     }
 
     @objc private func createTag() {
         let parent = clickedTag() ?? selectedTag()
-        if let name = prompt(title: parent == nil ? "新建标签" : "新建子标签", value: "") {
+        let title = parent == nil
+            ? String(localized: .tagCreateTitle)
+            : String(localized: .tagCreateChildTitle)
+        if let name = prompt(title: title, value: "") {
             onCreateTag(name, parent?.id)
         }
     }
@@ -872,10 +899,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     @objc private func deleteTag() {
         guard let tag = clickedTag() ?? selectedTag() else { return }
         let alert = NSAlert()
-        alert.messageText = "删除“\(tag.name)”及其全部子标签？"
-        alert.informativeText = "视频文件不会被删除，相关标签关系会被移除。"
-        alert.addButton(withTitle: "删除")
-        alert.addButton(withTitle: "取消")
+        alert.messageText = String(localized: .tagDeleteTitle(tag.name))
+        alert.informativeText = String(localized: .tagDeleteDetail)
+        alert.addButton(withTitle: String(localized: .tagActionDelete))
+        alert.addButton(withTitle: String(localized: .actionCancel))
         if alert.runModal() == .alertFirstButtonReturn { onDeleteTag(tag) }
     }
     @objc private func setColor(_ sender: NSMenuItem) {
@@ -893,8 +920,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         let field = NSTextField(string: value)
         field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
         alert.accessoryView = field
-        alert.addButton(withTitle: "保存")
-        alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: String(localized: .actionSave))
+        alert.addButton(withTitle: String(localized: .actionCancel))
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
         let result = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         return result.isEmpty ? nil : result
@@ -1007,7 +1034,7 @@ private final class SidebarTagGroupCellView: NSTableCellView {
     static let trailingInset: CGFloat = 9
 
     let toggleButton: NSButton = {
-        let button = NSButton(title: "标签", target: nil, action: nil)
+        let button = NSButton(title: String(localized: .sidebarTags), target: nil, action: nil)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.isBordered = false
         button.alignment = .left
@@ -1016,14 +1043,14 @@ private final class SidebarTagGroupCellView: NSTableCellView {
         button.imagePosition = .imageTrailing
         button.imageHugsTitle = true
         button.focusRingType = .none
-        button.setAccessibilityLabel("展开或收起标签")
+        button.setAccessibilityLabel(String(localized: .accessibilityTagToggle))
         return button
     }()
 
     let addButton: NSButton = {
         let image = NSImage(
             systemSymbolName: "plus",
-            accessibilityDescription: "新建标签"
+            accessibilityDescription: String(localized: .tagActionCreate)
         )?.withSymbolConfiguration(.init(pointSize: 12, weight: .medium)) ?? NSImage()
         let button = NSButton(image: image, target: nil, action: nil)
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -1032,15 +1059,15 @@ private final class SidebarTagGroupCellView: NSTableCellView {
         button.bezelStyle = .accessoryBarAction
         button.isBordered = false
         button.contentTintColor = .secondaryLabelColor
-        button.toolTip = "新建标签"
-        button.setAccessibilityLabel("新建标签")
+        button.toolTip = String(localized: .tagActionCreate)
+        button.setAccessibilityLabel(String(localized: .tagActionCreate))
         return button
     }()
 
     let sortButton: NSButton = {
         let image = NSImage(
             systemSymbolName: "line.3.horizontal.decrease",
-            accessibilityDescription: "排序标签"
+            accessibilityDescription: String(localized: .tagActionSort)
         )?.withSymbolConfiguration(.init(pointSize: 12, weight: .medium)) ?? NSImage()
         let button = NSButton(image: image, target: nil, action: nil)
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -1082,9 +1109,15 @@ private final class SidebarTagGroupCellView: NSTableCellView {
         let symbolName = expanded ? "chevron.down" : "chevron.right"
         toggleButton.image = NSImage(
             systemSymbolName: symbolName,
-            accessibilityDescription: expanded ? "收起标签" : "展开标签"
+            accessibilityDescription: expanded
+                ? String(localized: .accessibilityTagCollapse)
+                : String(localized: .accessibilityTagExpand)
         )?.withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
-        toggleButton.setAccessibilityLabel(expanded ? "收起标签" : "展开标签")
+        toggleButton.setAccessibilityLabel(
+            expanded
+                ? String(localized: .accessibilityTagCollapse)
+                : String(localized: .accessibilityTagExpand)
+        )
     }
 }
 

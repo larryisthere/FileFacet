@@ -12,23 +12,34 @@ final class InspectorViewController: NSViewController {
     private let contentStack = InspectorContentStackView()
     private let actionContainer = NSStackView()
     private let draftStatusLabel = NSTextField(wrappingLabelWithString: "")
-    private lazy var discardButton = NSButton(title: "取消", target: self, action: #selector(discardTagChanges))
-    private lazy var applyButton = NSButton(title: "应用", target: self, action: #selector(applyTagChanges))
+    private lazy var discardButton = NSButton(
+        title: String(localized: .actionCancel),
+        target: self,
+        action: #selector(discardTagChanges)
+    )
+    private lazy var applyButton = NSButton(
+        title: String(localized: .actionApply),
+        target: self,
+        action: #selector(applyTagChanges)
+    )
     private lazy var sectionControl: NSSegmentedControl = {
         let control = NSSegmentedControl(
-            labels: ["标签", "详情"],
+            labels: [
+                String(localized: .inspectorTags),
+                String(localized: .inspectorDetails),
+            ],
             trackingMode: .selectOne,
             target: self,
             action: #selector(changeSection(_:))
         )
         control.segmentStyle = .rounded
         control.selectedSegment = 0
-        control.setAccessibilityLabel("检查器内容")
+        control.setAccessibilityLabel(String(localized: .accessibilityInspectorContent))
         return control
     }()
     private lazy var tagSearchField: NSSearchField = {
         let field = NSSearchField()
-        field.placeholderString = "搜索或新建标签"
+        field.placeholderString = String(localized: .tagSearch)
         field.target = self
         field.action = #selector(searchTags(_:))
         field.sendsSearchStringImmediately = true
@@ -176,7 +187,7 @@ final class InspectorViewController: NSViewController {
         let videos = selectedVideos
 
         guard videos.isEmpty == false else {
-            addSecondaryText("选择一个或多个视频以查看标签或详情。")
+            addSecondaryText(String(localized: .inspectorEmpty))
             updateScrollDocumentSize()
             return
         }
@@ -186,26 +197,35 @@ final class InspectorViewController: NSViewController {
             return
         }
         guard let video = selectedVideo else {
-            addPrimaryText("已选择 \(videos.count) 个视频")
+            addPrimaryText(String(localized: .selectionVideoCount(videos.count)))
             let totalBytes = videos.reduce(Int64(0)) { $0 + $1.fileSize }
-            addField(title: "总大小", value: ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file))
+            addField(
+                title: String(localized: .detailTotalSize),
+                value: ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+            )
             updateScrollDocumentSize()
             return
         }
 
         addFilename(video.filename)
-        addField(title: "格式", value: video.fileExtension.uppercased())
-        addField(title: "大小", value: ByteCountFormatter.string(fromByteCount: video.fileSize, countStyle: .file))
-        addField(title: "时长", value: formattedDuration(video.duration))
+        addField(title: String(localized: .detailFormat), value: video.fileExtension.uppercased())
+        addField(
+            title: String(localized: .detailSize),
+            value: ByteCountFormatter.string(fromByteCount: video.fileSize, countStyle: .file)
+        )
+        addField(title: String(localized: .detailDuration), value: formattedDuration(video.duration))
         let resolution = if let width = video.width, let height = video.height {
             "\(width) × \(height)"
         } else {
-            "媒体信息不可用"
+            String(localized: .detailMediaUnavailable)
         }
-        addField(title: "分辨率", value: resolution)
-        addField(title: "创建时间", value: formattedDate(video.creationDate))
-        addField(title: "修改时间", value: formattedDate(video.modificationDate))
-        addField(title: "完整路径", value: filePath(video) ?? "文件位置不可用")
+        addField(title: String(localized: .detailResolution), value: resolution)
+        addField(title: String(localized: .detailCreated), value: formattedDate(video.creationDate))
+        addField(title: String(localized: .detailModified), value: formattedDate(video.modificationDate))
+        addField(
+            title: String(localized: .detailPath),
+            value: filePath(video) ?? String(localized: .detailPathUnavailable)
+        )
         updateScrollDocumentSize()
     }
 
@@ -222,7 +242,7 @@ final class InspectorViewController: NSViewController {
 
         let image = NSImage(
             systemSymbolName: "doc.on.doc",
-            accessibilityDescription: "复制文件名"
+            accessibilityDescription: String(localized: .accessibilityCopyFilename)
         ) ?? NSImage()
         let copyButton = NSButton(image: image, target: self, action: #selector(copyFilename))
         copyButton.title = ""
@@ -230,8 +250,8 @@ final class InspectorViewController: NSViewController {
         copyButton.isBordered = false
         copyButton.controlSize = .small
         copyButton.contentTintColor = .secondaryLabelColor
-        copyButton.toolTip = "复制文件名"
-        copyButton.setAccessibilityLabel("复制文件名")
+        copyButton.toolTip = String(localized: .accessibilityCopyFilename)
+        copyButton.setAccessibilityLabel(String(localized: .accessibilityCopyFilename))
         copyButton.setContentHuggingPriority(.required, for: .horizontal)
         copyButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
@@ -263,7 +283,9 @@ final class InspectorViewController: NSViewController {
     }
 
     private func formattedDuration(_ duration: Double?) -> String {
-        guard let duration, duration.isFinite else { return "媒体信息不可用" }
+        guard let duration, duration.isFinite else {
+            return String(localized: .detailMediaUnavailable)
+        }
         let totalSeconds = max(0, Int(duration.rounded()))
         let hours = totalSeconds / 3600
         let minutes = (totalSeconds % 3600) / 60
@@ -274,14 +296,14 @@ final class InspectorViewController: NSViewController {
     }
 
     private func formattedDate(_ date: Date?) -> String {
-        guard let date else { return "未知" }
+        guard let date else { return String(localized: .detailUnknown) }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 
     private func addTagControls() {
         guard selectedVideos.isEmpty == false else { return }
         guard tagStateVideoIDs == selectedVideos.map(\.id) else {
-            addSecondaryText("正在加载标签…")
+            addSecondaryText(String(localized: .tagLoading))
             return
         }
         let orderedTagIDs = Set(loadedTagOrderIDs)
@@ -320,25 +342,29 @@ final class InspectorViewController: NSViewController {
             contentStack.addArrangedSubview(button)
         }
         if tagSearchText.isEmpty, assignableTags.isEmpty, draftTagCreations.isEmpty {
-            addSecondaryText("暂无可用标签。可在搜索框中输入名称并新建。")
+            addSecondaryText(String(localized: .tagEmpty))
         } else if tagSearchText.isEmpty == false,
                   visibleTags.isEmpty,
                   visibleCreations.isEmpty,
                   hasExactMatch {
-            addSecondaryText("没有匹配的标签。")
+            addSecondaryText(String(localized: .tagNoMatches))
         }
     }
 
     private func addCreateTagButton(title: String) {
         let image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
-        let button = NSButton(title: "新建“\(title)”", target: self, action: #selector(createTagFromSearch(_:)))
+        let button = NSButton(
+            title: String(localized: .tagNewNamed(title)),
+            target: self,
+            action: #selector(createTagFromSearch(_:))
+        )
         button.image = image
         button.imagePosition = .imageLeading
         button.isBordered = false
         button.alignment = .left
         button.contentTintColor = .controlAccentColor
-        button.toolTip = "新建标签"
-        button.setAccessibilityLabel("新建标签“\(title)”")
+        button.toolTip = String(localized: .tagActionCreate)
+        button.setAccessibilityLabel(String(localized: .accessibilityNewTagNamed(title)))
         button.isEnabled = isApplyingTagChanges == false
         contentStack.addArrangedSubview(button)
         button.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
@@ -357,20 +383,25 @@ final class InspectorViewController: NSViewController {
         pathLabel.textColor = .tertiaryLabelColor
         pathLabel.setContentHuggingPriority(.required, for: .horizontal)
 
-        let pendingLabel = NSTextField(labelWithString: "待新建")
+        let pendingLabel = NSTextField(labelWithString: String(localized: .tagPending))
         pendingLabel.font = .systemFont(ofSize: 9, weight: .medium)
         pendingLabel.textColor = .controlAccentColor
         pendingLabel.setContentHuggingPriority(.required, for: .horizontal)
 
-        let image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "移除待新建标签") ?? NSImage()
+        let image = NSImage(
+            systemSymbolName: "xmark",
+            accessibilityDescription: String(localized: .accessibilityRemovePendingTag)
+        ) ?? NSImage()
         let removeButton = NSButton(image: image, target: self, action: #selector(removePendingTag(_:)))
         removeButton.title = ""
         removeButton.isBordered = false
         removeButton.controlSize = .small
         removeButton.contentTintColor = .secondaryLabelColor
         removeButton.identifier = NSUserInterfaceItemIdentifier(creation.id)
-        removeButton.toolTip = "移除待新建标签"
-        removeButton.setAccessibilityLabel("移除待新建标签“\(creation.name)”")
+        removeButton.toolTip = String(localized: .accessibilityRemovePendingTag)
+        removeButton.setAccessibilityLabel(
+            String(localized: .accessibilityRemovePendingTagNamed(creation.name))
+        )
         removeButton.isEnabled = isApplyingTagChanges == false
 
         let row = NSStackView(views: [checkbox, nameLabel, pathLabel, pendingLabel, removeButton])
@@ -457,7 +488,7 @@ final class InspectorViewController: NSViewController {
         )
         controller.onCancel = { [weak self] in self?.closeNewTagPopover() }
         controller.onStage = { [weak self] name, parentID in
-            guard let self else { return "无法新建标签，请重试。" }
+            guard let self else { return String(localized: .tagCreateFailed) }
             let duplicateExists = self.tags.contains {
                 $0.parentID == parentID
                     && $0.name.compare(name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
@@ -465,7 +496,9 @@ final class InspectorViewController: NSViewController {
                 $0.parentID == parentID
                     && $0.name.compare(name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
             }
-            guard duplicateExists == false else { return "同一父标签下已经存在同名标签。" }
+            guard duplicateExists == false else {
+                return String(localized: .tagCreateDuplicate)
+            }
             let creation = TagCreationDraft(id: UUID().uuidString, name: name, parentID: parentID)
             self.draftTagCreations.append(creation)
             self.draftTagStates[creation.id] = .on
@@ -509,7 +542,7 @@ final class InspectorViewController: NSViewController {
 
     private func parentName(for parentID: String?) -> String {
         guard let parentID, let parent = tags.first(where: { $0.id == parentID }) else {
-            return "顶级"
+            return String(localized: .tagCreateTopLevel)
         }
         return tagPath(for: parent)
     }
@@ -532,9 +565,9 @@ final class InspectorViewController: NSViewController {
     private func showTagLoadingState() {
         clearContent()
         if selectedVideos.isEmpty {
-            addSecondaryText("选择一个或多个视频以查看标签或详情。")
+            addSecondaryText(String(localized: .inspectorEmpty))
         } else {
-            addSecondaryText("正在加载标签…")
+            addSecondaryText(String(localized: .tagLoading))
         }
         updateScrollDocumentSize()
         updateTagSearchFieldVisibility()
@@ -655,21 +688,29 @@ final class InspectorViewController: NSViewController {
         discardButton.isEnabled = isDirty && isApplyingTagChanges == false
         applyButton.isEnabled = isDirty && isApplyingTagChanges == false
         if isApplyingTagChanges {
-            draftStatusLabel.stringValue = "正在应用标签…"
+            draftStatusLabel.stringValue = String(localized: .tagDraftApplying)
             return
         }
         guard isDirty else {
-            draftStatusLabel.stringValue = "勾选标签后，点击“应用”保存更改。"
+            draftStatusLabel.stringValue = String(localized: .tagDraftInstruction)
             return
         }
         let creations = draftTagCreations.count
         let additions = assignments.values.filter { $0 }.count
         let removals = assignments.values.filter { $0 == false }.count
         var parts: [String] = []
-        if creations > 0 { parts.append("新建 \(creations) 个标签") }
-        if additions > 0 { parts.append("添加 \(additions) 个标签") }
-        if removals > 0 { parts.append("移除 \(removals) 个标签") }
-        draftStatusLabel.stringValue = "\(parts.joined(separator: "，"))，尚未应用。"
+        if creations > 0 {
+            parts.append(String(localized: .tagDraftCreate(creations)))
+        }
+        if additions > 0 {
+            parts.append(String(localized: .tagDraftAdd(additions)))
+        }
+        if removals > 0 {
+            parts.append(String(localized: .tagDraftRemove(removals)))
+        }
+        draftStatusLabel.stringValue = String(
+            localized: .tagDraftPending(AppLocalization.list(parts))
+        )
     }
 
     private func updateTagSearchFieldVisibility() {
@@ -751,25 +792,27 @@ private final class NewTagPopoverViewController: NSViewController {
         stack.alignment = .leading
         stack.spacing = 10
 
-        let titleLabel = NSTextField(labelWithString: "新建标签")
+        let titleLabel = NSTextField(labelWithString: String(localized: .tagCreateTitle))
         titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         stack.addArrangedSubview(titleLabel)
 
         nameField.stringValue = suggestedName
-        nameField.placeholderString = "标签名称"
+        nameField.placeholderString = String(localized: .tagCreateNamePlaceholder)
         nameField.target = self
         nameField.action = #selector(stageTag)
-        addFormRow(title: "名称", control: nameField, to: stack)
+        addFormRow(title: String(localized: .tagCreateName), control: nameField, to: stack)
 
-        parentPopup.addItem(withTitle: "顶级（无父标签）")
+        parentPopup.addItem(withTitle: String(localized: .tagCreateTopLevelNoParent))
         for option in parentOptions {
             let item = NSMenuItem(title: option.title, action: nil, keyEquivalent: "")
             item.representedObject = option.id
             parentPopup.menu?.addItem(item)
         }
-        addFormRow(title: "父标签", control: parentPopup, to: stack)
+        addFormRow(title: String(localized: .tagCreateParent), control: parentPopup, to: stack)
 
-        let noteLabel = NSTextField(wrappingLabelWithString: "新标签将加入当前草稿。点击“应用”后创建标签并添加到当前视频。")
+        let noteLabel = NSTextField(
+            wrappingLabelWithString: String(localized: .tagCreateNote)
+        )
         noteLabel.font = .systemFont(ofSize: 10)
         noteLabel.textColor = .secondaryLabelColor
         stack.addArrangedSubview(noteLabel)
@@ -781,8 +824,16 @@ private final class NewTagPopoverViewController: NSViewController {
         stack.addArrangedSubview(errorLabel)
         errorLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        let cancelButton = NSButton(title: "取消", target: self, action: #selector(cancel))
-        let stageButton = NSButton(title: "加入草稿", target: self, action: #selector(stageTag))
+        let cancelButton = NSButton(
+            title: String(localized: .actionCancel),
+            target: self,
+            action: #selector(cancel)
+        )
+        let stageButton = NSButton(
+            title: String(localized: .actionStageDraft),
+            target: self,
+            action: #selector(stageTag)
+        )
         stageButton.keyEquivalent = "\r"
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -830,7 +881,7 @@ private final class NewTagPopoverViewController: NSViewController {
     @objc private func stageTag() {
         let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard name.isEmpty == false else {
-            showError("请输入标签名称。")
+            showError(String(localized: .tagValidationEnterName))
             return
         }
         let parentID = parentPopup.selectedItem?.representedObject as? String

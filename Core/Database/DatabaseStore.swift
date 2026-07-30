@@ -96,7 +96,7 @@ actor DatabaseStore {
             root_bookmark_data = excluded.root_bookmark_data,
             last_scan_at = excluded.last_scan_at
         """
-        let statement = try prepare(sql, operation: "保存资料库")
+        let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
 
         bindText(record.id, to: 1, in: statement)
@@ -112,15 +112,14 @@ actor DatabaseStore {
         }
 
         guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw DatabaseError.statementFailed("保存资料库")
+            throw DatabaseError.statementFailed
         }
     }
 
     func fetchPrimaryLibrary() throws -> LibraryRecord? {
         try prepareIfNeeded()
         let statement = try prepare(
-            "SELECT id, name, root_bookmark_data, created_at, last_scan_at FROM libraries WHERE id = ? LIMIT 1",
-            operation: "读取资料库"
+            "SELECT id, name, root_bookmark_data, created_at, last_scan_at FROM libraries WHERE id = ? LIMIT 1"
         )
         defer { sqlite3_finalize(statement) }
         bindText(LibraryRecord.primaryID, to: 1, in: statement)
@@ -131,7 +130,7 @@ actor DatabaseStore {
             let nameText = sqlite3_column_text(statement, 1),
             let bookmarkBytes = sqlite3_column_blob(statement, 2)
         else {
-            throw DatabaseError.statementFailed("读取资料库")
+            throw DatabaseError.statementFailed
         }
 
         let bookmarkSize = Int(sqlite3_column_bytes(statement, 2))
@@ -160,8 +159,7 @@ actor DatabaseStore {
                 display_name = excluded.display_name,
                 root_bookmark_data = excluded.root_bookmark_data,
                 health_status = 'available'
-            """,
-            operation: "保存视频来源授权"
+            """
         )
         defer { sqlite3_finalize(statement) }
         bindText(record.id, to: 1, in: statement)
@@ -170,7 +168,7 @@ actor DatabaseStore {
         bindData(record.rootBookmarkData, to: 4, in: statement)
         sqlite3_bind_double(statement, 5, record.createdAt.timeIntervalSince1970)
         guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw DatabaseError.statementFailed("保存视频来源授权")
+            throw DatabaseError.statementFailed
         }
     }
 
@@ -182,8 +180,7 @@ actor DatabaseStore {
             FROM source_authorizations
             WHERE library_id = ?
             ORDER BY created_at, id
-            """,
-            operation: "读取视频来源授权"
+            """
         )
         defer { sqlite3_finalize(statement) }
         bindText(libraryID, to: 1, in: statement)
@@ -193,7 +190,7 @@ actor DatabaseStore {
                   let storedLibraryID = text(at: 1, in: statement),
                   let displayName = text(at: 2, in: statement),
                   let bookmark = data(at: 3, in: statement) else {
-                throw DatabaseError.statementFailed("读取视频来源授权")
+                throw DatabaseError.statementFailed
             }
             records.append(SourceAuthorizationRecord(
                 id: id,
@@ -215,8 +212,7 @@ actor DatabaseStore {
                 try execute("CREATE TEMP TABLE IF NOT EXISTS pending_source_cleanup_ids (id TEXT PRIMARY KEY)")
                 try execute("DELETE FROM pending_source_cleanup_ids")
                 let insert = try prepare(
-                    "INSERT OR IGNORE INTO pending_source_cleanup_ids (id) VALUES (?)",
-                    operation: "准备清理来源授权"
+                    "INSERT OR IGNORE INTO pending_source_cleanup_ids (id) VALUES (?)"
                 )
                 for id in Set(candidateIDs) {
                     sqlite3_reset(insert)
@@ -224,7 +220,7 @@ actor DatabaseStore {
                     bindText(id, to: 1, in: insert)
                     guard sqlite3_step(insert) == SQLITE_DONE else {
                         sqlite3_finalize(insert)
-                        throw DatabaseError.statementFailed("准备清理来源授权")
+                        throw DatabaseError.statementFailed
                     }
                 }
                 sqlite3_finalize(insert)
@@ -239,8 +235,7 @@ actor DatabaseStore {
                     WHERE video_locations.source_id = source_authorizations.id
                 )
                 \(restriction)
-                """,
-                operation: "读取无引用来源授权"
+                """
             )
             var sourceIDs: [String] = []
             while sqlite3_step(lookup) == SQLITE_ROW {
@@ -252,8 +247,7 @@ actor DatabaseStore {
                 try execute("CREATE TEMP TABLE IF NOT EXISTS removable_source_ids (id TEXT PRIMARY KEY)")
                 try execute("DELETE FROM removable_source_ids")
                 let insert = try prepare(
-                    "INSERT OR IGNORE INTO removable_source_ids (id) VALUES (?)",
-                    operation: "准备移除来源授权"
+                    "INSERT OR IGNORE INTO removable_source_ids (id) VALUES (?)"
                 )
                 for id in sourceIDs {
                     sqlite3_reset(insert)
@@ -261,7 +255,7 @@ actor DatabaseStore {
                     bindText(id, to: 1, in: insert)
                     guard sqlite3_step(insert) == SQLITE_DONE else {
                         sqlite3_finalize(insert)
-                        throw DatabaseError.statementFailed("准备移除来源授权")
+                        throw DatabaseError.statementFailed
                     }
                 }
                 sqlite3_finalize(insert)
@@ -280,8 +274,7 @@ actor DatabaseStore {
     func fetchReferencedThumbnailIDs() throws -> Set<String> {
         try prepareIfNeeded()
         let statement = try prepare(
-            "SELECT thumbnail_id FROM videos WHERE thumbnail_id IS NOT NULL",
-            operation: "读取缩略图引用"
+            "SELECT thumbnail_id FROM videos WHERE thumbnail_id IS NOT NULL"
         )
         defer { sqlite3_finalize(statement) }
         var identifiers = Set<String>()
@@ -299,8 +292,7 @@ actor DatabaseStore {
             FROM video_locations
             WHERE is_available = 1
             ORDER BY last_verified_at DESC
-            """,
-            operation: "读取视频位置"
+            """
         )
         defer { sqlite3_finalize(statement) }
         var records: [VideoLocationRecord] = []
@@ -308,7 +300,7 @@ actor DatabaseStore {
             guard let videoID = text(at: 0, in: statement),
                   let sourceID = text(at: 1, in: statement),
                   let relativePath = text(at: 2, in: statement) else {
-                throw DatabaseError.statementFailed("读取视频位置")
+                throw DatabaseError.statementFailed
             }
             records.append(VideoLocationRecord(
                 videoID: videoID,
@@ -335,8 +327,7 @@ actor DatabaseStore {
                     SET fallback_path_key = ?
                     WHERE video_id = ? AND source_id = ? AND relative_path = ?
                       AND fallback_path_key IS NULL
-                    """,
-                    operation: "补全视频位置回退身份"
+                    """
                 )
                 defer { sqlite3_finalize(statement) }
                 for update in updates[batchStart..<batchEnd] {
@@ -347,7 +338,7 @@ actor DatabaseStore {
                     bindText(update.sourceID, to: 3, in: statement)
                     bindText(update.relativePath, to: 4, in: statement)
                     guard sqlite3_step(statement) == SQLITE_DONE else {
-                        throw DatabaseError.statementFailed("补全视频位置回退身份")
+                        throw DatabaseError.statementFailed
                     }
                 }
                 try execute("COMMIT")
@@ -373,15 +364,14 @@ actor DatabaseStore {
         var existingCount = 0
         var importedIDs: [String] = []
         let start = try prepare(
-            "INSERT INTO import_runs (id, source_id, started_at, status) VALUES (?, ?, ?, 'running')",
-            operation: "开始导入视频"
+            "INSERT INTO import_runs (id, source_id, started_at, status) VALUES (?, ?, ?, 'running')"
         )
         bindText(runID, to: 1, in: start)
         bindText(sourceID, to: 2, in: start)
         sqlite3_bind_double(start, 3, importedAt.timeIntervalSince1970)
         guard sqlite3_step(start) == SQLITE_DONE else {
             sqlite3_finalize(start)
-            throw DatabaseError.statementFailed("开始导入视频")
+            throw DatabaseError.statementFailed
         }
         sqlite3_finalize(start)
 
@@ -473,8 +463,7 @@ actor DatabaseStore {
             UPDATE import_runs
             SET completed_at = ?, status = ?, added_count = ?, existing_count = ?, failed_count = ?
             WHERE id = ?
-            """,
-            operation: "更新视频导入状态"
+            """
         )
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_double(statement, 1, Date().timeIntervalSince1970)
@@ -484,7 +473,7 @@ actor DatabaseStore {
         sqlite3_bind_int64(statement, 5, Int64(failedCount))
         bindText(id, to: 6, in: statement)
         guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw DatabaseError.statementFailed("更新视频导入状态")
+            throw DatabaseError.statementFailed
         }
     }
 
@@ -552,15 +541,14 @@ actor DatabaseStore {
                 do {
                     for location in staleLocations[staleBatchStart..<staleBatchEnd] {
                         let statement = try prepare(
-                            "DELETE FROM video_locations WHERE video_id = ? AND source_id = ? AND relative_path = ?",
-                            operation: "移除失效视频位置"
+                            "DELETE FROM video_locations WHERE video_id = ? AND source_id = ? AND relative_path = ?"
                         )
                         bindText(location.videoID, to: 1, in: statement)
                         bindText(sourceID, to: 2, in: statement)
                         bindText(location.relativePath, to: 3, in: statement)
                         guard sqlite3_step(statement) == SQLITE_DONE else {
                             sqlite3_finalize(statement)
-                            throw DatabaseError.statementFailed("移除失效视频位置")
+                            throw DatabaseError.statementFailed
                         }
                         sqlite3_finalize(statement)
                     }
@@ -591,13 +579,12 @@ actor DatabaseStore {
                 )
                 WHERE videos.library_id = ?
                   AND EXISTS (SELECT 1 FROM video_locations WHERE video_locations.video_id = videos.id)
-                """,
-                operation: "刷新视频当前位置"
+                """
             )
             bindText(LibraryRecord.primaryID, to: 1, in: refreshRemainingPaths)
             guard sqlite3_step(refreshRemainingPaths) == SQLITE_DONE else {
                 sqlite3_finalize(refreshRemainingPaths)
-                throw DatabaseError.statementFailed("刷新视频当前位置")
+                throw DatabaseError.statementFailed
             }
             sqlite3_finalize(refreshRemainingPaths)
 
@@ -615,8 +602,7 @@ actor DatabaseStore {
                 FROM videos
                 WHERE videos.library_id = ?
                   AND NOT EXISTS (SELECT 1 FROM video_locations WHERE video_locations.video_id = videos.id)
-                """,
-                operation: "读取已删除视频"
+                """
             )
             bindText(LibraryRecord.primaryID, to: 1, in: orphanLookup)
             var orphanIDs: [String] = []
@@ -632,13 +618,12 @@ actor DatabaseStore {
                 DELETE FROM videos
                 WHERE library_id = ?
                   AND NOT EXISTS (SELECT 1 FROM video_locations WHERE video_locations.video_id = videos.id)
-                """,
-                operation: "移除已删除视频"
+                """
             )
             bindText(LibraryRecord.primaryID, to: 1, in: deleteOrphans)
             guard sqlite3_step(deleteOrphans) == SQLITE_DONE else {
                 sqlite3_finalize(deleteOrphans)
-                throw DatabaseError.statementFailed("移除已删除视频")
+                throw DatabaseError.statementFailed
             }
             sqlite3_finalize(deleteOrphans)
             updatedVideoIDs.subtract(orphanIDs)
@@ -662,8 +647,7 @@ actor DatabaseStore {
                 WHERE library_id = ? AND volume_identifier = ? AND file_resource_identifier = ?
                 ORDER BY first_indexed_at
                 LIMIT 1
-                """,
-                operation: "识别已导入视频"
+                """
             )
             bindText(LibraryRecord.primaryID, to: 1, in: identityLookup)
             bindData(volumeIdentifier, to: 2, in: identityLookup)
@@ -682,8 +666,7 @@ actor DatabaseStore {
                 WHERE fallback_path_key = ?
                 ORDER BY last_verified_at DESC
                 LIMIT 1
-                """,
-                operation: "按文件位置识别已导入视频"
+                """
             )
             bindData(fallbackPathKey, to: 1, in: urlLookup)
             if sqlite3_step(urlLookup) == SQLITE_ROW, let id = text(at: 0, in: urlLookup) {
@@ -700,8 +683,7 @@ actor DatabaseStore {
             JOIN videos ON videos.id = video_locations.video_id
             WHERE video_locations.source_id = ? AND video_locations.relative_path = ?
             LIMIT 1
-            """,
-            operation: "识别已导入视频"
+            """
         )
         defer { sqlite3_finalize(pathLookup) }
         bindText(sourceID, to: 1, in: pathLookup)
@@ -726,8 +708,7 @@ actor DatabaseStore {
                 metadata_status, thumbnail_status, availability_status,
                 first_indexed_at, updated_at, finder_tags_imported_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending', 'available', ?, ?, ?)
-            """,
-            operation: "新增视频索引"
+            """
         )
         defer { sqlite3_finalize(statement) }
         bindText(videoID, to: 1, in: statement)
@@ -744,7 +725,7 @@ actor DatabaseStore {
         sqlite3_bind_double(statement, 12, indexedAt.timeIntervalSince1970)
         sqlite3_bind_double(statement, 13, indexedAt.timeIntervalSince1970)
         guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw DatabaseError.statementFailed("新增视频索引")
+            throw DatabaseError.statementFailed
         }
     }
 
@@ -763,8 +744,7 @@ actor DatabaseStore {
                 file_size = ?, creation_date = ?, modification_date = ?,
                 availability_status = 'available', updated_at = ?
             WHERE id = ?
-            """,
-            operation: "更新视频索引"
+            """
         )
         defer { sqlite3_finalize(statement) }
         bindText(video.relativePath, to: 1, in: statement)
@@ -784,14 +764,13 @@ actor DatabaseStore {
         sqlite3_bind_double(statement, index + 3, updatedAt.timeIntervalSince1970)
         bindText(videoID, to: index + 4, in: statement)
         guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw DatabaseError.statementFailed("更新视频索引")
+            throw DatabaseError.statementFailed
         }
     }
 
     private func mediaContentChanged(videoID: String, comparedWith video: DiscoveredVideo) throws -> Bool {
         let statement = try prepare(
-            "SELECT file_size, modification_date FROM videos WHERE id = ?",
-            operation: "检查视频内容变化"
+            "SELECT file_size, modification_date FROM videos WHERE id = ?"
         )
         defer { sqlite3_finalize(statement) }
         bindText(videoID, to: 1, in: statement)
@@ -818,8 +797,7 @@ actor DatabaseStore {
                 fallback_path_key = excluded.fallback_path_key,
                 last_verified_at = excluded.last_verified_at,
                 is_available = 1
-            """,
-            operation: "保存视频位置"
+            """
         )
         defer { sqlite3_finalize(statement) }
         bindText(videoID, to: 1, in: statement)
@@ -828,28 +806,26 @@ actor DatabaseStore {
         bindData(video.fallbackPathKey, to: 4, in: statement)
         sqlite3_bind_double(statement, 5, verifiedAt.timeIntervalSince1970)
         guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw DatabaseError.statementFailed("保存视频位置")
+            throw DatabaseError.statementFailed
         }
     }
 
     private func removeOtherLocations(videoID: String, sourceID: String, keepingPath: String) throws {
         let statement = try prepare(
-            "DELETE FROM video_locations WHERE video_id = ? AND source_id = ? AND relative_path != ?",
-            operation: "更新视频位置"
+            "DELETE FROM video_locations WHERE video_id = ? AND source_id = ? AND relative_path != ?"
         )
         defer { sqlite3_finalize(statement) }
         bindText(videoID, to: 1, in: statement)
         bindText(sourceID, to: 2, in: statement)
         bindText(keepingPath, to: 3, in: statement)
         guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw DatabaseError.statementFailed("更新视频位置")
+            throw DatabaseError.statementFailed
         }
     }
 
     private func sourceLocationRows(sourceID: String) throws -> [VideoLocationRecord] {
         let statement = try prepare(
-            "SELECT video_id, source_id, relative_path FROM video_locations WHERE source_id = ?",
-            operation: "读取来源视频位置"
+            "SELECT video_id, source_id, relative_path FROM video_locations WHERE source_id = ?"
         )
         defer { sqlite3_finalize(statement) }
         bindText(sourceID, to: 1, in: statement)
@@ -858,7 +834,7 @@ actor DatabaseStore {
             guard let videoID = text(at: 0, in: statement),
                   let storedSourceID = text(at: 1, in: statement),
                   let relativePath = text(at: 2, in: statement) else {
-                throw DatabaseError.statementFailed("读取来源视频位置")
+                throw DatabaseError.statementFailed
             }
             rows.append(VideoLocationRecord(videoID: videoID, sourceID: storedSourceID, relativePath: relativePath))
         }
@@ -877,15 +853,14 @@ actor DatabaseStore {
                 importedAt: importedAt
             )
             let relation = try prepare(
-                "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) VALUES (?, ?, ?)",
-                operation: "导入 Finder 标签"
+                "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) VALUES (?, ?, ?)"
             )
             bindText(videoID, to: 1, in: relation)
             bindText(tagID, to: 2, in: relation)
             sqlite3_bind_double(relation, 3, importedAt.timeIntervalSince1970)
             guard sqlite3_step(relation) == SQLITE_DONE else {
                 sqlite3_finalize(relation)
-                throw DatabaseError.statementFailed("导入 Finder 标签")
+                throw DatabaseError.statementFailed
             }
             sqlite3_finalize(relation)
         }
@@ -902,8 +877,7 @@ actor DatabaseStore {
             FROM videos
             WHERE library_id = ? \(availabilityClause)
             ORDER BY filename COLLATE NOCASE, relative_path COLLATE NOCASE
-            """,
-            operation: "读取视频索引"
+            """
         )
         defer { sqlite3_finalize(statement) }
         bindText(libraryID, to: 1, in: statement)
@@ -970,8 +944,7 @@ actor DatabaseStore {
             FROM videos
             WHERE \(conditions.joined(separator: " AND "))
             ORDER BY videos.filename COLLATE NOCASE, videos.relative_path COLLATE NOCASE
-            """,
-            operation: "筛选视频索引"
+            """
         )
         defer { sqlite3_finalize(statement) }
         for (offset, value) in bindings.enumerated() {
@@ -1005,8 +978,7 @@ actor DatabaseStore {
             FROM videos
             WHERE videos.library_id = ?
               AND videos.availability_status = 'available'
-            """,
-            operation: "读取侧边栏分类数量"
+            """
         )
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_double(
@@ -1016,7 +988,7 @@ actor DatabaseStore {
         )
         bindText(libraryID, to: 2, in: statement)
         guard sqlite3_step(statement) == SQLITE_ROW else {
-            throw DatabaseError.statementFailed("读取侧边栏分类数量")
+            throw DatabaseError.statementFailed
         }
         return SidebarFilterCounts(
             all: Int(sqlite3_column_int(statement, 0)),
@@ -1051,8 +1023,7 @@ actor DatabaseStore {
                    creation_date, modification_date, duration, width, height, thumbnail_id,
                    metadata_status, thumbnail_status, first_indexed_at, availability_status
             FROM videos WHERE id = ? LIMIT 1
-            """,
-            operation: "读取视频索引"
+            """
         )
         defer { sqlite3_finalize(statement) }
         bindText(id, to: 1, in: statement)
@@ -1072,8 +1043,7 @@ actor DatabaseStore {
             try execute("CREATE TEMP TABLE IF NOT EXISTS pending_video_removal_ids (id TEXT PRIMARY KEY)")
             try execute("DELETE FROM pending_video_removal_ids")
             let insertID = try prepare(
-                "INSERT OR IGNORE INTO pending_video_removal_ids (id) VALUES (?)",
-                operation: "准备移出视频"
+                "INSERT OR IGNORE INTO pending_video_removal_ids (id) VALUES (?)"
             )
             for id in uniqueIDs {
                 sqlite3_reset(insertID)
@@ -1081,7 +1051,7 @@ actor DatabaseStore {
                 bindText(id, to: 1, in: insertID)
                 guard sqlite3_step(insertID) == SQLITE_DONE else {
                     sqlite3_finalize(insertID)
-                    throw DatabaseError.statementFailed("准备移出视频")
+                    throw DatabaseError.statementFailed
                 }
             }
             sqlite3_finalize(insertID)
@@ -1096,8 +1066,7 @@ actor DatabaseStore {
                 FROM videos
                 WHERE id IN (SELECT id FROM pending_video_removal_ids)
                 ORDER BY first_indexed_at, id
-                """,
-                operation: "保存待移出视频"
+                """
             )
             var videos: [RemovedVideoRecord] = []
             while sqlite3_step(videoStatement) == SQLITE_ROW {
@@ -1110,7 +1079,7 @@ actor DatabaseStore {
                       let thumbnailStatus = text(at: 15, in: videoStatement),
                       let availabilityStatus = text(at: 16, in: videoStatement) else {
                     sqlite3_finalize(videoStatement)
-                    throw DatabaseError.statementFailed("保存待移出视频")
+                    throw DatabaseError.statementFailed
                 }
                 videos.append(RemovedVideoRecord(
                     id: id,
@@ -1148,8 +1117,7 @@ actor DatabaseStore {
                 FROM video_locations
                 WHERE video_id IN (SELECT id FROM pending_video_removal_ids)
                 ORDER BY video_id, source_id, relative_path
-                """,
-                operation: "保存待移出视频位置"
+                """
             )
             var locations: [RemovedVideoLocation] = []
             while sqlite3_step(locationStatement) == SQLITE_ROW {
@@ -1157,7 +1125,7 @@ actor DatabaseStore {
                       let sourceID = text(at: 1, in: locationStatement),
                       let relativePath = text(at: 2, in: locationStatement) else {
                     sqlite3_finalize(locationStatement)
-                    throw DatabaseError.statementFailed("保存待移出视频位置")
+                    throw DatabaseError.statementFailed
                 }
                 locations.append(RemovedVideoLocation(
                     videoID: videoID,
@@ -1176,15 +1144,14 @@ actor DatabaseStore {
                 FROM video_tags
                 WHERE video_id IN (SELECT id FROM pending_video_removal_ids)
                 ORDER BY video_id, tag_id
-                """,
-                operation: "保存待移出视频标签"
+                """
             )
             var tagRelations: [RemovedVideoTagRelation] = []
             while sqlite3_step(tagStatement) == SQLITE_ROW {
                 guard let videoID = text(at: 0, in: tagStatement),
                       let tagID = text(at: 1, in: tagStatement) else {
                     sqlite3_finalize(tagStatement)
-                    throw DatabaseError.statementFailed("保存待移出视频标签")
+                    throw DatabaseError.statementFailed
                 }
                 tagRelations.append(RemovedVideoTagRelation(
                     videoID: videoID,
@@ -1195,12 +1162,11 @@ actor DatabaseStore {
             sqlite3_finalize(tagStatement)
 
             let deleteStatement = try prepare(
-                "DELETE FROM videos WHERE id IN (SELECT id FROM pending_video_removal_ids)",
-                operation: "从资料库移出视频"
+                "DELETE FROM videos WHERE id IN (SELECT id FROM pending_video_removal_ids)"
             )
             guard sqlite3_step(deleteStatement) == SQLITE_DONE else {
                 sqlite3_finalize(deleteStatement)
-                throw DatabaseError.statementFailed("从资料库移出视频")
+                throw DatabaseError.statementFailed
             }
             sqlite3_finalize(deleteStatement)
             try execute("DELETE FROM pending_video_removal_ids")
@@ -1226,8 +1192,7 @@ actor DatabaseStore {
                     availability_status, first_indexed_at, updated_at, last_seen_scan_id,
                     finder_tags_imported_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                operation: "恢复已移出视频"
+                """
             )
             var restoredVideoIDs: [String: String] = [:]
             for video in snapshot.videos {
@@ -1261,7 +1226,7 @@ actor DatabaseStore {
                 bindDate(video.finderTagsImportedAt, to: 21, in: videoStatement)
                 guard sqlite3_step(videoStatement) == SQLITE_DONE else {
                     sqlite3_finalize(videoStatement)
-                    throw DatabaseError.statementFailed("恢复已移出视频")
+                    throw DatabaseError.statementFailed
                 }
                 restoredVideoIDs[video.id] = video.id
             }
@@ -1273,8 +1238,7 @@ actor DatabaseStore {
                     video_id, source_id, relative_path, last_verified_at, is_available,
                     fallback_path_key
                 ) VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                operation: "恢复已移出视频位置"
+                """
             )
             for location in snapshot.locations {
                 guard let restoredVideoID = restoredVideoIDs[location.videoID] else { continue }
@@ -1288,14 +1252,13 @@ actor DatabaseStore {
                 bindData(location.fallbackPathKey, to: 6, in: locationStatement)
                 guard sqlite3_step(locationStatement) == SQLITE_DONE else {
                     sqlite3_finalize(locationStatement)
-                    throw DatabaseError.statementFailed("恢复已移出视频位置")
+                    throw DatabaseError.statementFailed
                 }
             }
             sqlite3_finalize(locationStatement)
 
             let tagStatement = try prepare(
-                "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) VALUES (?, ?, ?)",
-                operation: "恢复已移出视频标签"
+                "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) VALUES (?, ?, ?)"
             )
             for relation in snapshot.tagRelations {
                 guard let restoredVideoID = restoredVideoIDs[relation.videoID] else { continue }
@@ -1306,7 +1269,7 @@ actor DatabaseStore {
                 sqlite3_bind_double(tagStatement, 3, relation.createdAt.timeIntervalSince1970)
                 guard sqlite3_step(tagStatement) == SQLITE_DONE else {
                     sqlite3_finalize(tagStatement)
-                    throw DatabaseError.statementFailed("恢复已移出视频标签")
+                    throw DatabaseError.statementFailed
                 }
             }
             sqlite3_finalize(tagStatement)
@@ -1330,8 +1293,7 @@ actor DatabaseStore {
                 WHERE library_id = ? AND volume_identifier = ? AND file_resource_identifier = ?
                 ORDER BY first_indexed_at
                 LIMIT 1
-                """,
-                operation: "识别已重新导入视频"
+                """
             )
             bindText(removedVideo.libraryID, to: 1, in: statement)
             bindData(volumeIdentifier, to: 2, in: statement)
@@ -1346,14 +1308,12 @@ actor DatabaseStore {
             let statement: OpaquePointer
             if let fallbackPathKey = location.fallbackPathKey {
                 statement = try prepare(
-                    "SELECT video_id FROM video_locations WHERE fallback_path_key = ? LIMIT 1",
-                    operation: "按文件位置识别已重新导入视频"
+                    "SELECT video_id FROM video_locations WHERE fallback_path_key = ? LIMIT 1"
                 )
                 bindData(fallbackPathKey, to: 1, in: statement)
             } else {
                 statement = try prepare(
-                    "SELECT video_id FROM video_locations WHERE source_id = ? AND relative_path = ? LIMIT 1",
-                    operation: "按来源位置识别已重新导入视频"
+                    "SELECT video_id FROM video_locations WHERE source_id = ? AND relative_path = ? LIMIT 1"
                 )
                 bindText(location.sourceID, to: 1, in: statement)
                 bindText(location.relativePath, to: 2, in: statement)
@@ -1372,8 +1332,7 @@ actor DatabaseStore {
             UPDATE videos SET duration = ?, width = ?, height = ?, thumbnail_id = ?,
                 metadata_status = ?, thumbnail_status = ?, updated_at = ?
             WHERE id = ?
-            """,
-            operation: "更新媒体信息"
+            """
         )
         defer { sqlite3_finalize(statement) }
         bindDouble(result.duration, to: 1, in: statement)
@@ -1385,7 +1344,7 @@ actor DatabaseStore {
         sqlite3_bind_double(statement, 7, Date().timeIntervalSince1970)
         bindText(videoID, to: 8, in: statement)
         guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw DatabaseError.statementFailed("更新媒体信息")
+            throw DatabaseError.statementFailed
         }
         return try fetchVideo(id: videoID)
     }
@@ -1408,8 +1367,7 @@ actor DatabaseStore {
             WHERE tags.library_id = ?
             GROUP BY tags.id
             ORDER BY tags.sort_order, tags.name COLLATE NOCASE
-            """,
-            operation: "读取标签"
+            """
         )
         defer { sqlite3_finalize(statement) }
         bindText(libraryID, to: 1, in: statement)
@@ -1421,7 +1379,7 @@ actor DatabaseStore {
                 let storedLibraryID = text(at: 1, in: statement),
                 let name = text(at: 2, in: statement),
                 let source = text(at: 6, in: statement)
-            else { throw DatabaseError.statementFailed("读取标签") }
+            else { throw DatabaseError.statementFailed }
             tags.append(TagRecord(
                 id: id,
                 libraryID: storedLibraryID,
@@ -1440,17 +1398,16 @@ actor DatabaseStore {
     func createTag(libraryID: String, name: String, parentID: String?, source: String = "user") throws -> String {
         try prepareIfNeeded()
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard cleanName.isEmpty == false else { throw DatabaseError.statementFailed("创建标签") }
+        guard cleanName.isEmpty == false else { throw DatabaseError.statementFailed }
         try ensureUniqueTagName(cleanName, libraryID: libraryID, parentID: parentID, excludingID: nil)
         let orderStatement = try prepare(
-            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tags WHERE library_id = ? AND parent_id IS ?",
-            operation: "创建标签"
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tags WHERE library_id = ? AND parent_id IS ?"
         )
         bindText(libraryID, to: 1, in: orderStatement)
         bindOptionalText(parentID, to: 2, in: orderStatement)
         guard sqlite3_step(orderStatement) == SQLITE_ROW else {
             sqlite3_finalize(orderStatement)
-            throw DatabaseError.statementFailed("创建标签")
+            throw DatabaseError.statementFailed
         }
         let sortOrder = sqlite3_column_int(orderStatement, 0)
         sqlite3_finalize(orderStatement)
@@ -1460,8 +1417,7 @@ actor DatabaseStore {
             INSERT INTO tags (id, library_id, name, normalized_name, parent_id, color,
                               sort_order, source, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
-            """,
-            operation: "创建标签"
+            """
         )
         defer { sqlite3_finalize(statement) }
         let now = Date().timeIntervalSince1970
@@ -1475,51 +1431,50 @@ actor DatabaseStore {
         bindText(source, to: 7, in: statement)
         sqlite3_bind_double(statement, 8, now)
         sqlite3_bind_double(statement, 9, now)
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("创建标签") }
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed }
         return id
     }
 
     func renameTag(id: String, name: String) throws {
         try prepareIfNeeded()
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard cleanName.isEmpty == false else { throw DatabaseError.statementFailed("重命名标签") }
-        let lookup = try prepare("SELECT library_id, parent_id FROM tags WHERE id = ?", operation: "重命名标签")
+        guard cleanName.isEmpty == false else { throw DatabaseError.statementFailed }
+        let lookup = try prepare("SELECT library_id, parent_id FROM tags WHERE id = ?")
         bindText(id, to: 1, in: lookup)
         guard sqlite3_step(lookup) == SQLITE_ROW, let libraryID = text(at: 0, in: lookup) else {
             sqlite3_finalize(lookup)
-            throw DatabaseError.statementFailed("重命名标签")
+            throw DatabaseError.statementFailed
         }
         let parentID = text(at: 1, in: lookup)
         sqlite3_finalize(lookup)
         try ensureUniqueTagName(cleanName, libraryID: libraryID, parentID: parentID, excludingID: id)
         let statement = try prepare(
-            "UPDATE tags SET name = ?, normalized_name = ?, updated_at = ? WHERE id = ?",
-            operation: "重命名标签"
+            "UPDATE tags SET name = ?, normalized_name = ?, updated_at = ? WHERE id = ?"
         )
         defer { sqlite3_finalize(statement) }
         bindText(cleanName, to: 1, in: statement)
         bindText(normalizedTagName(cleanName), to: 2, in: statement)
         sqlite3_bind_double(statement, 3, Date().timeIntervalSince1970)
         bindText(id, to: 4, in: statement)
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("重命名标签") }
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed }
     }
 
     func setTagColor(id: String, color: String?) throws {
         try prepareIfNeeded()
-        let statement = try prepare("UPDATE tags SET color = ?, updated_at = ? WHERE id = ?", operation: "设置标签颜色")
+        let statement = try prepare("UPDATE tags SET color = ?, updated_at = ? WHERE id = ?")
         defer { sqlite3_finalize(statement) }
         bindOptionalText(color, to: 1, in: statement)
         sqlite3_bind_double(statement, 2, Date().timeIntervalSince1970)
         bindText(id, to: 3, in: statement)
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("设置标签颜色") }
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed }
     }
 
     func deleteTag(id: String) throws {
         try prepareIfNeeded()
-        let statement = try prepare("DELETE FROM tags WHERE id = ?", operation: "删除标签")
+        let statement = try prepare("DELETE FROM tags WHERE id = ?")
         defer { sqlite3_finalize(statement) }
         bindText(id, to: 1, in: statement)
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed("删除标签") }
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed }
     }
 
     func moveTag(id: String, parentID: String?, sortOrder: Int) throws {
@@ -1536,7 +1491,7 @@ actor DatabaseStore {
         let allTags = try fetchTags(libraryID: LibraryRecord.primaryID)
         let tagsByID = Dictionary(uniqueKeysWithValues: allTags.map { ($0.id, $0) })
         guard uniqueIDs.allSatisfy({ tagsByID[$0] != nil }) else {
-            throw DatabaseError.statementFailed("移动标签")
+            throw DatabaseError.statementFailed
         }
 
         let requestedIDSet = Set(uniqueIDs)
@@ -1552,10 +1507,10 @@ actor DatabaseStore {
         guard movingIDSet.isEmpty == false else { return }
 
         if let parentID {
-            guard tagsByID[parentID] != nil else { throw DatabaseError.statementFailed("移动标签") }
+            guard tagsByID[parentID] != nil else { throw DatabaseError.statementFailed }
             var ancestorID: String? = parentID
             while let currentID = ancestorID {
-                if movingIDSet.contains(currentID) { throw DatabaseError.statementFailed("移动标签") }
+                if movingIDSet.contains(currentID) { throw DatabaseError.statementFailed }
                 ancestorID = tagsByID[currentID]?.parentID
             }
         }
@@ -1588,8 +1543,7 @@ actor DatabaseStore {
         try execute("BEGIN IMMEDIATE")
         do {
             let statement = try prepare(
-                "UPDATE tags SET parent_id = ?, sort_order = ?, updated_at = ? WHERE id = ?",
-                operation: "移动标签"
+                "UPDATE tags SET parent_id = ?, sort_order = ?, updated_at = ? WHERE id = ?"
             )
             defer { sqlite3_finalize(statement) }
 
@@ -1601,7 +1555,7 @@ actor DatabaseStore {
                 sqlite3_bind_double(statement, 3, Date().timeIntervalSince1970)
                 bindText(id, to: 4, in: statement)
                 guard sqlite3_step(statement) == SQLITE_DONE else {
-                    throw DatabaseError.statementFailed("移动标签")
+                    throw DatabaseError.statementFailed
                 }
             }
 
@@ -1632,27 +1586,26 @@ actor DatabaseStore {
         try prepareIfNeeded()
         guard sourceID != targetID else { return }
         guard try isTag(targetID, descendantOf: sourceID) == false else {
-            throw DatabaseError.statementFailed("合并标签")
+            throw DatabaseError.statementFailed
         }
         try execute("BEGIN IMMEDIATE")
         do {
             let relations = try prepare(
-                "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) SELECT video_id, ?, created_at FROM video_tags WHERE tag_id = ?",
-                operation: "合并标签"
+                "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) SELECT video_id, ?, created_at FROM video_tags WHERE tag_id = ?"
             )
             bindText(targetID, to: 1, in: relations)
             bindText(sourceID, to: 2, in: relations)
-            guard sqlite3_step(relations) == SQLITE_DONE else { sqlite3_finalize(relations); throw DatabaseError.statementFailed("合并标签") }
+            guard sqlite3_step(relations) == SQLITE_DONE else { sqlite3_finalize(relations); throw DatabaseError.statementFailed }
             sqlite3_finalize(relations)
-            let children = try prepare("UPDATE tags SET parent_id = ? WHERE parent_id = ?", operation: "合并标签")
+            let children = try prepare("UPDATE tags SET parent_id = ? WHERE parent_id = ?")
             bindText(targetID, to: 1, in: children)
             bindText(sourceID, to: 2, in: children)
-            guard sqlite3_step(children) == SQLITE_DONE else { sqlite3_finalize(children); throw DatabaseError.statementFailed("合并标签") }
+            guard sqlite3_step(children) == SQLITE_DONE else { sqlite3_finalize(children); throw DatabaseError.statementFailed }
             sqlite3_finalize(children)
-            let mappings = try prepare("UPDATE finder_tag_import_mappings SET tag_id = ? WHERE tag_id = ?", operation: "合并标签")
+            let mappings = try prepare("UPDATE finder_tag_import_mappings SET tag_id = ? WHERE tag_id = ?")
             bindText(targetID, to: 1, in: mappings)
             bindText(sourceID, to: 2, in: mappings)
-            guard sqlite3_step(mappings) == SQLITE_DONE else { sqlite3_finalize(mappings); throw DatabaseError.statementFailed("合并标签") }
+            guard sqlite3_step(mappings) == SQLITE_DONE else { sqlite3_finalize(mappings); throw DatabaseError.statementFailed }
             sqlite3_finalize(mappings)
             try deleteTag(id: sourceID)
             try execute("COMMIT")
@@ -1712,8 +1665,7 @@ actor DatabaseStore {
     private func applyTagAssignments(_ assignments: [String: Bool], videoIDs: [String]) throws {
         guard assignments.isEmpty == false, videoIDs.isEmpty == false else { return }
         let insertStatement = try prepare(
-            "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) VALUES (?, ?, ?)",
-            operation: "应用标签"
+            "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) VALUES (?, ?, ?)"
         )
         defer { sqlite3_finalize(insertStatement) }
         for (tagID, enabled) in assignments {
@@ -1725,15 +1677,14 @@ actor DatabaseStore {
                     bindText(tagID, to: 2, in: insertStatement)
                     sqlite3_bind_double(insertStatement, 3, Date().timeIntervalSince1970)
                     guard sqlite3_step(insertStatement) == SQLITE_DONE else {
-                        throw DatabaseError.statementFailed("应用标签")
+                        throw DatabaseError.statementFailed
                     }
                 }
                 continue
             }
             let placeholders = Array(repeating: "?", count: videoIDs.count).joined(separator: ",")
             let deleteStatement = try prepare(
-                "DELETE FROM video_tags WHERE tag_id = ? AND video_id IN (\(placeholders))",
-                operation: "应用标签"
+                "DELETE FROM video_tags WHERE tag_id = ? AND video_id IN (\(placeholders))"
             )
             bindText(tagID, to: 1, in: deleteStatement)
             for (index, videoID) in videoIDs.enumerated() {
@@ -1742,7 +1693,7 @@ actor DatabaseStore {
             let result = sqlite3_step(deleteStatement)
             sqlite3_finalize(deleteStatement)
             guard result == SQLITE_DONE else {
-                throw DatabaseError.statementFailed("应用标签")
+                throw DatabaseError.statementFailed
             }
         }
     }
@@ -1752,8 +1703,7 @@ actor DatabaseStore {
         guard videoIDs.isEmpty == false else { return [:] }
         let placeholders = Array(repeating: "?", count: videoIDs.count).joined(separator: ",")
         let statement = try prepare(
-            "SELECT tag_id, COUNT(DISTINCT video_id) FROM video_tags WHERE video_id IN (\(placeholders)) GROUP BY tag_id",
-            operation: "读取视频标签"
+            "SELECT tag_id, COUNT(DISTINCT video_id) FROM video_tags WHERE video_id IN (\(placeholders)) GROUP BY tag_id"
         )
         defer { sqlite3_finalize(statement) }
         for (index, videoID) in videoIDs.enumerated() { bindText(videoID, to: Int32(index + 1), in: statement) }
@@ -1775,8 +1725,7 @@ actor DatabaseStore {
             SELECT video_tags.video_id, video_tags.tag_id
             FROM video_tags JOIN tags ON tags.id = video_tags.tag_id
             WHERE tags.library_id = ?
-            """,
-            operation: "读取标签状态"
+            """
         )
         defer { sqlite3_finalize(statement) }
         bindText(libraryID, to: 1, in: statement)
@@ -1791,8 +1740,7 @@ actor DatabaseStore {
             SELECT external_key, tag_id, first_imported_at, last_seen_at
             FROM finder_tag_import_mappings
             WHERE library_id = ?
-            """,
-            operation: "读取 Finder 标签映射"
+            """
         )
         defer { sqlite3_finalize(mappingStatement) }
         bindText(libraryID, to: 1, in: mappingStatement)
@@ -1800,7 +1748,7 @@ actor DatabaseStore {
         while sqlite3_step(mappingStatement) == SQLITE_ROW {
             guard let externalKey = text(at: 0, in: mappingStatement),
                   let tagID = text(at: 1, in: mappingStatement) else {
-                throw DatabaseError.statementFailed("读取 Finder 标签映射")
+                throw DatabaseError.statementFailed
             }
             finderMappings.append(FinderTagMapping(
                 externalKey: externalKey,
@@ -1821,24 +1769,23 @@ actor DatabaseStore {
         try prepareIfNeeded()
         try execute("BEGIN IMMEDIATE")
         do {
-            let delete = try prepare("DELETE FROM tags WHERE library_id = ?", operation: "恢复标签状态")
+            let delete = try prepare("DELETE FROM tags WHERE library_id = ?")
             bindText(snapshot.libraryID, to: 1, in: delete)
-            guard sqlite3_step(delete) == SQLITE_DONE else { sqlite3_finalize(delete); throw DatabaseError.statementFailed("恢复标签状态") }
+            guard sqlite3_step(delete) == SQLITE_DONE else { sqlite3_finalize(delete); throw DatabaseError.statementFailed }
             sqlite3_finalize(delete)
 
             var pending = snapshot.tags
             var inserted = Set<String>()
             while pending.isEmpty == false {
                 let ready = pending.filter { $0.parentID == nil || inserted.contains($0.parentID!) }
-                guard ready.isEmpty == false else { throw DatabaseError.statementFailed("恢复标签状态") }
+                guard ready.isEmpty == false else { throw DatabaseError.statementFailed }
                 for tag in ready {
                     let statement = try prepare(
                         """
                         INSERT INTO tags (id, library_id, name, normalized_name, parent_id, color,
                                           sort_order, source, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        operation: "恢复标签状态"
+                        """
                     )
                     bindText(tag.id, to: 1, in: statement)
                     bindText(tag.libraryID, to: 2, in: statement)
@@ -1851,7 +1798,7 @@ actor DatabaseStore {
                     let now = Date().timeIntervalSince1970
                     sqlite3_bind_double(statement, 9, now)
                     sqlite3_bind_double(statement, 10, now)
-                    guard sqlite3_step(statement) == SQLITE_DONE else { sqlite3_finalize(statement); throw DatabaseError.statementFailed("恢复标签状态") }
+                    guard sqlite3_step(statement) == SQLITE_DONE else { sqlite3_finalize(statement); throw DatabaseError.statementFailed }
                     sqlite3_finalize(statement)
                     inserted.insert(tag.id)
                 }
@@ -1859,8 +1806,7 @@ actor DatabaseStore {
                 pending.removeAll { readyIDs.contains($0.id) }
             }
             let relationStatement = try prepare(
-                "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) VALUES (?, ?, ?)",
-                operation: "恢复标签状态"
+                "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) VALUES (?, ?, ?)"
             )
             defer { sqlite3_finalize(relationStatement) }
             for relation in snapshot.relations {
@@ -1868,15 +1814,14 @@ actor DatabaseStore {
                 bindText(relation.videoID, to: 1, in: relationStatement)
                 bindText(relation.tagID, to: 2, in: relationStatement)
                 sqlite3_bind_double(relationStatement, 3, Date().timeIntervalSince1970)
-                guard sqlite3_step(relationStatement) == SQLITE_DONE else { throw DatabaseError.statementFailed("恢复标签状态") }
+                guard sqlite3_step(relationStatement) == SQLITE_DONE else { throw DatabaseError.statementFailed }
             }
             let mappingStatement = try prepare(
                 """
                 INSERT INTO finder_tag_import_mappings
                     (library_id, external_key, tag_id, first_imported_at, last_seen_at)
                 VALUES (?, ?, ?, ?, ?)
-                """,
-                operation: "恢复 Finder 标签映射"
+                """
             )
             defer { sqlite3_finalize(mappingStatement) }
             for mapping in snapshot.finderMappings {
@@ -1887,7 +1832,7 @@ actor DatabaseStore {
                 sqlite3_bind_double(mappingStatement, 4, mapping.firstImportedAt.timeIntervalSince1970)
                 sqlite3_bind_double(mappingStatement, 5, mapping.lastSeenAt.timeIntervalSince1970)
                 guard sqlite3_step(mappingStatement) == SQLITE_DONE else {
-                    throw DatabaseError.statementFailed("恢复 Finder 标签映射")
+                    throw DatabaseError.statementFailed
                 }
             }
             try execute("COMMIT")
@@ -1904,23 +1849,21 @@ actor DatabaseStore {
         importedAt: Date
     ) throws -> String {
         let lookup = try prepare(
-            "SELECT tag_id FROM finder_tag_import_mappings WHERE library_id = ? AND external_key = ? LIMIT 1",
-            operation: "读取 Finder 标签映射"
+            "SELECT tag_id FROM finder_tag_import_mappings WHERE library_id = ? AND external_key = ? LIMIT 1"
         )
         bindText(libraryID, to: 1, in: lookup)
         bindText(externalKey, to: 2, in: lookup)
         if sqlite3_step(lookup) == SQLITE_ROW, let id = text(at: 0, in: lookup) {
             sqlite3_finalize(lookup)
             let update = try prepare(
-                "UPDATE finder_tag_import_mappings SET last_seen_at = ? WHERE library_id = ? AND external_key = ?",
-                operation: "更新 Finder 标签映射"
+                "UPDATE finder_tag_import_mappings SET last_seen_at = ? WHERE library_id = ? AND external_key = ?"
             )
             sqlite3_bind_double(update, 1, importedAt.timeIntervalSince1970)
             bindText(libraryID, to: 2, in: update)
             bindText(externalKey, to: 3, in: update)
             guard sqlite3_step(update) == SQLITE_DONE else {
                 sqlite3_finalize(update)
-                throw DatabaseError.statementFailed("更新 Finder 标签映射")
+                throw DatabaseError.statementFailed
             }
             sqlite3_finalize(update)
             return id
@@ -1933,8 +1876,7 @@ actor DatabaseStore {
             WHERE library_id = ? AND parent_id IS NULL AND normalized_name = ?
             ORDER BY CASE source WHEN 'user' THEN 0 ELSE 1 END, sort_order
             LIMIT 1
-            """,
-            operation: "复用同名顶级标签"
+            """
         )
         bindText(libraryID, to: 1, in: existing)
         bindText(externalKey, to: 2, in: existing)
@@ -1948,8 +1890,7 @@ actor DatabaseStore {
             INSERT INTO finder_tag_import_mappings
                 (library_id, external_key, tag_id, first_imported_at, last_seen_at)
             VALUES (?, ?, ?, ?, ?)
-            """,
-            operation: "保存 Finder 标签映射"
+            """
         )
         bindText(libraryID, to: 1, in: insert)
         bindText(externalKey, to: 2, in: insert)
@@ -1958,7 +1899,7 @@ actor DatabaseStore {
         sqlite3_bind_double(insert, 5, importedAt.timeIntervalSince1970)
         guard sqlite3_step(insert) == SQLITE_DONE else {
             sqlite3_finalize(insert)
-            throw DatabaseError.statementFailed("保存 Finder 标签映射")
+            throw DatabaseError.statementFailed
         }
         sqlite3_finalize(insert)
         return tagID
@@ -1982,14 +1923,13 @@ actor DatabaseStore {
                 try execute("BEGIN IMMEDIATE")
                 try applyMigration(version)
                 let statement = try prepare(
-                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-                    operation: "记录数据库迁移"
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)"
                 )
                 sqlite3_bind_int(statement, 1, Int32(version))
                 sqlite3_bind_double(statement, 2, Date().timeIntervalSince1970)
                 guard sqlite3_step(statement) == SQLITE_DONE else {
                     sqlite3_finalize(statement)
-                    throw DatabaseError.migrationFailed(version)
+                    throw DatabaseError.migrationFailed
                 }
                 sqlite3_finalize(statement)
                 try execute("COMMIT")
@@ -2000,7 +1940,7 @@ actor DatabaseStore {
             } catch {
                 try? execute("ROLLBACK")
                 if rebuildsVideoTable { try? execute("PRAGMA foreign_keys = ON") }
-                throw DatabaseError.migrationFailed(version)
+                throw DatabaseError.migrationFailed
             }
         }
     }
@@ -2148,7 +2088,7 @@ actor DatabaseStore {
             """)
             return
         }
-        guard version == 1 else { throw DatabaseError.migrationFailed(version) }
+        guard version == 1 else { throw DatabaseError.migrationFailed }
 
         try execute("""
         CREATE TABLE libraries (
@@ -2232,15 +2172,14 @@ actor DatabaseStore {
 
     private func migrateFinderTagsToTopLevel() throws {
         let rootsStatement = try prepare(
-            "SELECT id, library_id FROM tags WHERE source = 'finder-root'",
-            operation: "迁移 Finder 标签层级"
+            "SELECT id, library_id FROM tags WHERE source = 'finder-root'"
         )
         var roots: [(id: String, libraryID: String)] = []
         while sqlite3_step(rootsStatement) == SQLITE_ROW {
             guard let id = text(at: 0, in: rootsStatement),
                   let libraryID = text(at: 1, in: rootsStatement) else {
                 sqlite3_finalize(rootsStatement)
-                throw DatabaseError.statementFailed("迁移 Finder 标签层级")
+                throw DatabaseError.statementFailed
             }
             roots.append((id, libraryID))
         }
@@ -2248,8 +2187,7 @@ actor DatabaseStore {
 
         for root in roots {
             let childrenStatement = try prepare(
-                "SELECT id, normalized_name FROM tags WHERE parent_id = ? ORDER BY sort_order",
-                operation: "读取待迁移 Finder 标签"
+                "SELECT id, normalized_name FROM tags WHERE parent_id = ? ORDER BY sort_order"
             )
             bindText(root.id, to: 1, in: childrenStatement)
             var children: [(id: String, normalizedName: String)] = []
@@ -2257,7 +2195,7 @@ actor DatabaseStore {
                 guard let id = text(at: 0, in: childrenStatement),
                       let normalizedName = text(at: 1, in: childrenStatement) else {
                     sqlite3_finalize(childrenStatement)
-                    throw DatabaseError.statementFailed("读取待迁移 Finder 标签")
+                    throw DatabaseError.statementFailed
                 }
                 children.append((id, normalizedName))
             }
@@ -2273,25 +2211,24 @@ actor DatabaseStore {
                     try mergeTagDuringMigration(sourceID: child.id, targetID: targetID)
                 } else {
                     let move = try prepare(
-                        "UPDATE tags SET parent_id = NULL, sort_order = ?, updated_at = ? WHERE id = ?",
-                        operation: "平铺 Finder 标签"
+                        "UPDATE tags SET parent_id = NULL, sort_order = ?, updated_at = ? WHERE id = ?"
                     )
                     sqlite3_bind_int64(move, 1, Int64(try nextTagOrder(libraryID: root.libraryID, parentID: nil)))
                     sqlite3_bind_double(move, 2, Date().timeIntervalSince1970)
                     bindText(child.id, to: 3, in: move)
                     guard sqlite3_step(move) == SQLITE_DONE else {
                         sqlite3_finalize(move)
-                        throw DatabaseError.statementFailed("平铺 Finder 标签")
+                        throw DatabaseError.statementFailed
                     }
                     sqlite3_finalize(move)
                 }
             }
 
-            let deleteRoot = try prepare("DELETE FROM tags WHERE id = ?", operation: "移除 Finder 标签根节点")
+            let deleteRoot = try prepare("DELETE FROM tags WHERE id = ?")
             bindText(root.id, to: 1, in: deleteRoot)
             guard sqlite3_step(deleteRoot) == SQLITE_DONE else {
                 sqlite3_finalize(deleteRoot)
-                throw DatabaseError.statementFailed("移除 Finder 标签根节点")
+                throw DatabaseError.statementFailed
             }
             sqlite3_finalize(deleteRoot)
         }
@@ -2299,20 +2236,18 @@ actor DatabaseStore {
 
     private func mergeTagDuringMigration(sourceID: String, targetID: String) throws {
         let targetLibraryStatement = try prepare(
-            "SELECT library_id FROM tags WHERE id = ?",
-            operation: "读取合并目标标签"
+            "SELECT library_id FROM tags WHERE id = ?"
         )
         bindText(targetID, to: 1, in: targetLibraryStatement)
         guard sqlite3_step(targetLibraryStatement) == SQLITE_ROW,
               let libraryID = text(at: 0, in: targetLibraryStatement) else {
             sqlite3_finalize(targetLibraryStatement)
-            throw DatabaseError.statementFailed("读取合并目标标签")
+            throw DatabaseError.statementFailed
         }
         sqlite3_finalize(targetLibraryStatement)
 
         let childrenStatement = try prepare(
-            "SELECT id, normalized_name FROM tags WHERE parent_id = ? ORDER BY sort_order",
-            operation: "读取合并标签子级"
+            "SELECT id, normalized_name FROM tags WHERE parent_id = ? ORDER BY sort_order"
         )
         bindText(sourceID, to: 1, in: childrenStatement)
         var children: [(id: String, normalizedName: String)] = []
@@ -2320,7 +2255,7 @@ actor DatabaseStore {
             guard let id = text(at: 0, in: childrenStatement),
                   let normalizedName = text(at: 1, in: childrenStatement) else {
                 sqlite3_finalize(childrenStatement)
-                throw DatabaseError.statementFailed("读取合并标签子级")
+                throw DatabaseError.statementFailed
             }
             children.append((id, normalizedName))
         }
@@ -2336,8 +2271,7 @@ actor DatabaseStore {
                 try mergeTagDuringMigration(sourceID: child.id, targetID: matchingID)
             } else {
                 let move = try prepare(
-                    "UPDATE tags SET parent_id = ?, sort_order = ?, updated_at = ? WHERE id = ?",
-                    operation: "保留合并标签子级"
+                    "UPDATE tags SET parent_id = ?, sort_order = ?, updated_at = ? WHERE id = ?"
                 )
                 bindText(targetID, to: 1, in: move)
                 sqlite3_bind_int64(move, 2, Int64(try nextTagOrder(libraryID: libraryID, parentID: targetID)))
@@ -2345,41 +2279,39 @@ actor DatabaseStore {
                 bindText(child.id, to: 4, in: move)
                 guard sqlite3_step(move) == SQLITE_DONE else {
                     sqlite3_finalize(move)
-                    throw DatabaseError.statementFailed("保留合并标签子级")
+                    throw DatabaseError.statementFailed
                 }
                 sqlite3_finalize(move)
             }
         }
 
         let relations = try prepare(
-            "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) SELECT video_id, ?, created_at FROM video_tags WHERE tag_id = ?",
-            operation: "迁移 Finder 标签视频关系"
+            "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) SELECT video_id, ?, created_at FROM video_tags WHERE tag_id = ?"
         )
         bindText(targetID, to: 1, in: relations)
         bindText(sourceID, to: 2, in: relations)
         guard sqlite3_step(relations) == SQLITE_DONE else {
             sqlite3_finalize(relations)
-            throw DatabaseError.statementFailed("迁移 Finder 标签视频关系")
+            throw DatabaseError.statementFailed
         }
         sqlite3_finalize(relations)
 
         let mappings = try prepare(
-            "UPDATE finder_tag_import_mappings SET tag_id = ? WHERE tag_id = ?",
-            operation: "迁移 Finder 标签映射"
+            "UPDATE finder_tag_import_mappings SET tag_id = ? WHERE tag_id = ?"
         )
         bindText(targetID, to: 1, in: mappings)
         bindText(sourceID, to: 2, in: mappings)
         guard sqlite3_step(mappings) == SQLITE_DONE else {
             sqlite3_finalize(mappings)
-            throw DatabaseError.statementFailed("迁移 Finder 标签映射")
+            throw DatabaseError.statementFailed
         }
         sqlite3_finalize(mappings)
 
-        let delete = try prepare("DELETE FROM tags WHERE id = ?", operation: "合并 Finder 标签")
+        let delete = try prepare("DELETE FROM tags WHERE id = ?")
         bindText(sourceID, to: 1, in: delete)
         guard sqlite3_step(delete) == SQLITE_DONE else {
             sqlite3_finalize(delete)
-            throw DatabaseError.statementFailed("合并 Finder 标签")
+            throw DatabaseError.statementFailed
         }
         sqlite3_finalize(delete)
     }
@@ -2398,8 +2330,7 @@ actor DatabaseStore {
             WHERE library_id = ? AND parent_id IS ? AND normalized_name = ? \(exclusionClause)
             ORDER BY CASE source WHEN 'user' THEN 0 ELSE 1 END, sort_order
             LIMIT 1
-            """,
-            operation: "查找同名标签"
+            """
         )
         defer { sqlite3_finalize(statement) }
         bindText(libraryID, to: 1, in: statement)
@@ -2414,13 +2345,12 @@ actor DatabaseStore {
 
     private func nextTagOrder(libraryID: String, parentID: String?) throws -> Int {
         let statement = try prepare(
-            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tags WHERE library_id = ? AND parent_id IS ?",
-            operation: "读取标签排序"
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tags WHERE library_id = ? AND parent_id IS ?"
         )
         defer { sqlite3_finalize(statement) }
         bindText(libraryID, to: 1, in: statement)
         bindOptionalText(parentID, to: 2, in: statement)
-        guard sqlite3_step(statement) == SQLITE_ROW else { throw DatabaseError.statementFailed("读取标签排序") }
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw DatabaseError.statementFailed }
         return Int(sqlite3_column_int64(statement, 0))
     }
 
@@ -2429,31 +2359,31 @@ actor DatabaseStore {
         let result = sqlite3_exec(connection.handle, sql, nil, nil, &errorMessage)
         sqlite3_free(errorMessage)
         guard result == SQLITE_OK else {
-            throw DatabaseError.statementFailed("执行语句")
+            throw DatabaseError.statementFailed
         }
     }
 
     private func ensureForeignKeysAreValid() throws {
-        let statement = try prepare("PRAGMA foreign_key_check", operation: "检查数据库外键")
+        let statement = try prepare("PRAGMA foreign_key_check")
         defer { sqlite3_finalize(statement) }
         guard sqlite3_step(statement) != SQLITE_ROW else {
-            throw DatabaseError.statementFailed("检查数据库外键")
+            throw DatabaseError.statementFailed
         }
     }
 
     private func scalarInt(_ sql: String) throws -> Int {
-        let statement = try prepare(sql, operation: "读取数据库版本")
+        let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
         guard sqlite3_step(statement) == SQLITE_ROW else {
-            throw DatabaseError.statementFailed("读取数据库版本")
+            throw DatabaseError.statementFailed
         }
         return Int(sqlite3_column_int(statement, 0))
     }
 
-    private func prepare(_ sql: String, operation: String) throws -> OpaquePointer {
+    private func prepare(_ sql: String) throws -> OpaquePointer {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(connection.handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-            throw DatabaseError.statementFailed(operation)
+            throw DatabaseError.statementFailed
         }
         return statement
     }
@@ -2489,8 +2419,7 @@ actor DatabaseStore {
             WHERE library_id = ? AND parent_id IS ? AND normalized_name = ?
               AND (? IS NULL OR id != ?)
             LIMIT 1
-            """,
-            operation: "检查标签名称"
+            """
         )
         defer { sqlite3_finalize(statement) }
         bindText(libraryID, to: 1, in: statement)
@@ -2499,7 +2428,7 @@ actor DatabaseStore {
         bindOptionalText(excludingID, to: 4, in: statement)
         bindOptionalText(excludingID, to: 5, in: statement)
         guard sqlite3_step(statement) != SQLITE_ROW else {
-            throw DatabaseError.statementFailed("标签名称重复")
+            throw DatabaseError.statementFailed
         }
     }
 
@@ -2510,8 +2439,7 @@ actor DatabaseStore {
                 SELECT id FROM tags WHERE parent_id = ?
                 UNION ALL SELECT tags.id FROM tags JOIN descendants ON tags.parent_id = descendants.id
             ) SELECT 1 FROM descendants WHERE id = ? LIMIT 1
-            """,
-            operation: "检查标签层级"
+            """
         )
         defer { sqlite3_finalize(statement) }
         bindText(tagID, to: 1, in: statement)
@@ -2581,7 +2509,7 @@ actor DatabaseStore {
             let availabilityText = text(at: 15, in: statement),
             let availability = VideoRecord.Availability(rawValue: availabilityText)
         else {
-            throw DatabaseError.statementFailed("读取视频索引")
+            throw DatabaseError.statementFailed
         }
         return VideoRecord(
             id: id,

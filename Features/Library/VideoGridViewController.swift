@@ -30,8 +30,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     private var selectionAnchorVideoID: String?
 
     private let emptyState = NSStackView()
-    private let emptyTitleLabel = NSTextField(labelWithString: "导入视频与文件夹")
-    private let emptyDetailLabel = NSTextField(wrappingLabelWithString: "选择“文件 > 导入视频与文件夹…”或使用 ⇧⌘I，也可以直接拖入视频或文件夹。")
+    private let emptyTitleLabel = NSTextField(labelWithString: String(localized: .importEmptyTitle))
+    private let emptyDetailLabel = NSTextField(wrappingLabelWithString: String(localized: .importEmptyDetail))
     init(
         onOpenVideo: @escaping (VideoRecord) -> Void,
         onRevealVideo: @escaping (VideoRecord) -> Void,
@@ -111,7 +111,10 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         emptyState.spacing = 10
 
         let icon = NSImageView(
-            image: NSImage(systemSymbolName: "film.stack", accessibilityDescription: "视频") ?? NSImage()
+            image: NSImage(
+                systemSymbolName: "film.stack",
+                accessibilityDescription: String(localized: .accessibilityVideo)
+            ) ?? NSImage()
         )
         icon.symbolConfiguration = .init(pointSize: 32, weight: .light)
         icon.contentTintColor = .secondaryLabelColor
@@ -169,36 +172,41 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
                 && summary.failedVideoCount == 0
                 && summary.failedInputCount == 0
             if foundNoVideos {
-                let noun = summary.checkedFolderCount == summary.checkedInputCount ? "文件夹" : "项目"
+                let checkedDescription = summary.checkedFolderCount == summary.checkedInputCount
+                    ? String(localized: .importCheckedFolderCount(summary.checkedInputCount))
+                    : String(localized: .importCheckedItemCount(summary.checkedInputCount))
                 importStatusView.configureFinished(
-                    title: "未发现可导入的视频",
-                    detail: "已检查 \(summary.checkedInputCount) 个\(noun)。"
+                    title: String(localized: .importNoVideosTitle),
+                    detail: checkedDescription
                 )
             } else {
                 var resultParts = [
-                    "新增 \(summary.addedCount) 个",
-                    "已存在 \(summary.existingCount) 个",
+                    String(localized: .importResultAdded(summary.addedCount)),
+                    String(localized: .importResultExisting(summary.existingCount)),
                 ]
                 if summary.failedVideoCount > 0 {
-                    resultParts.append("视频失败 \(summary.failedVideoCount) 个")
+                    resultParts.append(String(localized: .importResultFailedVideo(summary.failedVideoCount)))
                 }
                 if summary.failedInputCount > 0 {
-                    resultParts.append("无法读取 \(summary.failedInputCount) 个项目")
+                    resultParts.append(String(localized: .importResultFailedInput(summary.failedInputCount)))
                 }
                 importStatusView.configureFinished(
                     title: summary.title,
-                    detail: resultParts.joined(separator: " · ")
+                    detail: AppLocalization.list(resultParts)
                 )
             }
             showImportStatus()
         case .cancelled:
             importStatusView.configureFinished(
-                title: "已取消视频导入",
-                detail: "已经完整加入的视频会保留。"
+                title: String(localized: .importCancelledTitle),
+                detail: String(localized: .importCancelledDetail)
             )
             showImportStatus()
         case let .failed(message):
-            importStatusView.configureFinished(title: "视频导入未完成", detail: message)
+            importStatusView.configureFinished(
+                title: String(localized: .importFailedTitle),
+                detail: message
+            )
             showImportStatus()
         }
     }
@@ -273,10 +281,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     func showRestoredVideos(_ videoIDs: [String]) {
         setSelectedVideoIDs(videoIDs)
         importStatusView.configureFinished(
-            title: videoIDs.count > 1
-                ? "已撤回，恢复 \(videoIDs.count) 个视频"
-                : "已撤回，恢复 1 个视频",
-            detail: "视频及其应用标签已恢复到资料库。"
+            title: String(localized: .importResultRestored(videoIDs.count)),
+            detail: String(localized: .importResultRestoredDetail(videoIDs.count))
         )
         showImportStatus()
     }
@@ -349,8 +355,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
 
     private func updateEmptyState() {
         emptyState.isHidden = videos.isEmpty == false
-        emptyTitleLabel.stringValue = "导入视频与文件夹"
-        emptyDetailLabel.stringValue = "选择“文件 > 导入视频与文件夹…”、使用 ⇧⌘I，或直接将视频、文件夹拖到这里。"
+        emptyTitleLabel.stringValue = String(localized: .importEmptyTitle)
+        emptyDetailLabel.stringValue = String(localized: .importEmptyDetail)
     }
 
     private func openVideo(at indexPath: IndexPath) {
@@ -382,24 +388,26 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.addItem(makeContextMenuItem(
-            title: "使用默认播放器打开",
+            title: String(localized: .videoActionOpen),
             action: #selector(openVideoFromContextMenu(_:)),
             video: video
         ))
         menu.addItem(makeContextMenuItem(
-            title: "在 Finder 中显示",
+            title: String(localized: .videoActionReveal),
             action: #selector(revealVideoFromContextMenu(_:)),
             video: video
         ))
         menu.addItem(makeContextMenuItem(
-            title: "复制完整路径",
+            title: String(localized: .videoActionCopyPath),
             action: #selector(copyPathFromContextMenu(_:)),
             video: video
         ))
         menu.addItem(.separator())
         let selectedCount = collectionView.selectionIndexPaths.count
         let removeItem = NSMenuItem(
-            title: selectedCount > 1 ? "从资料库移除 \(selectedCount) 个视频" : "从资料库移除",
+            title: selectedCount > 1
+                ? String(localized: .videoRemoveMenuMultiple(selectedCount))
+                : String(localized: .videoRemoveMenuSingle),
             action: #selector(removeVideosFromContextMenu(_:)),
             keyEquivalent: "\u{8}"
         )
@@ -416,13 +424,13 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = selected.count > 1
-            ? "从资料库移除 \(selected.count) 个视频？"
-            : "从资料库移除这个视频？"
+            ? String(localized: .videoRemoveTitleMultiple(selected.count))
+            : String(localized: .videoRemoveTitleSingle)
         alert.informativeText = selected.count > 1
-            ? "这些视频会从 FileFacet 及其标签中移除，Mac 上的原视频仍会保留。"
-            : "视频会从 FileFacet 及其标签中移除，Mac 上的原视频仍会保留。"
-        alert.addButton(withTitle: "移除")
-        alert.addButton(withTitle: "取消")
+            ? String(localized: .videoRemoveDetailMultiple)
+            : String(localized: .videoRemoveDetailSingle)
+        alert.addButton(withTitle: String(localized: .actionRemove))
+        alert.addButton(withTitle: String(localized: .actionCancel))
         alert.buttons.first?.hasDestructiveAction = true
         let videoIDs = selected.map(\.id)
         alert.beginSheetModal(for: window) { [weak self] response in
@@ -430,10 +438,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
             self?.onRemoveVideos(videoIDs) { [weak self] succeeded in
                 guard let self, succeeded else { return }
                 self.importStatusView.configureUndo(
-                    title: videoIDs.count > 1
-                        ? "已从资料库移除 \(videoIDs.count) 个视频"
-                        : "已从资料库移除 1 个视频",
-                    detail: "Mac 上的原视频仍然保留。"
+                    title: String(localized: .videoResultRemoved(videoIDs.count)),
+                    detail: String(localized: .importResultOriginalRemains(videoIDs.count))
                 )
                 self.showImportStatus()
             }
@@ -629,7 +635,7 @@ private final class ImportStatusView: NSView {
             progressIndicator.isIndeterminate = true
             progressIndicator.startAnimation(nil)
         }
-        actionButton.title = "取消"
+        actionButton.title = String(localized: .actionCancel)
         actionMode = .cancel
     }
 
@@ -638,7 +644,7 @@ private final class ImportStatusView: NSView {
         detailLabel.stringValue = detail
         progressIndicator.stopAnimation(nil)
         progressIndicator.isHidden = true
-        actionButton.title = "完成"
+        actionButton.title = String(localized: .actionDone)
         actionMode = .dismiss
     }
 
@@ -647,17 +653,17 @@ private final class ImportStatusView: NSView {
         detailLabel.stringValue = detail
         progressIndicator.stopAnimation(nil)
         progressIndicator.isHidden = true
-        actionButton.title = "撤回"
+        actionButton.title = String(localized: .actionUndo)
         actionMode = .undo
     }
 
     func configureUndoActionOnly() {
-        actionButton.title = "撤回移出"
+        actionButton.title = String(localized: .actionUndoRemoval)
         actionMode = .undo
     }
 
     func configureDismissActionOnly() {
-        actionButton.title = "完成"
+        actionButton.title = String(localized: .actionDone)
         actionMode = .dismiss
     }
 
@@ -880,7 +886,10 @@ private final class VideoThumbnailView: NSView {
         layer?.contentsGravity = .resizeAspectFill
 
         placeholderView.translatesAutoresizingMaskIntoConstraints = false
-        placeholderView.image = NSImage(systemSymbolName: "film", accessibilityDescription: "视频")
+        placeholderView.image = NSImage(
+            systemSymbolName: "film",
+            accessibilityDescription: String(localized: .accessibilityVideo)
+        )
         placeholderView.symbolConfiguration = .init(pointSize: 34, weight: .light)
         placeholderView.contentTintColor = .secondaryLabelColor
         placeholderView.imageScaling = .scaleProportionallyUpOrDown

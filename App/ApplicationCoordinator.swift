@@ -266,7 +266,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     @objc private func importVideos() {
         guard lockCoordinator.state == .unlocked else { return }
         guard let libraryAccessCoordinator else {
-            libraryViewController.setLibraryError("应用数据库暂时不可用，请重新启动应用。")
+            libraryViewController.setLibraryError(String(localized: .errorDatabaseUnavailable))
             return
         }
         libraryAccessCoordinator.importVideos()
@@ -342,19 +342,23 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu(title: AppConfiguration.displayName)
         let aboutItem = NSMenuItem(
-            title: "关于 \(AppConfiguration.displayName)",
+            title: String(localized: .menuAbout(AppConfiguration.displayName)),
             action: #selector(showAbout),
             keyEquivalent: ""
         )
         aboutItem.target = self
         appMenu.addItem(aboutItem)
         appMenu.addItem(.separator())
-        let settingsItem = NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(
+            title: String(localized: .menuSettings),
+            action: #selector(showSettings),
+            keyEquivalent: ","
+        )
         settingsItem.target = self
         appMenu.addItem(settingsItem)
         appMenu.addItem(.separator())
         appMenu.addItem(
-            withTitle: "退出 \(AppConfiguration.displayName)",
+            withTitle: String(localized: .menuQuit(AppConfiguration.displayName)),
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
@@ -362,9 +366,9 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         mainMenu.addItem(appMenuItem)
 
         let fileMenuItem = NSMenuItem()
-        let fileMenu = NSMenu(title: "文件")
+        let fileMenu = NSMenu(title: String(localized: .menuFile))
         let importItem = NSMenuItem(
-            title: "导入视频与文件夹…",
+            title: String(localized: .menuFileImport),
             action: #selector(importVideos),
             keyEquivalent: "i"
         )
@@ -372,7 +376,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         importItem.target = self
         fileMenu.addItem(importItem)
         let createTagItem = NSMenuItem(
-            title: "新建标签…",
+            title: String(localized: .menuFileNewTag),
             action: #selector(createRootTag),
             keyEquivalent: "n"
         )
@@ -383,9 +387,9 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         mainMenu.addItem(fileMenuItem)
 
         let editMenuItem = NSMenuItem()
-        let editMenu = NSMenu(title: "编辑")
+        let editMenu = NSMenu(title: String(localized: .menuEdit))
         let undoItem = NSMenuItem(
-            title: "撤销上一次操作",
+            title: String(localized: .menuUndoLastAction),
             action: #selector(undoLastMutation),
             keyEquivalent: "z"
         )
@@ -395,9 +399,9 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         mainMenu.addItem(editMenuItem)
 
         let windowMenuItem = NSMenuItem()
-        let windowMenu = NSMenu(title: "窗口")
+        let windowMenu = NSMenu(title: String(localized: .menuWindow))
         windowMenu.addItem(
-            withTitle: "最小化",
+            withTitle: String(localized: .menuMinimize),
             action: #selector(NSWindow.performMiniaturize(_:)),
             keyEquivalent: "m"
         )

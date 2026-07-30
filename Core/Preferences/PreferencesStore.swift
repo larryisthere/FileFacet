@@ -11,11 +11,11 @@ enum IdleLockInterval: Int, CaseIterable, Identifiable, Sendable {
     var id: Int { rawValue }
     var title: String {
         switch self {
-        case .immediately: "立即"
-        case .oneMinute: "1 分钟"
-        case .fiveMinutes: "5 分钟"
-        case .fifteenMinutes: "15 分钟"
-        case .never: "永不"
+        case .immediately: String(localized: .preferencesImmediately)
+        case .oneMinute: String(localized: .preferencesOneMinute)
+        case .fiveMinutes: String(localized: .preferencesFiveMinutes)
+        case .fifteenMinutes: String(localized: .preferencesFifteenMinutes)
+        case .never: String(localized: .preferencesNever)
         }
     }
 }

@@ -5,9 +5,9 @@ import UniformTypeIdentifiers
 struct LibraryPicker {
     func chooseImportItems() -> [URL]? {
         let panel = NSOpenPanel()
-        panel.title = "选择要导入的视频和文件夹"
-        panel.message = "可选择多个视频、多个文件夹或两者组合；文件夹会递归导入。"
-        panel.prompt = "导入"
+        panel.title = String(localized: .importPickerTitle)
+        panel.message = String(localized: .importPickerMessage)
+        panel.prompt = String(localized: .importPickerPrompt)
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true

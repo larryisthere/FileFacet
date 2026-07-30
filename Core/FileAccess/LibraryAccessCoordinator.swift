@@ -33,30 +33,35 @@ private enum LibraryImportEntryPoint: Equatable {
 
     var emptyMessage: String {
         switch self {
-        case .picker: "没有可导入的内容。请选择受支持的视频文件或普通文件夹。"
-        case .drop: "没有可导入的内容。请拖入受支持的视频文件或普通文件夹。"
+        case .picker: String(localized: .importNoContentPicker)
+        case .drop: String(localized: .importNoContentDrop)
         }
     }
 
     var completionTitle: String {
         switch self {
-        case .picker: "已完成导入"
-        case .drop: "已完成拖入导入"
+        case .picker: String(localized: .importCompletedPicker)
+        case .drop: String(localized: .importCompletedDrop)
         }
     }
 
     func title(for plan: VideoImportPlan) -> String {
-        if self == .picker, plan.roots.count == 1, let root = plan.roots.first {
-            return "正在导入“\(root.url.lastPathComponent)”"
+        if plan.roots.count == 1, let root = plan.roots.first {
+            return String(localized: .importProgressNamedItem(root.url.lastPathComponent))
         }
-        let source = self == .picker ? "选中的" : "拖入的"
         if plan.fileCount > 0, plan.folderCount > 0 {
-            return "正在导入\(source) \(plan.acceptedInputCount) 个项目"
+            return self == .picker
+                ? String(localized: .importProgressPickerItems(plan.acceptedInputCount))
+                : String(localized: .importProgressDropItems(plan.acceptedInputCount))
         }
         if plan.folderCount > 0 {
-            return "正在导入\(source) \(plan.folderCount) 个文件夹"
+            return self == .picker
+                ? String(localized: .importProgressPickerFolders(plan.folderCount))
+                : String(localized: .importProgressDropFolders(plan.folderCount))
         }
-        return "正在导入\(source) \(plan.fileCount) 个视频"
+        return self == .picker
+            ? String(localized: .importProgressPickerVideos(plan.fileCount))
+            : String(localized: .importProgressDropVideos(plan.fileCount))
     }
 }
 
@@ -198,7 +203,7 @@ final class LibraryAccessCoordinator {
                 if sourceURLs.isEmpty == false { scheduleMaintenance() }
             } catch {
                 AppLogger.library.error("Library restore failed with category: \(String(describing: type(of: error)), privacy: .public)")
-                onError?("无法读取现有视频索引，请重新启动应用。")
+                onError?(String(localized: .importVideoIndexRead))
             }
         }
     }
@@ -220,11 +225,20 @@ final class LibraryAccessCoordinator {
         }
         let initialDetail: String
         if plan.collapsedInputCount > 0 {
-            initialDetail = "已合并 \(plan.collapsedInputCount) 个重叠项目，正在处理第 1 / \(plan.roots.count) 个项目…"
+            initialDetail = plan.collapsedInputCount == 1
+                ? String(localized: .importProgressMergedOne(plan.roots.count))
+                : String(
+                    localized: .importProgressMergedMultiple(
+                        plan.collapsedInputCount,
+                        plan.roots.count
+                    )
+                )
         } else if plan.roots.count == 1, let root = plan.roots.first {
-            initialDetail = root.kind == .directory ? "正在扫描文件夹…" : "正在核对视频…"
+            initialDetail = root.kind == .directory
+                ? String(localized: .importProgressScanningFolder)
+                : String(localized: .importProgressCheckingVideo)
         } else {
-            initialDetail = "正在处理第 1 / \(plan.roots.count) 个项目…"
+            initialDetail = String(localized: .importProgressProcessing(plan.roots.count))
         }
         runImport(LibraryImportRequest(
             roots: plan.roots,
@@ -247,7 +261,7 @@ final class LibraryAccessCoordinator {
             }
         }
         guard let initialSource = sources.first else {
-            onImportStateChanged?(.failed(message: "无法获得所选内容的持续访问权限。"))
+            onImportStateChanged?(.failed(message: String(localized: .importPermission)))
             return
         }
         importTask?.cancel()
@@ -270,7 +284,7 @@ final class LibraryAccessCoordinator {
                 if try await database.fetchPrimaryLibrary() == nil {
                     try await database.saveLibrary(LibraryRecord(
                         id: LibraryRecord.primaryID,
-                        name: "全部视频",
+                        name: AppConfiguration.internalName,
                         rootBookmarkData: initialSource.bookmark,
                         createdAt: Date(),
                         lastScanAt: nil
@@ -287,8 +301,17 @@ final class LibraryAccessCoordinator {
                     onImportStateChanged?(.importing(
                         title: request.title,
                         detail: request.inputCount == 1
-                            ? (source.kind == .directory ? "正在扫描文件夹…" : "正在核对视频…")
-                            : "正在扫描第 \(source.requestIndex + 1) / \(request.inputCount) 个项目…",
+                            ? (
+                                source.kind == .directory
+                                    ? String(localized: .importProgressScanningFolder)
+                                    : String(localized: .importProgressCheckingVideo)
+                            )
+                            : String(
+                                localized: .importProgressScanningPosition(
+                                    source.requestIndex + 1,
+                                    request.inputCount
+                                )
+                            ),
                         progress: sources.count == 1 ? nil : sourceProgress
                     ))
                     do {
@@ -307,8 +330,13 @@ final class LibraryAccessCoordinator {
                         onImportStateChanged?(.importing(
                             title: request.title,
                             detail: request.inputCount == 1
-                                ? "正在保存视频…"
-                                : "正在保存第 \(source.requestIndex + 1) / \(request.inputCount) 个项目…",
+                                ? String(localized: .importProgressSaving)
+                                : String(
+                                    localized: .importProgressSavingPosition(
+                                        source.requestIndex + 1,
+                                        request.inputCount
+                                    )
+                                ),
                             progress: (Double(sourceIndex) + 0.5) / Double(sources.count)
                         ))
                         try await database.saveSourceAuthorization(SourceAuthorizationRecord(
@@ -342,7 +370,7 @@ final class LibraryAccessCoordinator {
                 }
                 onImportStateChanged?(.importing(
                     title: request.title,
-                    detail: "正在更新资料库…",
+                    detail: String(localized: .importProgressUpdating),
                     progress: 0.98
                 ))
                 try await refreshTags(libraryID: LibraryRecord.primaryID)
@@ -372,7 +400,7 @@ final class LibraryAccessCoordinator {
                 AppLogger.library.error("Manual import failed with category: \(String(describing: type(of: error)), privacy: .public)")
                 await refreshAfterInterruptedImportInFreshTask()
                 guard importRevision == revision else { return }
-                onImportStateChanged?(.failed(message: "导入未完成；已经完整加入的视频会保留，请重试剩余内容。"))
+                onImportStateChanged?(.failed(message: String(localized: .importFailedDetail)))
             }
         }
     }
@@ -433,32 +461,43 @@ final class LibraryAccessCoordinator {
     }
 
     func createTag(name: String, parentID: String?) {
-        mutateTags(actionName: "新建标签") { database in
+        mutateTags(actionName: String(localized: .tagActionCreate)) { database in
             _ = try await database.createTag(libraryID: LibraryRecord.primaryID, name: name, parentID: parentID)
         }
     }
 
     func renameTag(_ tag: TagRecord, name: String) {
-        mutateTags(actionName: "重命名标签") { database in try await database.renameTag(id: tag.id, name: name) }
+        mutateTags(actionName: String(localized: .tagActionRename)) { database in
+            try await database.renameTag(id: tag.id, name: name)
+        }
     }
 
     func deleteTag(_ tag: TagRecord) {
-        mutateTags(actionName: "删除标签") { database in try await database.deleteTag(id: tag.id) }
+        mutateTags(actionName: String(localized: .tagActionDelete)) { database in
+            try await database.deleteTag(id: tag.id)
+        }
     }
 
     func moveTags(_ tags: [TagRecord], parentID: String?, sortOrder: Int) {
         let tagIDs = tags.map(\.id)
-        mutateTags(actionName: tags.count > 1 ? "移动多个标签" : "移动标签") { database in
+        let actionName = tags.count > 1
+            ? String(localized: .tagActionMoveMultiple)
+            : String(localized: .tagActionMove)
+        mutateTags(actionName: actionName) { database in
             try await database.moveTags(ids: tagIDs, parentID: parentID, sortOrder: sortOrder)
         }
     }
 
     func setTagColor(_ tag: TagRecord, color: String?) {
-        mutateTags(actionName: "设置标签颜色") { database in try await database.setTagColor(id: tag.id, color: color) }
+        mutateTags(actionName: String(localized: .tagActionSetColor)) { database in
+            try await database.setTagColor(id: tag.id, color: color)
+        }
     }
 
     func mergeTag(_ source: TagRecord, into target: TagRecord) {
-        mutateTags(actionName: "合并标签") { database in try await database.mergeTag(sourceID: source.id, targetID: target.id) }
+        mutateTags(actionName: String(localized: .tagActionMerge)) { database in
+            try await database.mergeTag(sourceID: source.id, targetID: target.id)
+        }
     }
 
     func setTagAssignment(
@@ -467,7 +506,10 @@ final class LibraryAccessCoordinator {
         enabled: Bool,
         completion: ((Bool) -> Void)? = nil
     ) {
-        mutateTags(actionName: enabled ? "添加标签" : "移除标签") { database in
+        let actionName = enabled
+            ? String(localized: .tagActionAdd)
+            : String(localized: .tagActionRemove)
+        mutateTags(actionName: actionName) { database in
             try await database.setTagAssignment(tagID: tag.id, videoIDs: videoIDs, enabled: enabled)
         } completion: { succeeded in
             completion?(succeeded)
@@ -479,7 +521,7 @@ final class LibraryAccessCoordinator {
         videoIDs: [String],
         completion: ((Bool) -> Void)? = nil
     ) {
-        mutateTags(actionName: "应用标签") { database in
+        mutateTags(actionName: String(localized: .tagActionApply)) { database in
             try await database.setTagAssignments(assignments, videoIDs: videoIDs)
         } completion: { succeeded in
             completion?(succeeded)
@@ -492,7 +534,7 @@ final class LibraryAccessCoordinator {
         videoIDs: [String],
         completion: ((Bool) -> Void)? = nil
     ) {
-        mutateTags(actionName: "应用标签") { database in
+        mutateTags(actionName: String(localized: .tagActionApply)) { database in
             try await database.applyTagDraft(
                 libraryID: LibraryRecord.primaryID,
                 creations: creations,
@@ -540,13 +582,13 @@ final class LibraryAccessCoordinator {
                     AppLogger.database.error(
                         "Video removal refresh failed with category: \(String(describing: type(of: error)), privacy: .public)"
                     )
-                    onOperationError?("视频已从资料库移出，但列表未能刷新；重新启动应用后会显示最新结果。")
+                    onOperationError?(String(localized: .errorRemoveRefresh))
                 }
                 completion?(true)
             } catch {
                 completion?(false)
                 AppLogger.database.error("Video removal failed with category: \(String(describing: type(of: error)), privacy: .public)")
-                onOperationError?("视频未能从资料库移出，请重试。")
+                onOperationError?(String(localized: .errorRemove))
             }
         }
     }
@@ -582,7 +624,7 @@ final class LibraryAccessCoordinator {
                     AppLogger.database.error(
                         "Video removal undo refresh failed with category: \(String(describing: type(of: error)), privacy: .public)"
                     )
-                    onOperationError?("视频已经恢复，但列表未能刷新；重新启动应用后会显示最新结果。")
+                    onOperationError?(String(localized: .errorRestoreRefresh))
                 }
                 undoManager.removeAllActions()
                 lastUndoMutation = nil
@@ -591,7 +633,7 @@ final class LibraryAccessCoordinator {
                 undoManager.removeAllActions()
                 installVideoRemovalUndo(snapshot)
                 AppLogger.database.error("Video removal undo failed with category: \(String(describing: type(of: error)), privacy: .public)")
-                onOperationError?("撤回移出未完成，请重试。")
+                onOperationError?(String(localized: .errorRestore))
             }
         }
     }
@@ -606,7 +648,11 @@ final class LibraryAccessCoordinator {
         undoManager.registerUndo(withTarget: self) { target in
             target.restoreRemovedVideos(snapshot)
         }
-        undoManager.setActionName(snapshot.videos.count > 1 ? "移出多个视频" : "移出视频")
+        undoManager.setActionName(
+            snapshot.videos.count > 1
+                ? String(localized: .videoUndoActionMultiple)
+                : String(localized: .videoUndoActionSingle)
+        )
     }
 
     private func invalidateUndoHistoryUnlessVideoRemoval() {
@@ -962,7 +1008,7 @@ final class LibraryAccessCoordinator {
             } catch {
                 completion?(false)
                 AppLogger.database.error("Tag mutation failed with category: \(String(describing: type(of: error)), privacy: .public)")
-                onOperationError?("标签操作未完成，请检查名称或层级后重试。")
+                onOperationError?(String(localized: .errorTagOperation))
             }
         }
     }
@@ -982,7 +1028,7 @@ final class LibraryAccessCoordinator {
                 invalidateUndoHistory()
             } catch {
                 AppLogger.database.error("Tag undo failed with category: \(String(describing: type(of: error)), privacy: .public)")
-                onOperationError?("撤销未完成，请重试。")
+                onOperationError?(String(localized: .errorUndo))
             }
         }
     }
@@ -1006,7 +1052,7 @@ final class LibraryAccessCoordinator {
                 return
             } catch {
                 AppLogger.database.error("Video query failed with category: \(String(describing: type(of: error)), privacy: .public)")
-                onOperationError?("筛选视频时发生错误，请重试。")
+                onOperationError?(String(localized: .errorFilter))
             }
         }
     }

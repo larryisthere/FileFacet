@@ -14,13 +14,13 @@ enum AppConfiguration {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         switch (version, build) {
         case let (.some(version), .some(build)):
-            return "版本 \(version)（构建 \(build)）"
+            return String(localized: .aboutVersionBuild(version, build))
         case let (.some(version), .none):
-            return "版本 \(version)"
+            return String(localized: .aboutVersion(version))
         case let (.none, .some(build)):
-            return "构建 \(build)"
+            return String(localized: .aboutBuild(build))
         case (.none, .none):
-            return "版本信息不可用"
+            return String(localized: .aboutUnavailable)
         }
     }
 }

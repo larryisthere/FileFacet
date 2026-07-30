@@ -7,12 +7,12 @@ protocol Authenticating: Sendable {
 struct AuthenticationService: Authenticating {
     func authenticate() async -> Bool {
         let context = LAContext()
-        context.localizedCancelTitle = "取消"
+        context.localizedCancelTitle = String(localized: .authenticationCancel)
 
         do {
             return try await context.evaluatePolicy(
                 .deviceOwnerAuthentication,
-                localizedReason: "验证后访问本地视频资料库"
+                localizedReason: String(localized: .authenticationReason)
             )
         } catch {
             return false

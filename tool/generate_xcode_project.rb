@@ -7,6 +7,8 @@ project = Xcodeproj::Project.new(project_path)
 project.root_object.attributes["LastSwiftUpdateCheck"] = "2650"
 project.root_object.attributes["LastUpgradeCheck"] = "2650"
 project.root_object.attributes["BuildIndependentTargetsInParallel"] = "YES"
+project.root_object.development_region = "en"
+project.root_object.known_regions = ["en", "zh-Hans", "Base"]
 
 app_target = project.new_target(:application, "VideoTagManager", :osx, "14.0")
 test_target = project.new_target(:unit_test_bundle, "VideoTagManagerTests", :osx, "14.0")
@@ -30,6 +32,8 @@ config_group.new_file("VideoTagManager.entitlements")
 resources_group = main_group.new_group("Resources", "Resources")
 asset_catalog = resources_group.new_file("Assets.xcassets")
 app_target.resources_build_phase.add_file_reference(asset_catalog)
+string_catalog = resources_group.new_file("Localizable.xcstrings")
+app_target.resources_build_phase.add_file_reference(string_catalog)
 
 tests_group = main_group.new_group("Tests", "Tests")
 Dir.glob(File.join(root, "Tests", "**", "*.swift")).sort.each do |path|

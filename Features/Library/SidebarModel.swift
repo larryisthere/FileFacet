@@ -7,9 +7,9 @@ enum TagSortMode: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .custom: "自定义"
-        case .name: "按名称"
-        case .count: "按数量 ↓"
+        case .custom: String(localized: .tagSortCustom)
+        case .name: String(localized: .tagSortName)
+        case .count: String(localized: .tagSortCount)
         }
     }
 
@@ -45,11 +45,18 @@ struct SidebarFilterCounts: Equatable, Sendable {
     static let zero = SidebarFilterCounts(all: 0, untagged: 0, recent: 0)
 }
 
+enum SidebarGroupKind {
+    case library
+    case tags
+}
+
 final class SidebarGroupNode {
+    let kind: SidebarGroupKind
     let title: String
     var children: [Any]
 
-    init(title: String, children: [Any]) {
+    init(kind: SidebarGroupKind, title: String, children: [Any]) {
+        self.kind = kind
         self.title = title
         self.children = children
     }

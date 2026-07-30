@@ -22,7 +22,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private let sidebarViewController: SidebarViewController
     private let settingsViewController: NSViewController
     private let onSearchChanged: (String) -> Void
-    private var contextTitle = "全部视频"
+    private var contextTitle = String(localized: .libraryAllVideos)
     private var contextTagID: String?
     private var contextStatus: String?
     private var isImporting = false
@@ -210,7 +210,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         removeSplitViewItem(sidebarSplitViewItem)
         addSplitViewItem(settingsSplitViewItem)
         view.window?.toolbar = settingsToolbar
-        view.window?.title = "设置"
+        view.window?.title = String(localized: .toolbarSettings)
         view.window?.subtitle = ""
         updateSplitViewToggleState()
     }
@@ -308,12 +308,12 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
               let window = view.window else { return }
         isPresentingSelectionAlert = true
         let alert = NSAlert()
-        alert.messageText = "应用标签更改？"
-        alert.informativeText = "当前视频的标签还有未应用的修改。"
+        alert.messageText = String(localized: .unsavedTagsTitle)
+        alert.informativeText = String(localized: .unsavedTagsDetail)
         alert.alertStyle = .informational
-        alert.addButton(withTitle: "应用")
-        alert.addButton(withTitle: "放弃更改")
-        alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: String(localized: .actionApply))
+        alert.addButton(withTitle: String(localized: .unsavedTagsDiscard))
+        alert.addButton(withTitle: String(localized: .actionCancel))
         alert.beginSheetModal(for: window) { [weak self] response in
             guard let self else { return }
             self.isPresentingSelectionAlert = false
@@ -359,7 +359,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
 
     func setLibraryError(_ message: String) {
         isLibraryAvailable = false
-        contextTitle = "全部视频"
+        contextTitle = String(localized: .libraryAllVideos)
         contextTagID = nil
         setContextStatus(message)
         updateToolbarState()
@@ -423,7 +423,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             return makeSplitViewToggleToolbarItem(
                 identifier: itemIdentifier,
                 symbolName: "sidebar.left",
-                label: "显示或隐藏左侧边栏",
+                label: String(localized: .toolbarHideShowSidebar),
                 action: #selector(toggleSidebarFromToolbar(_:)),
                 isOn: sidebarSplitViewItem?.isCollapsed == false,
                 buttonStore: { [weak self] button in self?.sidebarToggleButton = button }
@@ -436,7 +436,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             return makeSplitViewToggleToolbarItem(
                 identifier: itemIdentifier,
                 symbolName: "sidebar.right",
-                label: "显示或隐藏右侧边栏",
+                label: String(localized: .toolbarHideShowInspector),
                 action: #selector(toggleInspectorFromToolbar(_:)),
                 isOn: inspectorSplitViewItem?.isCollapsed == false,
                 buttonStore: { [weak self] button in self?.inspectorToggleButton = button }
@@ -445,10 +445,10 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             return makeContextTitleToolbarItem(identifier: itemIdentifier)
         case Self.searchItemIdentifier:
             let item = NSSearchToolbarItem(itemIdentifier: itemIdentifier)
-            item.label = "搜索"
-            item.paletteLabel = "搜索视频"
-            item.toolTip = "按文件名搜索"
-            item.searchField.placeholderString = "搜索文件名"
+            item.label = String(localized: .toolbarSearch)
+            item.paletteLabel = String(localized: .toolbarSearchVideos)
+            item.toolTip = String(localized: .toolbarSearchFilename)
+            item.searchField.placeholderString = String(localized: .toolbarSearchFilename)
             item.searchField.sendsSearchStringImmediately = true
             item.searchField.target = self
             item.searchField.action = #selector(searchChanged(_:))
@@ -475,14 +475,14 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private func makeZoomToolbarItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItemGroup {
         let smallButton = makeToolbarIconButton(
             symbolName: "rectangle.grid.3x2",
-            label: "减小缩略图",
+            label: String(localized: .toolbarThumbnailDecrease),
             target: self,
             action: #selector(decreaseZoom(_:)),
             buttonType: .momentaryPushIn
         )
         let largeButton = makeToolbarIconButton(
             symbolName: "square.grid.2x2",
-            label: "增大缩略图",
+            label: String(localized: .toolbarThumbnailIncrease),
             target: self,
             action: #selector(increaseZoom(_:)),
             buttonType: .momentaryPushIn
@@ -500,31 +500,31 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             action: #selector(changeZoom(_:))
         )
         slider.controlSize = .small
-        slider.toolTip = "调整缩略图大小"
-        slider.setAccessibilityLabel("缩略图大小")
+        slider.toolTip = String(localized: .toolbarThumbnailSizeAdjust)
+        slider.setAccessibilityLabel(String(localized: .toolbarThumbnailSize))
         slider.widthAnchor.constraint(equalToConstant: 70).isActive = true
         slider.isEnabled = isLibraryAvailable
         zoomSlider = slider
 
         let zoomOutItem = NSToolbarItem(itemIdentifier: Self.zoomOutItemIdentifier)
-        zoomOutItem.label = "减小缩略图"
-        zoomOutItem.toolTip = "减小缩略图"
+        zoomOutItem.label = String(localized: .toolbarThumbnailDecrease)
+        zoomOutItem.toolTip = String(localized: .toolbarThumbnailDecrease)
         zoomOutItem.view = smallButton
 
         let sliderItem = NSToolbarItem(itemIdentifier: Self.zoomSliderItemIdentifier)
-        sliderItem.label = "缩略图大小"
-        sliderItem.toolTip = "调整缩略图大小"
+        sliderItem.label = String(localized: .toolbarThumbnailSize)
+        sliderItem.toolTip = String(localized: .toolbarThumbnailSizeAdjust)
         sliderItem.view = slider
 
         let zoomInItem = NSToolbarItem(itemIdentifier: Self.zoomInItemIdentifier)
-        zoomInItem.label = "增大缩略图"
-        zoomInItem.toolTip = "增大缩略图"
+        zoomInItem.label = String(localized: .toolbarThumbnailIncrease)
+        zoomInItem.toolTip = String(localized: .toolbarThumbnailIncrease)
         zoomInItem.view = largeButton
 
         let group = NSToolbarItemGroup(itemIdentifier: identifier)
-        group.label = "缩略图大小"
-        group.paletteLabel = "缩略图大小"
-        group.toolTip = "调整缩略图大小"
+        group.label = String(localized: .toolbarThumbnailSize)
+        group.paletteLabel = String(localized: .toolbarThumbnailSize)
+        group.toolTip = String(localized: .toolbarThumbnailSizeAdjust)
         group.controlRepresentation = .expanded
         group.subitems = [zoomOutItem, sliderItem, zoomInItem]
         return group
@@ -535,8 +535,8 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         contextTitleView = titleView
 
         let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = "当前分类"
-        item.paletteLabel = "当前分类"
+        item.label = String(localized: .toolbarCurrentCategory)
+        item.paletteLabel = String(localized: .toolbarCurrentCategory)
         item.isBordered = false
         if #available(macOS 26.0, *) {
             item.style = .plain
@@ -549,34 +549,34 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private func makeSettingsBackToolbarItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
         let image = NSImage(
             systemSymbolName: "chevron.left",
-            accessibilityDescription: "返回资料库"
+            accessibilityDescription: String(localized: .toolbarBackLibrary)
         ) ?? NSImage()
         let button = NSButton(
-            title: "资料库",
+            title: String(localized: .libraryGroup),
             image: image,
             target: self,
             action: #selector(returnToLibraryFromSettings(_:))
         )
         button.imagePosition = .imageLeading
         button.bezelStyle = .toolbar
-        button.toolTip = "返回资料库"
-        button.setAccessibilityLabel("返回资料库")
+        button.toolTip = String(localized: .toolbarBackLibrary)
+        button.setAccessibilityLabel(String(localized: .toolbarBackLibrary))
 
         let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = "返回资料库"
-        item.paletteLabel = "返回资料库"
+        item.label = String(localized: .toolbarBackLibrary)
+        item.paletteLabel = String(localized: .toolbarBackLibrary)
         item.view = button
         return item
     }
 
     private func makeSettingsTitleToolbarItem(identifier: NSToolbarItem.Identifier) -> NSToolbarItem {
-        let label = NSTextField(labelWithString: "设置")
+        let label = NSTextField(labelWithString: String(localized: .toolbarSettings))
         label.font = .systemFont(ofSize: 13, weight: .semibold)
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = "设置"
-        item.paletteLabel = "设置"
+        item.label = String(localized: .toolbarSettings)
+        item.paletteLabel = String(localized: .toolbarSettings)
         item.isBordered = false
         if #available(macOS 26.0, *) {
             item.style = .plain
@@ -668,7 +668,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private func updateWindowTitle() {
         var subtitleParts: [String] = []
         if isLibraryAvailable {
-            subtitleParts.append("\(visibleVideoCount) 个视频")
+            subtitleParts.append(String(localized: .libraryVideoCount(visibleVideoCount)))
         }
         if let contextStatus, contextStatus.isEmpty == false {
             subtitleParts.append(contextStatus)

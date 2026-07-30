@@ -27,17 +27,19 @@ struct LockView: View {
     private var message: String {
         switch state {
         case .locked:
-            "通过 Touch ID 或 Mac 登录密码继续"
+            String(localized: .lockPrompt)
         case .authenticating:
-            "正在等待系统验证…"
+            String(localized: .lockWaiting)
         case .unlocked:
-            "已解锁"
+            String(localized: .lockUnlocked)
         case .failed:
-            "验证未完成，请重试"
+            String(localized: .lockFailed)
         }
     }
 
     private var actionTitle: String {
-        state == .failed ? "重新验证" : "解锁"
+        state == .failed
+            ? String(localized: .lockActionReauthenticate)
+            : String(localized: .lockActionUnlock)
     }
 }

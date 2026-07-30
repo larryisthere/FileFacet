@@ -8,8 +8,8 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .privacy: "隐私"
-        case .about: "关于"
+        case .privacy: String(localized: .settingsPrivacy)
+        case .about: String(localized: .settingsAbout)
         }
     }
     var systemImage: String {
@@ -53,28 +53,28 @@ struct SettingsView: View {
         Form {
             Section {
                 Toggle(
-                    "启用应用锁",
+                    String(localized: .settingsEnableLock),
                     isOn: Binding(
                         get: { preferences.authenticationEnabled },
                         set: { enabled in setAuthenticationEnabled(enabled) }
                     )
                 )
 
-                Picker("闲置后锁定", selection: $preferences.idleLockInterval) {
+                Picker(String(localized: .settingsIdleLock), selection: $preferences.idleLockInterval) {
                     ForEach(IdleLockInterval.allCases) { interval in
                         Text(interval.title).tag(interval)
                     }
                 }
                 .disabled(preferences.authenticationEnabled == false)
 
-                Text("开启时使用 Touch ID 或 Mac 登录密码验证。应用切换时始终隐藏窗口中的视频与标签信息。")
+                Text(String(localized: .settingsLockNote))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("隐私")
+        .navigationTitle(String(localized: .settingsPrivacy))
         .frame(maxWidth: 680, maxHeight: .infinity, alignment: .topLeading)
         .padding(.horizontal, 24)
     }
@@ -96,18 +96,18 @@ struct SettingsView: View {
 
                 Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 14) {
                     GridRow {
-                        Text("最低系统要求").foregroundStyle(.secondary)
+                        Text(String(localized: .aboutMinimumSystem)).foregroundStyle(.secondary)
                         Text("macOS \(AppConfiguration.minimumSystemVersion)")
                     }
                     GridRow {
-                        Text("数据与视频").foregroundStyle(.secondary)
-                        Text("本地保存 · 原视频只读")
+                        Text(String(localized: .aboutDataAndVideos)).foregroundStyle(.secondary)
+                        Text(String(localized: .aboutLocalReadOnly))
                     }
                 }
             }
             .frame(maxWidth: 680, alignment: .leading)
             .padding(32)
         }
-        .navigationTitle("关于")
+        .navigationTitle(String(localized: .settingsAbout))
     }
 }

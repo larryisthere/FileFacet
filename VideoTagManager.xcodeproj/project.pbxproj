@@ -34,6 +34,8 @@
 		9379E9915463B27A14C6F77C /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 500321485A35B89955B04774 /* Cocoa.framework */; };
 		9AF05198436650CF3898E5F0 /* VideoGridViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1FF02AA6C391F4A09600494 /* VideoGridViewController.swift */; };
 		A11C0A000000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A11C0A000000000000000002 /* Assets.xcassets */; };
+		A11C0A000000000000000004 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A11C0A000000000000000005 /* Localizable.xcstrings */; };
+		A11C0A000000000000000006 /* AppLocalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C0A000000000000000007 /* AppLocalization.swift */; };
 		AC4206539E27EB777B8523C7 /* MediaProcessingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC01ADC3215507585598FE5D /* MediaProcessingService.swift */; };
 		B8D55C07D945D4C28EE0A8BD /* DatabaseStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3891FB80CD353B9DEBC4E4AF /* DatabaseStore.swift */; };
 		C172706BE997D15C1D10FF5D /* AuthenticationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF4B385CF17799F7594B30A2 /* AuthenticationService.swift */; };
@@ -82,6 +84,8 @@
 		9DB6000E03913CDFF89032FF /* SecurityScopedResource.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SecurityScopedResource.swift; path = FileAccess/SecurityScopedResource.swift; sourceTree = "<group>"; };
 		9E2C6570CE48CDD9E241BA29 /* DiscoveredVideo.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DiscoveredVideo.swift; path = Scanning/DiscoveredVideo.swift; sourceTree = "<group>"; };
 		A11C0A000000000000000002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A11C0A000000000000000005 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		A11C0A000000000000000007 /* AppLocalization.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppLocalization.swift; path = Localization/AppLocalization.swift; sourceTree = "<group>"; };
 		A1FF02AA6C391F4A09600494 /* VideoGridViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = VideoGridViewController.swift; path = Library/VideoGridViewController.swift; sourceTree = "<group>"; };
 		AE9CC8AA63A88BF3576BA8A8 /* SidebarModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SidebarModelTests.swift; sourceTree = "<group>"; };
 		C2129BA05EEE64F81130DCAB /* LockView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LockView.swift; path = Lock/LockView.swift; sourceTree = "<group>"; };
@@ -185,6 +189,7 @@
 			isa = PBXGroup;
 			children = (
 				A11C0A000000000000000002 /* Assets.xcassets */,
+				A11C0A000000000000000005 /* Localizable.xcstrings */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -208,6 +213,7 @@
 				5237BD0DF7ABF874685A3BB8 /* VideoFileDiscovery.swift */,
 				DF4B385CF17799F7594B30A2 /* AuthenticationService.swift */,
 				883FE7170807F701A3AEF3EB /* LockCoordinator.swift */,
+				A11C0A000000000000000007 /* AppLocalization.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -288,6 +294,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				"zh-Hans",
 				Base,
 			);
 			mainGroup = 0D7CFE4C1B02A400207F6BBB;
@@ -307,6 +314,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A11C0A000000000000000001 /* Assets.xcassets in Resources */,
+				A11C0A000000000000000004 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -344,6 +352,7 @@
 				5DABD04A558E536DE42A1F37 /* VideoFileDiscovery.swift in Sources */,
 				C172706BE997D15C1D10FF5D /* AuthenticationService.swift in Sources */,
 				665BB794F745734AA0EFA7F6 /* LockCoordinator.swift in Sources */,
+				A11C0A000000000000000006 /* AppLocalization.swift in Sources */,
 				094938578441E9B6D1B51099 /* InspectorViewController.swift in Sources */,
 				0C54A3A5BC0A2404DCA91C8D /* LibrarySplitViewController.swift in Sources */,
 				D4FE04895A1AB608482B131C /* SidebarModel.swift in Sources */,

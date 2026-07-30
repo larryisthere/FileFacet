@@ -1,49 +1,58 @@
 # Changelog
 
-本文件记录 FileFacet 正式版本中用户可以感知的主要变化。
+This file records the user-visible changes in FileFacet releases.
 
-## 未发布
+## Unreleased
+
+### Added
+
+- Added complete English and Simplified Chinese localization across menus, the library, import flows, tag management, settings, App Lock, errors, tooltips, and accessibility labels.
+- FileFacet now follows the language configured in macOS, including the per-app language setting, and falls back to English for unsupported languages.
+
+### Fixed
+
+- Corrected library video-count subtitles and English singular/plural feedback for overlapping imports, removing videos, and restoring videos.
 
 ## [1.0.2] - 2026-07-18
 
-### 变更
+### Changed
 
-- “导入视频与文件夹…”支持一次选择多个视频、多个文件夹或两者组合，与直接拖入使用相同的导入范围和处理规则。
-- 侧边栏标签支持自定义、按名称和按去重视频数量从多到少排序；父标签数量包含全部后代，自动排序期间仍可调整标签层级，切回自定义后恢复原有顺序。
+- “Import Videos and Folders…” accepts multiple videos, multiple folders, or a mixture in one selection, using the same import scope and processing rules as drag and drop.
+- Sidebar tags can be sorted manually, by name, or by unique video count in descending order. Parent counts include all descendants, tag hierarchy remains editable while automatic sorting is active, and switching back to manual sorting restores the saved order.
 
 ## [1.0.1] - 2026-07-17
 
-### 变更
+### Changed
 
-- 以 MIT License 开放源代码，并补充公开构建说明、隐私边界和安全报告入口。
-- 增加 GitHub Actions 构建检查与 GitHub Release 发布流程。
+- Published the source under the MIT License and added public build instructions, privacy boundaries, and a security-reporting entry point.
+- Added GitHub Actions build checks and the GitHub Release publishing workflow.
 
-### 修复
+### Fixed
 
-- 修复侧边栏标签分组无法收起和重新展开的问题。
+- Fixed the sidebar tag group failing to collapse and expand again.
 
 ## [1.0.0] - 2026-07-16
 
-### 首次发布
+### Initial Release
 
-- 支持从多个文件夹手动导入视频，也可将多个视频、多个文件夹或两者混合拖入中部区域，并在统一资料库中自动识别已导入的同一文件。
-- 视频首次导入时可单向迁移 Finder 标签，之后在应用内独立管理顶级与层级标签。
-- 支持标签创建、重命名、移动、合并、批量选择、拖拽打标、延迟应用和单步撤销。
-- 提供原生三栏布局、视频网格、搜索、预置分类、标签筛选、详情查看和可记忆的缩略图尺寸。
-- 支持系统 Quick Look 预览、默认播放器打开视频、Finder 定位以及文件路径和文件名复制。
-- 支持通过右键菜单或 `Command-Delete` 将单个或多个视频移出资料库，原视频继续保留，并可单步撤回。
-- 视频移出撤回会跨导入保留；同一原视频已重新导入时，撤回会合并记录并恢复原有标签。撤回失效后清理无引用缩略图和文件访问授权，失败时保留尚未应用的标签编辑。
-- 提供默认关闭的身份验证开关，启用后支持隐私遮罩、闲置锁定和系统身份验证。
-- 设置通过应用菜单或 `Command-,` 在主窗口内独占工作区；应用菜单“关于”直达主窗口的“关于”分类，并显示当前版本与构建号。
-- 静默维护已导入视频的位置与删除状态；新出现的视频始终由用户手动导入。
+- Import videos from multiple folders, or drag multiple videos, multiple folders, or a mixture into the content area. The unified library recognizes files that were already imported.
+- Import Finder tags once when a video first enters the library, then manage top-level and hierarchical tags independently in FileFacet.
+- Create, rename, move, merge, and batch-select tags, assign them by dragging, apply edits later, and undo the last change.
+- Browse a native three-column layout with a video grid, search, built-in categories, tag filters, details, and a remembered thumbnail size.
+- Preview with Quick Look, open videos in the default player, reveal them in Finder, and copy file paths or names.
+- Remove one or more videos from the library with the context menu or `Command-Delete`, keep the original files, and undo the removal.
+- Keep removal undo available across imports. If the same original video was reimported, undo merges the records and restores its tags. Expired undo cleanup removes unreferenced thumbnails and file authorizations, while failed removals preserve pending tag edits.
+- Protect the library with an optional authentication setting, privacy cover, idle locking, and macOS system authentication.
+- Open Settings with the app menu or `Command-,` in a dedicated main-window workspace. The app-menu About command opens the About section and shows the current version and build.
+- Maintain imported video locations and deletion state silently; newly discovered videos always require manual import.
 
-### 修复
+### Fixed
 
-- 修复从侧边栏新建标签时，行内输入框出现后立即消失的问题。
-- 修复多个已选标签拖拽时只移动一个标签的问题。
-- 修复导入后旧搜索条件继续生效，导致重新选择标签仍无法显示视频的问题。
-- 导入进度、取消操作和导入结果统一显示在中部标题下方，避免导入结果持续占用窗口标题。
-- 多文件拖入时会显示当前阶段和批次进度；单个文件失败后继续导入其余可用文件。
-- 拖动视频经过中部区域时使用系统复制或禁止指针反馈，视频网格保持完整可见。
-- 修复从 Finder 拖入视频时，临时沙盒访问 URL 被误判为无法建立持续访问授权的问题。
-- 拖入父子文件夹或文件夹内的文件时自动合并重叠来源；空文件夹、视频处理失败和无法读取的项目分别提供准确反馈。
+- Fixed the inline field disappearing immediately after creating a tag from the sidebar.
+- Fixed dragging multiple selected tags moving only one tag.
+- Fixed an old search query remaining active after import and hiding videos after selecting another tag.
+- Unified import progress, cancellation, and results below the content title so completed results no longer occupy the window title.
+- Added stage and batch progress for multi-file drops, while continuing with remaining files after one file fails.
+- Used the system copy or prohibited cursor while videos are dragged over the content area, keeping the grid fully visible.
+- Fixed temporary sandbox URLs from Finder drops being mistaken for failures to establish persistent access.
+- Merged overlapping parent folders, child folders, and contained files, with separate feedback for empty folders, processing failures, and unreadable items.
