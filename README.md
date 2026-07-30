@@ -10,7 +10,7 @@ FileFacet is a native, local-first macOS video tag manager for organizing videos
 
 [Download the latest release](https://github.com/larryisthere/FileFacet/releases/latest) · [Browse all releases](https://github.com/larryisthere/FileFacet/releases)
 
-> The current source supports English and Simplified Chinese and follows the language configured for FileFacet in macOS. The latest published release still uses a Simplified Chinese interface.
+> FileFacet supports English and Simplified Chinese and follows the language configured for the app in macOS.
 
 ## Who FileFacet is for
 

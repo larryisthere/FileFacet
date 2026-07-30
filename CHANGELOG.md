@@ -2,7 +2,7 @@
 
 This file records the user-visible changes in FileFacet releases.
 
-## Unreleased
+## [1.0.3] - 2026-07-30
 
 ### Added
 
