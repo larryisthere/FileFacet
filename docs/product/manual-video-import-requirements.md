@@ -2,6 +2,8 @@
 
 状态：已确认（2026-07-18）
 
+后续扩展：`docs/product/folder-structure-tag-import-requirements.md`
+
 ## 1. 目标
 
 用户可以通过菜单选择或直接拖入一个或多个视频文件、一个或多个文件夹或两者组合，并在同一个 FileFacet 资料库和标签体系中统一管理所有已导入视频。

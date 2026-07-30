@@ -936,6 +936,227 @@
         }
       }
     },
+    "folderImport.continue" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continue Import"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "继续导入"
+          }
+        }
+      }
+    },
+    "folderImport.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This choice only affects videos inside folders. Video-only selections continue directly."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个选择只影响文件夹中的视频。仅选择视频文件时会直接导入。"
+          }
+        }
+      }
+    },
+    "folderImport.direct.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep the existing import behavior and Finder tags without creating tags from the folder structure."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留现有导入行为和 Finder 标签，不根据目录结构创建标签。"
+          }
+        }
+      }
+    },
+    "folderImport.direct.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import Videos Directly"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直接导入视频"
+          }
+        }
+      }
+    },
+    "folderImport.includeRoot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create the Selected Folder as the Root Tag"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将所选文件夹本身创建为根标签"
+          }
+        }
+      }
+    },
+    "folderImport.includeRoot.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off: Japan › Tokyo. On: Travel Footage › Japan › Tokyo. Multiple folders become separate root tags."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭：日本 › 东京；开启：旅行素材 › 日本 › 东京。多个文件夹会分别成为根标签。"
+          }
+        }
+      }
+    },
+    "folderImport.mapping.direct" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Direct import creates no folder tags. Finder aliases and symbolic links are skipped, and Finder tags remain available."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直接导入不会创建目录标签。目录别名和符号链接会跳过，Finder 标签继续保留。"
+          }
+        }
+      }
+    },
+    "folderImport.mapping.excludeRoot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected folder is excluded by default. Tags start with its first level of subfolders. Finder aliases and symbolic links are skipped."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选文件夹默认不会成为标签，标签从其内部第一层目录开始创建。目录别名和符号链接会跳过。"
+          }
+        }
+      }
+    },
+    "folderImport.mapping.includeRoot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected folder becomes the root tag, including for videos directly inside it. Finder aliases and symbolic links are skipped."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选文件夹会成为根标签；根目录直属视频也会关联该标签。目录别名和符号链接会跳过。"
+          }
+        }
+      }
+    },
+    "folderImport.remember" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Always use this method for future folder imports"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以后导入文件夹时始终使用此方式，不再询问"
+          }
+        }
+      }
+    },
+    "folderImport.tags.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Create hierarchical tags from folders inside the selection. Existing videos receive any missing folder tags."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用所选文件夹内的目录名称创建层级标签；已有视频会追加缺少的标签。"
+          }
+        }
+      }
+    },
+    "folderImport.tags.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import Videos and Create Folder Tags"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入视频并创建目录标签"
+          }
+        }
+      }
+    },
+    "folderImport.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "How Do You Want to Import Videos from Folders?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如何导入文件夹中的视频？"
+          }
+        }
+      }
+    },
     "import.cancelled.detail" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1673,6 +1894,41 @@
         }
       }
     },
+    "import.result.folderTagsCreated" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Created %lld folder tag"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Created %lld folder tags"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "variations" : {
+            "plural" : {
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "创建 %lld 个目录标签"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "import.result.originalRemains" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2392,6 +2648,91 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关于"
+          }
+        }
+      }
+    },
+    "settings.folderImportAsk" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ask Every Time"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每次询问"
+          }
+        }
+      }
+    },
+    "settings.folderImportMethod" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Folder Import Method"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件夹导入方式"
+          }
+        }
+      }
+    },
+    "settings.folderImportMethodHelp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The File menu, Shift-Command-I, and folder drops share this setting. Video-only imports continue directly."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件菜单、⇧⌘I 和拖入文件夹共用此设置。仅导入视频文件时会直接继续。"
+          }
+        }
+      }
+    },
+    "settings.import" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入"
+          }
+        }
+      }
+    },
+    "settings.includeSelectedFolderHelp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When disabled, folder tags start with the first level inside each selected folder. In Ask Every Time mode, this is the default shown in the import sheet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭时，目录标签从每个所选文件夹内的第一层开始创建；设为“每次询问”时，这也是导入 Sheet 中的默认值。"
           }
         }
       }

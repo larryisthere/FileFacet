@@ -2,6 +2,17 @@
 
 This file records the user-visible changes in FileFacet releases.
 
+## [Unreleased]
+
+### Added
+
+- Folder imports can now create hierarchical FileFacet tags from the directory structure, with an optional root tag for each selected folder.
+- Added a shared folder-import preference for the File menu, `Shift-Command-I`, and Finder drops, including “Ask Every Time” and an option to remember the chosen method.
+
+### Changed
+
+- Finder aliases, symbolic links, and macOS packages are skipped consistently when importing folders.
+
 ## [1.0.3] - 2026-07-30
 
 ### Added

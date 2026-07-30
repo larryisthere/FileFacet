@@ -40,6 +40,16 @@ struct VideoImportResult: Equatable, Sendable {
     let existingCount: Int
     let failedCount: Int
     let importedVideos: [VideoRecord]
+    let createdFolderTagIDs: Set<String>
+}
+
+struct FolderTagImportOptions: Equatable, Sendable {
+    let selectedRootName: String?
+}
+
+private struct FolderTagLookupKey: Hashable {
+    let parentID: String?
+    let normalizedName: String
 }
 
 struct LibraryMaintenanceResult: Equatable, Sendable {
@@ -355,6 +365,7 @@ actor DatabaseStore {
         sourceID: String,
         discoveredVideos: [DiscoveredVideo],
         discoveryFailedCount: Int = 0,
+        folderTagOptions: FolderTagImportOptions? = nil,
         importedAt: Date = Date()
     ) async throws -> VideoImportResult {
         try prepareIfNeeded()
@@ -363,6 +374,8 @@ actor DatabaseStore {
         var addedCount = 0
         var existingCount = 0
         var importedIDs: [String] = []
+        var createdFolderTagIDs = Set<String>()
+        var folderTagCache: [FolderTagLookupKey: String] = [:]
         let start = try prepare(
             "INSERT INTO import_runs (id, source_id, started_at, status) VALUES (?, ?, ?, 'running')"
         )
@@ -384,22 +397,34 @@ actor DatabaseStore {
                 var batchAddedCount = 0
                 var batchExistingCount = 0
                 var batchImportedIDs: [String] = []
+                var batchCreatedFolderTagIDs = Set<String>()
                 try execute("BEGIN IMMEDIATE")
                 do {
                     for video in discoveredVideos[batchStart..<batchEnd] {
                         try Task.checkCancellation()
-                        if let videoID = try existingVideoID(for: video, sourceID: sourceID) {
-                            try updateVideo(videoID: videoID, from: video, updatedAt: importedAt)
-                            try upsertLocation(videoID: videoID, sourceID: sourceID, video: video, verifiedAt: importedAt)
+                        let videoID: String
+                        if let existingID = try existingVideoID(for: video, sourceID: sourceID) {
+                            videoID = existingID
+                            try updateVideo(videoID: existingID, from: video, updatedAt: importedAt)
+                            try upsertLocation(videoID: existingID, sourceID: sourceID, video: video, verifiedAt: importedAt)
                             batchExistingCount += 1
-                            batchImportedIDs.append(videoID)
+                            batchImportedIDs.append(existingID)
                         } else {
-                            let videoID = UUID().uuidString
+                            videoID = UUID().uuidString
                             try insertVideo(videoID: videoID, video: video, indexedAt: importedAt)
                             try upsertLocation(videoID: videoID, sourceID: sourceID, video: video, verifiedAt: importedAt)
                             try importFinderTags(videoID: videoID, finderTags: video.finderTags, importedAt: importedAt)
                             batchAddedCount += 1
                             batchImportedIDs.append(videoID)
+                        }
+                        if let folderTagOptions {
+                            batchCreatedFolderTagIDs.formUnion(try importFolderTags(
+                                videoID: videoID,
+                                relativePath: video.relativePath,
+                                options: folderTagOptions,
+                                importedAt: importedAt,
+                                cache: &folderTagCache
+                            ))
                         }
                     }
                     try execute("COMMIT")
@@ -410,6 +435,7 @@ actor DatabaseStore {
                 addedCount += batchAddedCount
                 existingCount += batchExistingCount
                 importedIDs.append(contentsOf: batchImportedIDs)
+                createdFolderTagIDs.formUnion(batchCreatedFolderTagIDs)
                 batchStart = batchEnd
                 await Task.yield()
             }
@@ -447,7 +473,8 @@ actor DatabaseStore {
             addedCount: addedCount,
             existingCount: existingCount,
             failedCount: discoveryFailedCount,
-            importedVideos: imported
+            importedVideos: imported,
+            createdFolderTagIDs: createdFolderTagIDs
         )
     }
 
@@ -864,6 +891,89 @@ actor DatabaseStore {
             }
             sqlite3_finalize(relation)
         }
+    }
+
+    private func importFolderTags(
+        videoID: String,
+        relativePath: String,
+        options: FolderTagImportOptions,
+        importedAt: Date,
+        cache: inout [FolderTagLookupKey: String]
+    ) throws -> Set<String> {
+        var pathComponents = NSString(string: relativePath).pathComponents
+        if pathComponents.isEmpty == false {
+            pathComponents.removeLast()
+        }
+        if let selectedRootName = options.selectedRootName {
+            pathComponents.insert(selectedRootName, at: 0)
+        }
+        let tagNames = pathComponents.compactMap { component -> String? in
+            let name = component.trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? nil : name
+        }
+        guard tagNames.isEmpty == false else { return [] }
+
+        var parentID: String?
+        var createdTagIDs = Set<String>()
+        for name in tagNames {
+            let key = FolderTagLookupKey(
+                parentID: parentID,
+                normalizedName: normalizedTagName(name)
+            )
+            let tagID: String
+            if let cachedID = cache[key] {
+                tagID = cachedID
+            } else if let existingID = try folderTagID(
+                libraryID: LibraryRecord.primaryID,
+                parentID: parentID,
+                normalizedName: key.normalizedName
+            ) {
+                tagID = existingID
+                cache[key] = existingID
+            } else {
+                tagID = try createTag(
+                    libraryID: LibraryRecord.primaryID,
+                    name: name,
+                    parentID: parentID
+                )
+                cache[key] = tagID
+                createdTagIDs.insert(tagID)
+            }
+            parentID = tagID
+        }
+
+        guard let leafTagID = parentID else { return createdTagIDs }
+        let relation = try prepare(
+            "INSERT OR IGNORE INTO video_tags (video_id, tag_id, created_at) VALUES (?, ?, ?)"
+        )
+        defer { sqlite3_finalize(relation) }
+        bindText(videoID, to: 1, in: relation)
+        bindText(leafTagID, to: 2, in: relation)
+        sqlite3_bind_double(relation, 3, importedAt.timeIntervalSince1970)
+        guard sqlite3_step(relation) == SQLITE_DONE else {
+            throw DatabaseError.statementFailed
+        }
+        return createdTagIDs
+    }
+
+    private func folderTagID(
+        libraryID: String,
+        parentID: String?,
+        normalizedName: String
+    ) throws -> String? {
+        let statement = try prepare(
+            """
+            SELECT id FROM tags
+            WHERE library_id = ? AND parent_id IS ? AND normalized_name = ?
+            LIMIT 1
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bindText(libraryID, to: 1, in: statement)
+        bindOptionalText(parentID, to: 2, in: statement)
+        bindText(normalizedName, to: 3, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return text(at: 0, in: statement)
     }
 
     func fetchVideos(libraryID: String, includeMissing: Bool = false) throws -> [VideoRecord] {

@@ -1,5 +1,10 @@
 import Foundation
 
+enum FolderImportMethod: Equatable, Sendable {
+    case direct
+    case folderTags(includeSelectedRoot: Bool)
+}
+
 enum LibraryImportState: Equatable, Sendable {
     case idle
     case importing(title: String, detail: String, progress: Double?)
@@ -16,6 +21,7 @@ struct LibraryImportSummary: Equatable, Sendable {
     let failedInputCount: Int
     let checkedInputCount: Int
     let checkedFolderCount: Int
+    let createdFolderTagCount: Int
 }
 
 private struct LibraryImportRequest {
@@ -25,6 +31,7 @@ private struct LibraryImportRequest {
     let initialDetail: String
     let inputCount: Int
     let folderCount: Int
+    let method: FolderImportMethod
 }
 
 private enum LibraryImportEntryPoint: Equatable {
@@ -84,6 +91,7 @@ final class LibraryAccessCoordinator {
     private let database: DatabaseStore
     private let picker: LibraryPicker
     private let discovery: any VideoFileDiscovering
+    private let resolveFolderImportMethod: @MainActor () async -> FolderImportMethod?
     private let mediaService: MediaProcessingService?
     private var resources: [String: SecurityScopedResource] = [:]
     private var sourceURLs: [String: URL] = [:]
@@ -133,11 +141,15 @@ final class LibraryAccessCoordinator {
     init(
         database: DatabaseStore,
         picker: LibraryPicker = LibraryPicker(),
-        discovery: any VideoFileDiscovering = VideoFileDiscovery()
+        discovery: any VideoFileDiscovering = VideoFileDiscovery(),
+        resolveFolderImportMethod: @escaping @MainActor () async -> FolderImportMethod? = {
+            .direct
+        }
     ) {
         self.database = database
         self.picker = picker
         self.discovery = discovery
+        self.resolveFolderImportMethod = resolveFolderImportMethod
         mediaService = try? MediaProcessingService()
     }
 
@@ -210,18 +222,29 @@ final class LibraryAccessCoordinator {
 
     func importVideos() {
         guard let urls = picker.chooseImportItems() else { return }
-        importItems(urls, entryPoint: .picker)
+        Task { [weak self] in
+            await self?.importItems(urls, entryPoint: .picker)
+        }
     }
 
     func importDroppedItems(_ urls: [URL]) {
-        importItems(urls, entryPoint: .drop)
+        Task { [weak self] in
+            await self?.importItems(urls, entryPoint: .drop)
+        }
     }
 
-    private func importItems(_ urls: [URL], entryPoint: LibraryImportEntryPoint) {
+    private func importItems(_ urls: [URL], entryPoint: LibraryImportEntryPoint) async {
         let plan = VideoFileDiscovery.importPlan(for: urls)
         guard plan.roots.isEmpty == false else {
             onImportStateChanged?(.failed(message: entryPoint.emptyMessage))
             return
+        }
+        let method: FolderImportMethod
+        if plan.folderCount > 0 {
+            guard let resolvedMethod = await resolveFolderImportMethod() else { return }
+            method = resolvedMethod
+        } else {
+            method = .direct
         }
         let initialDetail: String
         if plan.collapsedInputCount > 0 {
@@ -246,7 +269,8 @@ final class LibraryAccessCoordinator {
             completionTitle: entryPoint.completionTitle,
             initialDetail: initialDetail,
             inputCount: plan.roots.count,
-            folderCount: plan.roots.filter { $0.kind == .directory }.count
+            folderCount: plan.roots.filter { $0.kind == .directory }.count,
+            method: method
         ))
     }
 
@@ -295,6 +319,7 @@ final class LibraryAccessCoordinator {
                 var failedVideoCount = 0
                 var failedInputCount = preparationFailedCount
                 var importedVideos: [VideoRecord] = []
+                var createdFolderTagIDs = Set<String>()
                 for (sourceIndex, source) in sources.enumerated() {
                     try Task.checkCancellation()
                     let sourceProgress = Double(sourceIndex) / Double(sources.count)
@@ -347,15 +372,28 @@ final class LibraryAccessCoordinator {
                             createdAt: Date()
                         ))
                         persistedSourceIDs.insert(source.id)
+                        let folderTagOptions: FolderTagImportOptions?
+                        if source.kind == .directory,
+                           case let .folderTags(includeSelectedRoot) = request.method {
+                            folderTagOptions = FolderTagImportOptions(
+                                selectedRootName: includeSelectedRoot
+                                    ? source.url.lastPathComponent
+                                    : nil
+                            )
+                        } else {
+                            folderTagOptions = nil
+                        }
                         let result = try await database.importVideos(
                             sourceID: source.id,
                             discoveredVideos: discoveryResult.videos,
-                            discoveryFailedCount: discoveryResult.failedCount
+                            discoveryFailedCount: discoveryResult.failedCount,
+                            folderTagOptions: folderTagOptions
                         )
                         addedCount += result.addedCount
                         existingCount += result.existingCount
                         failedVideoCount += result.failedCount
                         importedVideos.append(contentsOf: result.importedVideos)
+                        createdFolderTagIDs.formUnion(result.createdFolderTagIDs)
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch {
@@ -376,6 +414,7 @@ final class LibraryAccessCoordinator {
                 try await refreshTags(libraryID: LibraryRecord.primaryID)
                 try await refreshResolvedVideoURLs()
                 try await refreshVisibleVideosNow()
+                onTagAssignmentsChanged?()
                 tagStateRevision += 1
                 invalidateUndoHistoryUnlessVideoRemoval()
                 startMediaProcessing(videos: importedVideos)
@@ -387,7 +426,8 @@ final class LibraryAccessCoordinator {
                     failedVideoCount: failedVideoCount,
                     failedInputCount: failedInputCount,
                     checkedInputCount: request.inputCount,
-                    checkedFolderCount: request.folderCount
+                    checkedFolderCount: request.folderCount,
+                    createdFolderTagCount: createdFolderTagIDs.count
                 )))
                 AppLogger.library.notice("Manual import completed with \(addedCount, privacy: .public) new videos")
             } catch is CancellationError {
@@ -430,6 +470,7 @@ final class LibraryAccessCoordinator {
             try await refreshTags(libraryID: LibraryRecord.primaryID)
             try await refreshResolvedVideoURLs()
             try await refreshVisibleVideosNow()
+            onTagAssignmentsChanged?()
             tagStateRevision += 1
             invalidateUndoHistoryUnlessVideoRemoval()
             let videos = try await database.fetchVideos(libraryID: LibraryRecord.primaryID)

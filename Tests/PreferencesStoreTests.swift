@@ -28,6 +28,31 @@ final class PreferencesStoreTests: XCTestCase {
         XCTAssertEqual(PreferencesStore(defaults: defaults).idleLockInterval, .fiveMinutes)
     }
 
+    func testFolderImportPreferencesDefaultAndPersist() {
+        let defaults = makeDefaults()
+        let store = PreferencesStore(defaults: defaults)
+
+        XCTAssertEqual(store.folderImportPreference, .ask)
+        XCTAssertFalse(store.includeSelectedFolderAsRootTag)
+
+        store.folderImportPreference = .folderTags
+        store.includeSelectedFolderAsRootTag = true
+
+        let restored = PreferencesStore(defaults: defaults)
+        XCTAssertEqual(restored.folderImportPreference, .folderTags)
+        XCTAssertTrue(restored.includeSelectedFolderAsRootTag)
+    }
+
+    func testUnknownFolderImportPreferenceFallsBackToAsk() {
+        let defaults = makeDefaults()
+        defaults.set("future-value", forKey: PreferencesStore.Key.folderImportPreference)
+
+        XCTAssertEqual(
+            PreferencesStore(defaults: defaults).folderImportPreference,
+            .ask
+        )
+    }
+
     private func makeDefaults() -> UserDefaults {
         let suiteName = "PreferencesStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

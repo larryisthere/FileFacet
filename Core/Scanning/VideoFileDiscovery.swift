@@ -50,9 +50,11 @@ struct VideoFileDiscovery: VideoFileDiscovering {
               let values = try? standardizedURL.resourceValues(forKeys: [
                   .isRegularFileKey,
                   .isDirectoryKey,
+                  .isAliasFileKey,
                   .isSymbolicLinkKey,
                   .isPackageKey,
               ]),
+              values.isAliasFile != true,
               values.isSymbolicLink != true,
               values.isPackage != true else { return nil }
         if values.isDirectory == true {
@@ -85,6 +87,7 @@ struct VideoFileDiscovery: VideoFileDiscovering {
         let keys: [URLResourceKey] = [
             .isRegularFileKey,
             .isDirectoryKey,
+            .isAliasFileKey,
             .isSymbolicLinkKey,
             .isPackageKey,
             .isHiddenKey,
@@ -137,6 +140,10 @@ struct VideoFileDiscovery: VideoFileDiscovering {
                 continue
             }
 
+            if values.isAliasFile == true {
+                if values.isDirectory == true { enumerator.skipDescendants() }
+                continue
+            }
             if values.isSymbolicLink == true {
                 if values.isDirectory == true { enumerator.skipDescendants() }
                 continue

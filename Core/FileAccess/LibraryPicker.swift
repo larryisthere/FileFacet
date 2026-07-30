@@ -12,7 +12,7 @@ struct LibraryPicker {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
         panel.canCreateDirectories = false
-        panel.resolvesAliases = true
+        panel.resolvesAliases = false
         panel.allowedContentTypes = VideoFileDiscovery.supportedExtensions
             .sorted()
             .compactMap { UTType(filenameExtension: $0) }

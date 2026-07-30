@@ -28,6 +28,7 @@ FileFacet is designed for people who keep videos locally and want a flexible way
 ## Why FileFacet
 
 - **One library across folders** — import individual videos, multiple folders, or a mixture of both into one searchable library.
+- **Folder structure to tags** — optionally turn nested folders into hierarchical tags while importing, with control over whether each selected folder becomes a root tag.
 - **Hierarchical video tags** — build multi-level tag trees, batch-edit assignments, merge tags, add colors, and organize tags with drag and drop.
 - **Files stay where they are** — FileFacet reads original videos without moving, renaming, modifying, or deleting them.
 - **Local-first and private** — the library index, tags, access permissions, and thumbnails stay on your Mac. FileFacet makes no network requests by default.
@@ -38,7 +39,7 @@ If FileFacet fits your workflow, [star the repository](https://github.com/larryi
 ## How it works
 
 1. Choose **File > Import Videos and Folders…** or drag videos and folders into FileFacet.
-2. FileFacet recursively discovers supported videos and adds them to a unified library.
+2. For folder imports, choose direct import or create hierarchical tags from the directory structure. FileFacet can remember this preference.
 3. Existing Finder tags are imported once when a video first enters the library.
 4. Create hierarchical tags, apply them to one or many videos, and filter the library by tag or filename.
 5. Preview with Quick Look, open a video in your default player, or reveal it in Finder.
@@ -50,6 +51,7 @@ Repeated imports are safe: the same file keeps a single library record, includin
 ### Organize
 
 - Multi-level tags with custom order, name sorting, and video-count sorting
+- Optional hierarchical tag creation from folder structure during import
 - Single- and multi-video tagging with selected, unselected, and mixed states
 - Drag videos onto tags or tags onto videos
 - Tag creation, renaming, reparenting, merging, colors, and single-step undo
@@ -127,7 +129,7 @@ No. Finder tags are read once when a video first enters the library. Imported ta
 
 ### Can I import from multiple folders?
 
-Yes. Videos, folders, and mixed selections share one library, tag tree, search scope, and filtering space.
+Yes. Videos, folders, and mixed selections share one library, tag tree, search scope, and filtering space. Folder imports can remain direct or create hierarchical tags from their directory structure. The selected folder itself is excluded from the tag tree by default and can optionally become a root tag.
 
 ### Does FileFacet upload library data?
 

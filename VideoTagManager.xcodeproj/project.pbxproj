@@ -15,6 +15,7 @@
 		166E1B59532BD73E7703EEB5 /* DiscoveredVideo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E2C6570CE48CDD9E241BA29 /* DiscoveredVideo.swift */; };
 		1BC19C08DDA40CFEE5BDABED /* LibraryRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15D2DC162E023FE6C61C744E /* LibraryRecord.swift */; };
 		1C1B65FF73D4A4735CE177E8 /* ApplicationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65BC78F7B6A61CB148B1483D /* ApplicationCoordinator.swift */; };
+		F11D00000000000000000001 /* FolderImportMethodPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11D00000000000000000002 /* FolderImportMethodPresenter.swift */; };
 		1CD2C0755FE991270B80D231 /* TagRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 851696AF2C5AB56678B796BC /* TagRecord.swift */; };
 		1E40E58D5FC7F491D7B2D1D9 /* SidebarViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 999DD897E04F33DB96FBAF98 /* SidebarViewController.swift */; };
 		1E908D672F65231A67801238 /* SidebarModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE9CC8AA63A88BF3576BA8A8 /* SidebarModelTests.swift */; };
@@ -71,6 +72,7 @@
 		500321485A35B89955B04774 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
 		5237BD0DF7ABF874685A3BB8 /* VideoFileDiscovery.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = VideoFileDiscovery.swift; path = Scanning/VideoFileDiscovery.swift; sourceTree = "<group>"; };
 		65BC78F7B6A61CB148B1483D /* ApplicationCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ApplicationCoordinator.swift; sourceTree = "<group>"; };
+		F11D00000000000000000002 /* FolderImportMethodPresenter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FolderImportMethodPresenter.swift; sourceTree = "<group>"; };
 		66647030C303C90DD350FAC1 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		69323B27400CD3637B980311 /* AppConfiguration.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppConfiguration.swift; sourceTree = "<group>"; };
 		851696AF2C5AB56678B796BC /* TagRecord.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TagRecord.swift; path = Database/TagRecord.swift; sourceTree = "<group>"; };
@@ -150,6 +152,7 @@
 				69323B27400CD3637B980311 /* AppConfiguration.swift */,
 				E90739611A6585A639F67C8B /* AppDelegate.swift */,
 				65BC78F7B6A61CB148B1483D /* ApplicationCoordinator.swift */,
+				F11D00000000000000000002 /* FolderImportMethodPresenter.swift */,
 				932A36E631207B2E8F36909B /* MainWindowController.swift */,
 			);
 			path = App;
@@ -335,6 +338,7 @@
 				035724ABB602F506C8722631 /* AppConfiguration.swift in Sources */,
 				3D9BF8338051025B82BFCA63 /* AppDelegate.swift in Sources */,
 				1C1B65FF73D4A4735CE177E8 /* ApplicationCoordinator.swift in Sources */,
+				F11D00000000000000000001 /* FolderImportMethodPresenter.swift in Sources */,
 				7DB2D23AF1009554B9C3BA4D /* MainWindowController.swift in Sources */,
 				D0109FDB87583764B7BF9312 /* DatabaseError.swift in Sources */,
 				B8D55C07D945D4C28EE0A8BD /* DatabaseStore.swift in Sources */,

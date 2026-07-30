@@ -1,0 +1,1283 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FileFacet · 文件夹导入方式原型</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --desktop: #d9dde3;
+      --window: rgba(246, 246, 246, .97);
+      --toolbar: rgba(246, 246, 246, .92);
+      --sidebar: rgba(232, 232, 232, .96);
+      --content: #fff;
+      --inspector: #f7f7f7;
+      --line: rgba(60, 60, 67, .18);
+      --line-strong: rgba(60, 60, 67, .28);
+      --text: #202124;
+      --secondary: #6e6e73;
+      --tertiary: #8e8e93;
+      --accent: #0a84ff;
+      --accent-soft: rgba(10, 132, 255, .13);
+      --selection: rgba(10, 132, 255, .18);
+      --success: #248a3d;
+      --purple: #7d4ec7;
+      --shadow: 0 24px 70px rgba(20, 24, 31, .28), 0 2px 10px rgba(20, 24, 31, .14);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --desktop: #17191d;
+        --window: rgba(42, 42, 44, .98);
+        --toolbar: rgba(42, 42, 44, .94);
+        --sidebar: rgba(37, 37, 39, .98);
+        --content: #1f1f21;
+        --inspector: #252527;
+        --line: rgba(235, 235, 245, .13);
+        --line-strong: rgba(235, 235, 245, .24);
+        --text: #f2f2f7;
+        --secondary: #aeaeb2;
+        --tertiary: #8e8e93;
+        --accent-soft: rgba(10, 132, 255, .2);
+        --selection: rgba(10, 132, 255, .27);
+        --success: #30d158;
+        --purple: #bf8cff;
+        --shadow: 0 26px 80px rgba(0, 0, 0, .56), 0 2px 12px rgba(0, 0, 0, .4);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      color: var(--text);
+      background: var(--desktop);
+      font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    }
+    button, input, select { color: inherit; font: inherit; }
+    button, select { cursor: default; }
+
+    .desktop {
+      height: 100%;
+      padding: 44px 24px 70px;
+      background:
+        radial-gradient(circle at 18% 15%, rgba(255,255,255,.55), transparent 32%),
+        linear-gradient(135deg, rgba(200, 213, 227, .56), rgba(224, 226, 230, .2));
+    }
+
+    .app-menubar {
+      position: fixed;
+      z-index: 80;
+      inset: 0 0 auto;
+      display: flex;
+      height: 25px;
+      align-items: center;
+      gap: 1px;
+      padding: 0 14px;
+      border-bottom: 1px solid rgba(60,60,67,.14);
+      background: color-mix(in srgb, var(--window) 91%, transparent);
+      box-shadow: 0 1px 5px rgba(0,0,0,.06);
+      backdrop-filter: blur(24px) saturate(1.35);
+      font-size: 12px;
+    }
+    .menu-wrap { position: relative; height: 100%; }
+    .menu-button {
+      height: 100%;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      font-size: 12px;
+    }
+    .menu-button.app-name { font-weight: 650; }
+    .menu-button:hover, .menu-button.open { background: rgba(127,127,127,.16); }
+    .menu-popover {
+      position: absolute;
+      z-index: 90;
+      top: 24px;
+      left: 0;
+      width: 264px;
+      padding: 5px;
+      border: 1px solid rgba(255,255,255,.38);
+      border-radius: 7px;
+      background: color-mix(in srgb, var(--window) 96%, transparent);
+      box-shadow: 0 13px 34px rgba(0,0,0,.28), 0 2px 8px rgba(0,0,0,.16);
+      backdrop-filter: blur(24px) saturate(1.3);
+    }
+    .menu-command {
+      display: grid;
+      width: 100%;
+      min-height: 24px;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 18px;
+      padding: 3px 9px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      text-align: left;
+    }
+    .menu-command:hover, .menu-command:focus-visible {
+      color: #fff;
+      outline: 0;
+      background: var(--accent);
+    }
+    .shortcut { color: var(--secondary); font-variant-numeric: tabular-nums; }
+    .menu-command:hover .shortcut { color: rgba(255,255,255,.86); }
+    .menu-divider { height: 1px; margin: 4px 6px; background: var(--line); }
+
+    .window {
+      position: relative;
+      display: grid;
+      grid-template-columns: 224px minmax(500px, 1fr) 292px;
+      grid-template-rows: 52px minmax(0, 1fr);
+      width: 100%;
+      height: 100%;
+      min-width: 1020px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.5);
+      border-radius: 15px;
+      background: var(--window);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(26px) saturate(1.35);
+    }
+
+    .titlebar {
+      grid-column: 1 / 4;
+      display: grid;
+      grid-template-columns: 224px minmax(500px, 1fr) 292px;
+      border-bottom: 1px solid var(--line);
+      background: var(--toolbar);
+    }
+    .title-part {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+    }
+    .title-part + .title-part { border-left: 1px solid var(--line); }
+    .traffic { display: flex; gap: 8px; margin-right: 14px; }
+    .traffic span {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      box-shadow: inset 0 0 0 .5px rgba(0,0,0,.16);
+    }
+    .traffic span:nth-child(1) { background: #ff5f57; }
+    .traffic span:nth-child(2) { background: #febc2e; }
+    .traffic span:nth-child(3) { background: #28c840; }
+    .title-name {
+      min-width: 0;
+      overflow: hidden;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .title-count { color: var(--secondary); font-size: 11px; white-space: nowrap; }
+    .spacer { flex: 1; }
+    .toolbar-button {
+      min-width: 28px;
+      height: 28px;
+      padding: 0 7px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(127,127,127,.08);
+    }
+    .search {
+      display: flex;
+      width: min(180px, 22vw);
+      height: 28px;
+      align-items: center;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(127,127,127,.1);
+    }
+    .search input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      color: var(--text);
+      background: transparent;
+    }
+
+    .sidebar {
+      grid-column: 1;
+      grid-row: 2;
+      min-height: 0;
+      overflow: auto;
+      padding: 9px 8px;
+      border-right: 1px solid var(--line);
+      background: var(--sidebar);
+    }
+    .section-label {
+      padding: 12px 9px 5px;
+      color: var(--secondary);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .nav-row {
+      display: flex;
+      min-height: 29px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border-radius: 6px;
+    }
+    .nav-row.selected { background: var(--selection); }
+    .nav-label {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .nav-count {
+      color: var(--secondary);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+    .tag-dot {
+      width: 8px;
+      height: 8px;
+      flex: 0 0 8px;
+      border-radius: 50%;
+      background: var(--tag-color, #ff9f0a);
+    }
+    .indent-1 { padding-left: 25px; }
+
+    .content {
+      position: relative;
+      grid-column: 2;
+      grid-row: 2;
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--content);
+    }
+    .status-bar {
+      display: none;
+      flex: 0 0 auto;
+      min-height: 50px;
+      align-items: center;
+      gap: 11px;
+      padding: 8px 15px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--content) 94%, var(--sidebar));
+    }
+    .status-bar.visible { display: flex; }
+    .status-mark {
+      display: grid;
+      width: 27px;
+      height: 27px;
+      flex: 0 0 27px;
+      place-items: center;
+      border-radius: 50%;
+      color: #fff;
+      background: var(--accent);
+      font-size: 12px;
+    }
+    .status-bar.complete .status-mark { background: var(--success); }
+    .status-copy { min-width: 0; flex: 1; }
+    .status-title { font-size: 11px; font-weight: 600; }
+    .status-detail { margin-top: 2px; color: var(--secondary); font-size: 9px; }
+    .progress {
+      width: 120px;
+      height: 4px;
+      overflow: hidden;
+      border-radius: 99px;
+      background: rgba(127,127,127,.17);
+    }
+    .progress-value {
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--accent);
+      transition: width .2s ease;
+    }
+    .button {
+      min-height: 29px;
+      padding: 4px 11px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--window) 78%, var(--text) 4%);
+      box-shadow: 0 1px 1px rgba(0,0,0,.07);
+      white-space: nowrap;
+    }
+    .button:hover { background: color-mix(in srgb, var(--window) 70%, var(--text) 8%); }
+    .button.primary {
+      color: #fff;
+      border-color: color-mix(in srgb, var(--accent) 80%, #000);
+      background: var(--accent);
+    }
+    .button.text { border-color: transparent; background: transparent; box-shadow: none; }
+    .button:disabled { opacity: .45; }
+
+    .grid-scroll { flex: 1; min-height: 0; overflow: auto; padding: 17px; }
+    .grid-heading {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      margin: 0 2px 12px;
+    }
+    .grid-heading strong { font-size: 12px; }
+    .grid-heading span { color: var(--secondary); font-size: 10px; }
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+      gap: 18px 13px;
+      align-content: start;
+    }
+    .video-card {
+      min-width: 0;
+      padding: 4px;
+      border: 1px solid transparent;
+      border-radius: 9px;
+    }
+    .video-card:hover { background: rgba(127,127,127,.06); }
+    .video-card.selected {
+      border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+      background: var(--selection);
+    }
+    .thumb {
+      position: relative;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      border-radius: 6px;
+      background: linear-gradient(160deg, #86bfd0 0 48%, #d8bf8a 49% 65%, #58724e 66%);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.09);
+    }
+    .thumb.city { background: linear-gradient(170deg, #c7b18f 0 54%, #68717c 55%); }
+    .thumb.indoor { background: linear-gradient(170deg, #d5b38f 0 48%, #6d5345 49%); }
+    .thumb.forest { background: linear-gradient(175deg, #b8c6a3 0 45%, #53694a 46%); }
+    .thumb.night { background: linear-gradient(170deg, #26334f 0 52%, #8d7259 53%); }
+    .duration {
+      position: absolute;
+      right: 6px;
+      bottom: 5px;
+      padding: 2px 5px;
+      border-radius: 4px;
+      color: #fff;
+      background: rgba(0,0,0,.66);
+      font-size: 10px;
+    }
+    .filename {
+      margin-top: 7px;
+      overflow: hidden;
+      font-size: 11px;
+      font-weight: 550;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .meta {
+      margin-top: 2px;
+      overflow: hidden;
+      color: var(--secondary);
+      font-size: 9px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .drop-hint {
+      position: absolute;
+      z-index: 20;
+      inset: 18px;
+      display: none;
+      place-items: center;
+      border: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--content) 87%, var(--accent-soft));
+      color: var(--accent);
+      box-shadow: 0 10px 30px rgba(0,0,0,.12);
+      font-size: 15px;
+      font-weight: 650;
+    }
+    .content.dragging .drop-hint { display: grid; }
+
+    .inspector {
+      grid-column: 3;
+      grid-row: 2;
+      min-height: 0;
+      overflow: auto;
+      border-left: 1px solid var(--line);
+      background: var(--inspector);
+    }
+    .inspector-head { padding: 15px 16px; border-bottom: 1px solid var(--line); }
+    .inspector-kicker { color: var(--accent); font-size: 9px; font-weight: 650; }
+    .inspector-head h3 {
+      margin: 3px 0 0;
+      overflow: hidden;
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .inspector-head p { margin: 4px 0 0; color: var(--secondary); font-size: 10px; }
+    .inspector-section { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+    .inspector-label {
+      margin-bottom: 8px;
+      color: var(--secondary);
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .detail-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 3px 0;
+      font-size: 10px;
+    }
+    .detail-row span:first-child { width: 52px; flex: 0 0 52px; color: var(--secondary); }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
+    .chip {
+      padding: 3px 7px;
+      border: 1px solid var(--line);
+      border-radius: 99px;
+      background: rgba(127,127,127,.08);
+      font-size: 9px;
+    }
+    .chip.finder {
+      color: var(--purple);
+      border-color: color-mix(in srgb, var(--purple) 34%, var(--line));
+      background: color-mix(in srgb, var(--purple) 9%, transparent);
+    }
+
+    .modal-backdrop {
+      position: absolute;
+      z-index: 30;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(20,20,22,.3);
+      backdrop-filter: blur(2px);
+    }
+    .modal-backdrop.visible { display: flex; }
+    .sheet {
+      width: 620px;
+      max-width: 94%;
+      max-height: 92%;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.42);
+      border-radius: 12px;
+      background: var(--window);
+      box-shadow: 0 22px 54px rgba(0,0,0,.34);
+    }
+    .sheet.compact { width: 520px; }
+    .sheet-title { padding: 18px 22px 12px; text-align: center; }
+    .sheet-title h2 { margin: 0; font-size: 15px; }
+    .sheet-title p { margin: 5px 0 0; color: var(--secondary); font-size: 11px; }
+    .sheet-footer {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 14px 18px 16px;
+    }
+    .footer-note { margin-right: auto; color: var(--secondary); font-size: 10px; }
+    .folder-list {
+      margin: 0 18px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--content);
+    }
+    .folder-row {
+      display: grid;
+      min-height: 50px;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .folder-row:last-child { border-bottom: 0; }
+    .folder-row.selected { background: var(--selection); }
+    .folder-name { font-size: 12px; font-weight: 550; }
+    .folder-path { margin-top: 2px; color: var(--secondary); font-size: 10px; }
+    .folder-note { color: var(--secondary); font-size: 10px; }
+
+    .choice-list { display: grid; gap: 8px; margin: 0 18px; }
+    .choice-card {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 9px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--content);
+    }
+    .choice-card:has(input:checked) {
+      border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+      background: var(--accent-soft);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
+    }
+    .choice-card input { margin: 2px 0 0; accent-color: var(--accent); }
+    .choice-title { font-size: 12px; font-weight: 600; }
+    .choice-copy { margin-top: 3px; color: var(--secondary); font-size: 10px; line-height: 1.45; }
+    .root-option {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 9px;
+      margin: 10px 18px 0;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--content) 96%, var(--sidebar));
+    }
+    .root-option input { margin: 2px 0 0; accent-color: var(--accent); }
+    .root-option.disabled { opacity: .48; }
+    .root-option-title { display: block; font-size: 11px; font-weight: 560; }
+    .root-option-copy {
+      display: block;
+      margin-top: 3px;
+      color: var(--secondary);
+      font-size: 9px;
+      line-height: 1.45;
+    }
+    .remember-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin: 13px 20px 0;
+      font-size: 10px;
+    }
+    .remember-option input { margin-top: 1px; accent-color: var(--accent); }
+    .mapping-note {
+      margin: 10px 18px 0;
+      padding: 8px 10px;
+      border-radius: 7px;
+      color: var(--secondary);
+      background: rgba(127,127,127,.08);
+      font-size: 9px;
+      line-height: 1.45;
+    }
+
+    .settings-window {
+      display: grid;
+      width: 680px;
+      max-width: 96%;
+      height: min(430px, 88%);
+      grid-template-columns: 170px 1fr;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.42);
+      border-radius: 12px;
+      background: var(--window);
+      box-shadow: 0 22px 54px rgba(0,0,0,.34);
+    }
+    .settings-sidebar { padding: 52px 10px 12px; border-right: 1px solid var(--line); background: var(--sidebar); }
+    .settings-nav {
+      min-height: 31px;
+      padding: 7px 10px;
+      border-radius: 6px;
+      color: var(--secondary);
+      font-size: 11px;
+    }
+    .settings-nav.selected { color: var(--text); background: var(--selection); }
+    .settings-content { position: relative; overflow: auto; padding: 54px 30px 30px; background: var(--content); }
+    .settings-title {
+      position: absolute;
+      top: 18px;
+      right: 30px;
+      left: 30px;
+      font-size: 15px;
+      font-weight: 650;
+      text-align: center;
+    }
+    .settings-close {
+      position: absolute;
+      z-index: 2;
+      top: 17px;
+      left: 18px;
+      width: 13px;
+      height: 13px;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      background: #ff5f57;
+      color: transparent;
+    }
+    .settings-group {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: color-mix(in srgb, var(--content) 94%, var(--sidebar));
+    }
+    .settings-row {
+      display: grid;
+      min-height: 44px;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 18px;
+      padding: 9px 12px;
+    }
+    .settings-row + .settings-row { border-top: 1px solid var(--line); }
+    .settings-label { font-size: 11px; font-weight: 550; }
+    .settings-help { margin-top: 3px; color: var(--secondary); font-size: 9px; }
+    .settings-row select {
+      width: 176px;
+      height: 28px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: var(--content);
+      font-size: 10px;
+    }
+    .settings-row.disabled { opacity: .48; }
+    .settings-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    .settings-checkbox input { accent-color: var(--accent); }
+    .settings-note { margin: 9px 2px 0; color: var(--secondary); font-size: 9px; line-height: 1.45; }
+
+    .demo-bar {
+      position: fixed;
+      z-index: 60;
+      right: 14px;
+      bottom: 12px;
+      left: 14px;
+      display: flex;
+      min-height: 42px;
+      align-items: center;
+      gap: 5px;
+      overflow-x: auto;
+      padding: 6px 8px;
+      border: 1px solid rgba(255,255,255,.42);
+      border-radius: 10px;
+      background: rgba(42,42,44,.9);
+      color: #fff;
+      box-shadow: 0 8px 24px rgba(0,0,0,.22);
+      backdrop-filter: blur(18px);
+    }
+    .demo-label {
+      padding: 0 5px;
+      color: rgba(255,255,255,.62);
+      font-size: 10px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .demo-button, .demo-link {
+      min-height: 28px;
+      padding: 4px 9px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: #fff;
+      font-size: 10px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .demo-button:hover, .demo-link:hover { background: rgba(255,255,255,.13); }
+    .demo-separator {
+      width: 1px;
+      height: 18px;
+      flex: 0 0 1px;
+      background: rgba(255,255,255,.22);
+    }
+
+    @media (max-width: 1180px) {
+      .window { grid-template-columns: 205px minmax(470px, 1fr) 260px; }
+      .titlebar { grid-template-columns: 205px minmax(470px, 1fr) 260px; }
+      .search { width: 125px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-menubar" aria-label="应用菜单栏">
+    <div class="menu-wrap"><button class="menu-button app-name">FileFacet</button></div>
+    <div class="menu-wrap">
+      <button class="menu-button" id="fileMenuButton" aria-haspopup="menu" aria-expanded="false">文件</button>
+      <div class="menu-popover" id="fileMenu" role="menu" hidden>
+        <button class="menu-command" id="importMenuItem" role="menuitem">
+          <span>导入视频与文件夹…</span><span class="shortcut">⇧⌘I</span>
+        </button>
+        <div class="menu-divider"></div>
+        <button class="menu-command" role="menuitem"><span>关闭窗口</span><span class="shortcut">⌘W</span></button>
+      </div>
+    </div>
+    <button class="menu-button">编辑</button>
+    <button class="menu-button">显示</button>
+    <button class="menu-button">窗口</button>
+    <button class="menu-button">帮助</button>
+  </header>
+
+  <main class="desktop">
+    <section class="window" id="appWindow">
+      <header class="titlebar">
+        <div class="title-part">
+          <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+          <span class="title-name">资料库</span>
+        </div>
+        <div class="title-part">
+          <button class="toolbar-button" aria-label="切换侧边栏">☷</button>
+          <span class="title-name">所有视频</span>
+          <span class="title-count" id="titleCount">24 个视频</span>
+          <span class="spacer"></span>
+          <label class="search"><input type="search" placeholder="搜索"></label>
+        </div>
+        <div class="title-part">
+          <span class="title-name">信息</span>
+          <span class="spacer"></span>
+          <button class="toolbar-button" id="settingsButton" aria-label="打开设置">设置</button>
+        </div>
+      </header>
+
+      <aside class="sidebar">
+        <div class="section-label">资料库</div>
+        <div class="nav-row selected">
+          <span>▦</span><span class="nav-label">所有视频</span><span class="nav-count" id="allCount">24</span>
+        </div>
+        <div class="nav-row">
+          <span>◷</span><span class="nav-label">最近导入</span><span class="nav-count" id="recentCount">8</span>
+        </div>
+        <div class="nav-row">
+          <span>○</span><span class="nav-label">未加标签</span><span class="nav-count" id="untaggedCount">5</span>
+        </div>
+
+        <div class="section-label">标签</div>
+        <div class="nav-row">
+          <span class="tag-dot" style="--tag-color:#ff9f0a"></span>
+          <span class="nav-label">工作</span><span class="nav-count">11</span>
+        </div>
+        <div class="nav-row indent-1">
+          <span class="tag-dot" style="--tag-color:#5ac8fa"></span>
+          <span class="nav-label">用户访谈</span><span class="nav-count">7</span>
+        </div>
+        <div class="nav-row">
+          <span class="tag-dot" style="--tag-color:#ff375f"></span>
+          <span class="nav-label">精选片段</span><span class="nav-count">6</span>
+        </div>
+        <div class="nav-row">
+          <span class="tag-dot" style="--tag-color:#30d158"></span>
+          <span class="nav-label">待整理</span><span class="nav-count">4</span>
+        </div>
+      </aside>
+
+      <section class="content" id="content">
+        <div class="status-bar" id="statusBar">
+          <div class="status-mark" id="statusMark">⇣</div>
+          <div class="status-copy">
+            <div class="status-title" id="statusTitle">正在导入视频</div>
+            <div class="status-detail" id="statusDetail">正在扫描所选文件夹…</div>
+          </div>
+          <div class="progress" id="progress"><div class="progress-value" id="progressValue"></div></div>
+          <button class="button text" id="dismissStatus" hidden>完成</button>
+        </div>
+
+        <div class="grid-scroll">
+          <div class="grid-heading">
+            <strong>资料库中的视频</strong>
+            <span id="gridCaption">拖入视频或文件夹即可导入</span>
+          </div>
+          <div class="video-grid" id="videoGrid"></div>
+        </div>
+
+        <div class="drop-hint">松开以导入视频和文件夹</div>
+      </section>
+
+      <aside class="inspector">
+        <div id="inspectorContent"></div>
+      </aside>
+
+      <div class="modal-backdrop" id="pickerBackdrop" role="dialog" aria-modal="true" aria-labelledby="pickerTitle">
+        <section class="sheet">
+          <div class="sheet-title">
+            <h2 id="pickerTitle">选择要导入的视频或文件夹</h2>
+            <p>支持一次选择多个视频、多个文件夹或两者组合。</p>
+          </div>
+          <div class="folder-list">
+            <div class="folder-row selected" data-picker-kind="folder">
+              <div><div class="folder-name">旅行素材</div><div class="folder-path">影片 / 旅行素材</div></div>
+              <div class="folder-note">包含文件夹</div>
+            </div>
+            <div class="folder-row" data-picker-kind="videos">
+              <div><div class="folder-name">3 个视频</div><div class="folder-path">海边日落.mov、城市步行.mp4、林间公路.mp4</div></div>
+              <div class="folder-note">仅视频文件</div>
+            </div>
+          </div>
+          <footer class="sheet-footer">
+            <span class="footer-note">原视频始终保持只读。</span>
+            <button class="button" id="cancelPicker">取消</button>
+            <button class="button primary" id="continuePicker">选择</button>
+          </footer>
+        </section>
+      </div>
+
+      <div class="modal-backdrop" id="methodBackdrop" role="dialog" aria-modal="true" aria-labelledby="methodTitle">
+        <section class="sheet compact">
+          <div class="sheet-title">
+            <h2 id="methodTitle">如何导入文件夹中的视频？</h2>
+            <p>这个选择只影响文件夹中的视频。</p>
+          </div>
+          <div class="choice-list">
+            <label class="choice-card">
+              <input type="radio" name="importMethod" value="standard" checked>
+              <span>
+                <span class="choice-title">直接导入视频</span>
+                <span class="choice-copy">保留现有导入行为和 Finder 标签，不根据目录结构创建标签。</span>
+              </span>
+            </label>
+            <label class="choice-card">
+              <input type="radio" name="importMethod" value="folderTags">
+              <span>
+                <span class="choice-title">导入视频并创建目录标签</span>
+                <span class="choice-copy">使用所选文件夹内的目录名称创建层级标签；已有视频会追加缺少的标签。</span>
+              </span>
+            </label>
+          </div>
+          <label class="root-option disabled" id="rootOptionRow">
+            <input type="checkbox" id="includeSelectedRoot" disabled>
+            <span>
+              <span class="root-option-title">将所选文件夹本身创建为根标签</span>
+              <span class="root-option-copy">关闭：日本 › 东京；开启：旅行素材 › 日本 › 东京。多个文件夹会分别成为根标签。</span>
+            </span>
+          </label>
+          <div class="mapping-note" id="mappingNote">
+            直接导入不会创建目录标签。目录别名和符号链接会跳过，Finder 标签继续保留。
+          </div>
+          <label class="remember-option">
+            <input type="checkbox" id="rememberMethod">
+            <span>以后导入文件夹时始终使用此方式，不再询问</span>
+          </label>
+          <footer class="sheet-footer">
+            <span class="footer-note" id="methodEntry">来自“文件”菜单</span>
+            <button class="button" id="cancelMethod">取消</button>
+            <button class="button primary" id="continueMethod">继续导入</button>
+          </footer>
+        </section>
+      </div>
+
+      <div class="modal-backdrop" id="settingsBackdrop" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <section class="settings-window">
+          <button class="settings-close" id="closeSettings" aria-label="关闭设置">关闭</button>
+          <aside class="settings-sidebar">
+            <div class="settings-nav">通用</div>
+            <div class="settings-nav selected">导入</div>
+            <div class="settings-nav">外观</div>
+          </aside>
+          <div class="settings-content">
+            <div class="settings-title" id="settingsTitle">导入</div>
+            <div class="settings-group">
+              <div class="settings-row">
+                <div>
+                  <div class="settings-label">文件夹导入方式</div>
+                  <div class="settings-help">菜单、快捷键和拖入目录共用此设置。</div>
+                </div>
+                <select id="defaultMethod">
+                  <option value="ask">每次询问</option>
+                  <option value="standard">直接导入视频</option>
+                  <option value="folderTags">导入并创建目录标签</option>
+                </select>
+              </div>
+              <div class="settings-row" id="rootSettingsRow">
+                <div>
+                  <div class="settings-label">包含所选文件夹</div>
+                  <div class="settings-help">关闭时，从所选文件夹内的第一层目录开始创建标签。</div>
+                </div>
+                <label class="settings-checkbox">
+                  <input type="checkbox" id="defaultIncludeRoot">
+                  创建为根标签
+                </label>
+              </div>
+            </div>
+            <p class="settings-note">
+              “每次询问”会在导入内容包含文件夹时显示方式选择；“包含所选文件夹”会作为其中的默认值。仅选择视频文件时会直接导入。
+            </p>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <nav class="demo-bar" aria-label="原型演示控制">
+    <span class="demo-label">入口</span>
+    <button class="demo-button" id="demoMenu">菜单 / ⇧⌘I</button>
+    <button class="demo-button" id="demoDrop">拖入文件夹</button>
+    <button class="demo-button" id="demoVideos">仅导入视频</button>
+    <span class="demo-separator"></span>
+    <span class="demo-label">偏好</span>
+    <button class="demo-button" id="demoSettings">打开设置</button>
+    <button class="demo-button" id="demoReset">恢复每次询问</button>
+    <span class="demo-separator"></span>
+    <span class="demo-label">结果</span>
+    <button class="demo-button" data-result-mode="standard">普通导入结果</button>
+    <button class="demo-button" data-result-mode="folderTags">目录标签结果</button>
+    <button class="demo-button" data-result-mode="folderTags" data-include-root="true">根标签结果</button>
+    <span class="demo-separator"></span>
+    <a class="demo-link" href="../manual-video-import/index.html">基础导入</a>
+    <a class="demo-link" href="../deferred-tag-editing/index.html">延后编辑标签</a>
+    <a class="demo-link" href="../tag-sorting/index.html">标签排序</a>
+  </nav>
+
+  <script>
+    const baseVideos = [
+      { id: "base-1", name: "海边日落.mov", meta: "4K · 00:18", duration: "00:18", theme: "", tags: ["精选片段"], finder: ["橙色"] },
+      { id: "base-2", name: "城市步行.mp4", meta: "1080p · 01:24", duration: "01:24", theme: "city", tags: ["待整理"], finder: [] },
+      { id: "base-3", name: "室内采访 03.mov", meta: "4K · 03:12", duration: "03:12", theme: "indoor", tags: ["工作", "用户访谈"], finder: ["蓝色"] },
+      { id: "base-4", name: "林间公路.mp4", meta: "1080p · 00:42", duration: "00:42", theme: "forest", tags: [], finder: [] },
+      { id: "base-5", name: "夜景延时.mov", meta: "4K · 00:33", duration: "00:33", theme: "night", tags: ["精选片段"], finder: ["紫色"] },
+      { id: "base-6", name: "咖啡店 B-roll.mp4", meta: "1080p · 00:27", duration: "00:27", theme: "indoor", tags: ["待整理"], finder: [] }
+    ];
+
+    const importedVideos = [
+      { id: "new-1", name: "东京街头 01.mov", meta: "刚刚导入 · Finder 标签：红色", duration: "00:24", theme: "city", tags: [], finder: ["红色"], folderTags: ["日本", "东京", "街景"] },
+      { id: "new-2", name: "浅草清晨.mp4", meta: "刚刚导入", duration: "00:41", theme: "", tags: [], finder: [], folderTags: ["日本", "东京"] },
+      { id: "new-3", name: "京都小径.mov", meta: "刚刚导入 · Finder 标签：绿色", duration: "01:08", theme: "forest", tags: [], finder: ["绿色"], folderTags: ["日本", "京都"] }
+    ];
+
+    const appWindow = document.getElementById("appWindow");
+    const content = document.getElementById("content");
+    const fileMenuButton = document.getElementById("fileMenuButton");
+    const fileMenu = document.getElementById("fileMenu");
+    const pickerBackdrop = document.getElementById("pickerBackdrop");
+    const methodBackdrop = document.getElementById("methodBackdrop");
+    const settingsBackdrop = document.getElementById("settingsBackdrop");
+    const defaultMethod = document.getElementById("defaultMethod");
+    const defaultIncludeRoot = document.getElementById("defaultIncludeRoot");
+    const rootSettingsRow = document.getElementById("rootSettingsRow");
+    const rememberMethod = document.getElementById("rememberMethod");
+    const includeSelectedRoot = document.getElementById("includeSelectedRoot");
+    const rootOptionRow = document.getElementById("rootOptionRow");
+    const mappingNote = document.getElementById("mappingNote");
+    const statusBar = document.getElementById("statusBar");
+    const progressValue = document.getElementById("progressValue");
+    const dismissStatus = document.getElementById("dismissStatus");
+    const videoGrid = document.getElementById("videoGrid");
+    const inspectorContent = document.getElementById("inspectorContent");
+    let selectedPickerKind = "folder";
+    let selectedVideoId = "base-1";
+    let preference = "ask";
+    let includeRootPreference = false;
+    let pendingEntry = "menu";
+    let progressTimer = null;
+    let lastResultMode = null;
+    let lastIncludeRoot = false;
+
+    function closeFileMenu() {
+      fileMenu.hidden = true;
+      fileMenuButton.classList.remove("open");
+      fileMenuButton.setAttribute("aria-expanded", "false");
+    }
+
+    function toggleFileMenu() {
+      const willOpen = fileMenu.hidden;
+      fileMenu.hidden = !willOpen;
+      fileMenuButton.classList.toggle("open", willOpen);
+      fileMenuButton.setAttribute("aria-expanded", String(willOpen));
+    }
+
+    function showPicker() {
+      closeFileMenu();
+      pendingEntry = "menu";
+      pickerBackdrop.classList.add("visible");
+    }
+
+    function hidePicker() {
+      pickerBackdrop.classList.remove("visible");
+    }
+
+    function selectedMethod() {
+      return document.querySelector('input[name="importMethod"]:checked').value;
+    }
+
+    function setSelectedMethod(value) {
+      const radio = document.querySelector(`input[name="importMethod"][value="${value}"]`);
+      if (radio) radio.checked = true;
+      updateMethodOptions();
+    }
+
+    function updateMethodOptions() {
+      const folderTagsSelected = selectedMethod() === "folderTags";
+      includeSelectedRoot.disabled = !folderTagsSelected;
+      rootOptionRow.classList.toggle("disabled", !folderTagsSelected);
+      rootOptionRow.setAttribute("aria-disabled", String(!folderTagsSelected));
+      if (!folderTagsSelected) {
+        mappingNote.textContent = "直接导入不会创建目录标签。目录别名和符号链接会跳过，Finder 标签继续保留。";
+      } else if (includeSelectedRoot.checked) {
+        mappingNote.textContent = "所选文件夹会成为根标签；根目录直属视频也会关联该标签。目录别名和符号链接会跳过。";
+      } else {
+        mappingNote.textContent = "所选文件夹默认不会成为标签，标签从其内部第一层目录开始创建。目录别名和符号链接会跳过。";
+      }
+    }
+
+    function updateSettingsOptions() {
+      const directImportSelected = defaultMethod.value === "standard";
+      defaultIncludeRoot.disabled = directImportSelected;
+      rootSettingsRow.classList.toggle("disabled", directImportSelected);
+      rootSettingsRow.setAttribute("aria-disabled", String(directImportSelected));
+    }
+
+    function showMethodDialog(entry) {
+      pendingEntry = entry;
+      rememberMethod.checked = false;
+      setSelectedMethod("standard");
+      includeSelectedRoot.checked = includeRootPreference;
+      updateMethodOptions();
+      document.getElementById("methodEntry").textContent = entry === "drop"
+        ? "来自拖入文件夹"
+        : "来自“文件”菜单 · ⇧⌘I";
+      methodBackdrop.classList.add("visible");
+    }
+
+    function handleFolderImport(entry) {
+      pendingEntry = entry;
+      if (preference === "ask") {
+        showMethodDialog(entry);
+        return;
+      }
+      beginImport(preference, true, preference === "folderTags" && includeRootPreference);
+    }
+
+    function handlePickerSelection() {
+      hidePicker();
+      if (selectedPickerKind === "folder") {
+        handleFolderImport("menu");
+      } else {
+        beginImport("standard", false);
+      }
+    }
+
+    function beginImport(mode, hasFolder, includeRoot = false) {
+      methodBackdrop.classList.remove("visible");
+      clearInterval(progressTimer);
+      statusBar.classList.add("visible");
+      statusBar.classList.remove("complete");
+      document.getElementById("statusMark").textContent = "⇣";
+      document.getElementById("statusTitle").textContent = mode === "folderTags" && hasFolder
+        ? "正在导入视频并创建目录标签"
+        : "正在导入视频";
+      document.getElementById("statusDetail").textContent = pendingEntry === "drop"
+        ? "正在扫描拖入的文件夹…"
+        : "正在处理所选项目…";
+      document.getElementById("progress").hidden = false;
+      dismissStatus.hidden = true;
+      let progress = 8;
+      progressValue.style.width = `${progress}%`;
+      progressTimer = window.setInterval(() => {
+        progress = Math.min(100, progress + 18);
+        progressValue.style.width = `${progress}%`;
+        if (progress >= 100) {
+          clearInterval(progressTimer);
+          progressTimer = null;
+          showCompletedResult(
+            mode === "folderTags" && hasFolder ? "folderTags" : "standard",
+            hasFolder,
+            mode === "folderTags" && hasFolder && includeRoot
+          );
+        }
+      }, 220);
+    }
+
+    function visibleVideos() {
+      return lastResultMode ? [...importedVideos, ...baseVideos] : baseVideos;
+    }
+
+    function renderGrid() {
+      const videos = visibleVideos();
+      videoGrid.innerHTML = videos.map(video => `
+        <article class="video-card${video.id === selectedVideoId ? " selected" : ""}" data-video-id="${video.id}">
+          <div class="thumb ${video.theme || ""}">
+            <span class="duration">${video.duration}</span>
+          </div>
+          <div class="filename">${video.name}</div>
+          <div class="meta">${video.meta}</div>
+        </article>
+      `).join("");
+      document.querySelectorAll("[data-video-id]").forEach(card => {
+        card.addEventListener("click", () => {
+          selectedVideoId = card.dataset.videoId;
+          renderGrid();
+          renderInspector();
+        });
+      });
+    }
+
+    function chipMarkup(values, className = "") {
+      return values.map(value => `<span class="chip ${className}">${value}</span>`).join("");
+    }
+
+    function renderInspector() {
+      const video = visibleVideos().find(item => item.id === selectedVideoId) || visibleVideos()[0];
+      const folderTags = lastResultMode === "folderTags"
+        ? [...(lastIncludeRoot ? ["旅行素材"] : []), ...(video.folderTags || [])]
+        : [];
+      const groups = [
+        video.tags.length ? `<div class="inspector-section"><div class="inspector-label">应用标签</div><div class="chip-row">${chipMarkup(video.tags)}</div></div>` : "",
+        video.finder.length ? `<div class="inspector-section"><div class="inspector-label">Finder 标签</div><div class="chip-row">${chipMarkup(video.finder, "finder")}</div></div>` : "",
+        folderTags.length ? `<div class="inspector-section"><div class="inspector-label">目录标签</div><div class="chip-row">${chipMarkup(folderTags)}</div></div>` : ""
+      ].join("");
+      inspectorContent.innerHTML = `
+        <div class="inspector-head">
+          <div class="inspector-kicker">${video.id.startsWith("new-") ? "最近导入" : "视频信息"}</div>
+          <h3>${video.name}</h3>
+          <p>${video.meta}</p>
+        </div>
+        <div class="inspector-section">
+          <div class="inspector-label">文件</div>
+          <div class="detail-row"><span>原文件</span><span>保持只读</span></div>
+          <div class="detail-row"><span>时长</span><span>${video.duration}</span></div>
+        </div>
+        ${groups}`;
+    }
+
+    function showCompletedResult(mode, hasFolder = true, includeRoot = false) {
+      lastResultMode = mode;
+      lastIncludeRoot = mode === "folderTags" && includeRoot;
+      statusBar.classList.add("visible", "complete");
+      document.getElementById("statusMark").textContent = "✓";
+      document.getElementById("statusTitle").textContent = "导入已完成";
+      document.getElementById("statusDetail").textContent = hasFolder
+        ? mode === "folderTags"
+          ? includeRoot
+            ? "已导入 12 个新视频，更新 2 个已有视频，添加 8 个目录标签（包含根标签）；另有 3 个项目未导入。"
+            : "已导入 12 个新视频，更新 2 个已有视频，添加 7 个目录标签；另有 3 个项目未导入。"
+          : "已导入 12 个新视频，2 个视频已在资料库；另有 3 个项目未导入。"
+        : "已导入 3 个视频。";
+      document.getElementById("progress").hidden = true;
+      dismissStatus.hidden = false;
+      document.getElementById("titleCount").textContent = hasFolder ? "36 个视频" : "27 个视频";
+      document.getElementById("allCount").textContent = hasFolder ? "36" : "27";
+      document.getElementById("recentCount").textContent = hasFolder ? "12" : "3";
+      document.getElementById("untaggedCount").textContent = mode === "folderTags" ? "3" : "5";
+      document.getElementById("gridCaption").textContent = mode === "folderTags"
+        ? "新视频已加入资料库，已有视频已追加缺少的目录标签"
+        : "新视频已加入资料库";
+      selectedVideoId = "new-1";
+      renderGrid();
+      renderInspector();
+    }
+
+    function openSettings() {
+      defaultMethod.value = preference;
+      defaultIncludeRoot.checked = includeRootPreference;
+      updateSettingsOptions();
+      settingsBackdrop.classList.add("visible");
+    }
+
+    function closeSettings() {
+      settingsBackdrop.classList.remove("visible");
+    }
+
+    fileMenuButton.addEventListener("click", toggleFileMenu);
+    document.getElementById("importMenuItem").addEventListener("click", showPicker);
+    document.getElementById("cancelPicker").addEventListener("click", hidePicker);
+    document.getElementById("continuePicker").addEventListener("click", handlePickerSelection);
+    document.getElementById("cancelMethod").addEventListener("click", () => methodBackdrop.classList.remove("visible"));
+    document.getElementById("continueMethod").addEventListener("click", () => {
+      const method = selectedMethod();
+      const includeRoot = method === "folderTags" && includeSelectedRoot.checked;
+      if (rememberMethod.checked) {
+        preference = method;
+        includeRootPreference = includeRoot;
+      }
+      beginImport(method, true, includeRoot);
+    });
+    document.querySelectorAll('input[name="importMethod"]').forEach(radio => {
+      radio.addEventListener("change", updateMethodOptions);
+    });
+    includeSelectedRoot.addEventListener("change", updateMethodOptions);
+    document.getElementById("settingsButton").addEventListener("click", openSettings);
+    document.getElementById("closeSettings").addEventListener("click", closeSettings);
+    defaultMethod.addEventListener("change", () => {
+      preference = defaultMethod.value;
+      updateSettingsOptions();
+    });
+    defaultIncludeRoot.addEventListener("change", () => {
+      includeRootPreference = defaultIncludeRoot.checked;
+    });
+    dismissStatus.addEventListener("click", () => statusBar.classList.remove("visible", "complete"));
+    document.getElementById("demoMenu").addEventListener("click", showPicker);
+    document.getElementById("demoDrop").addEventListener("click", () => {
+      pendingEntry = "drop";
+      content.classList.add("dragging");
+      window.setTimeout(() => {
+        content.classList.remove("dragging");
+        handleFolderImport("drop");
+      }, 650);
+    });
+    document.getElementById("demoVideos").addEventListener("click", () => {
+      pendingEntry = "menu";
+      beginImport("standard", false);
+    });
+    document.getElementById("demoSettings").addEventListener("click", openSettings);
+    document.getElementById("demoReset").addEventListener("click", () => {
+      preference = "ask";
+      includeRootPreference = false;
+      defaultMethod.value = "ask";
+      defaultIncludeRoot.checked = false;
+      updateSettingsOptions();
+      statusBar.classList.add("visible", "complete");
+      document.getElementById("statusMark").textContent = "✓";
+      document.getElementById("statusTitle").textContent = "已恢复为每次询问";
+      document.getElementById("statusDetail").textContent = "下次导入内容包含文件夹时，会再次显示导入方式选择。";
+      document.getElementById("progress").hidden = true;
+      dismissStatus.hidden = false;
+    });
+    document.querySelectorAll("[data-result-mode]").forEach(button => {
+      button.addEventListener("click", () => showCompletedResult(
+        button.dataset.resultMode,
+        true,
+        button.dataset.includeRoot === "true"
+      ));
+    });
+    document.querySelectorAll("[data-picker-kind]").forEach(row => {
+      row.addEventListener("click", () => {
+        selectedPickerKind = row.dataset.pickerKind;
+        document.querySelectorAll("[data-picker-kind]").forEach(item => item.classList.remove("selected"));
+        row.classList.add("selected");
+      });
+    });
+    pickerBackdrop.addEventListener("click", event => {
+      if (event.target === pickerBackdrop) hidePicker();
+    });
+    methodBackdrop.addEventListener("click", event => {
+      if (event.target === methodBackdrop) methodBackdrop.classList.remove("visible");
+    });
+    settingsBackdrop.addEventListener("click", event => {
+      if (event.target === settingsBackdrop) closeSettings();
+    });
+    content.addEventListener("dragenter", event => {
+      event.preventDefault();
+      content.classList.add("dragging");
+    });
+    content.addEventListener("dragover", event => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    });
+    content.addEventListener("dragleave", event => {
+      if (!content.contains(event.relatedTarget)) content.classList.remove("dragging");
+    });
+    content.addEventListener("drop", event => {
+      event.preventDefault();
+      content.classList.remove("dragging");
+      handleFolderImport("drop");
+    });
+    document.addEventListener("click", event => {
+      if (!fileMenu.contains(event.target) && event.target !== fileMenuButton) closeFileMenu();
+    });
+    document.addEventListener("keydown", event => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "i") {
+        event.preventDefault();
+        showPicker();
+      }
+      if (event.key === "Escape") {
+        closeFileMenu();
+        hidePicker();
+        methodBackdrop.classList.remove("visible");
+        if (settingsBackdrop.classList.contains("visible")) closeSettings();
+      }
+    });
+
+    renderGrid();
+    renderInspector();
+  </script>
+</body>
+</html>

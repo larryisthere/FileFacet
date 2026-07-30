@@ -184,6 +184,11 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
                     String(localized: .importResultAdded(summary.addedCount)),
                     String(localized: .importResultExisting(summary.existingCount)),
                 ]
+                if summary.createdFolderTagCount > 0 {
+                    resultParts.append(
+                        String(localized: .importResultFolderTagsCreated(summary.createdFolderTagCount))
+                    )
+                }
                 if summary.failedVideoCount > 0 {
                     resultParts.append(String(localized: .importResultFailedVideo(summary.failedVideoCount)))
                 }

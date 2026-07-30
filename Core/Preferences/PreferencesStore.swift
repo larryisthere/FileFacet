@@ -20,11 +20,28 @@ enum IdleLockInterval: Int, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum FolderImportPreference: String, CaseIterable, Identifiable, Sendable {
+    case ask = "ask"
+    case direct = "direct"
+    case folderTags = "folderTags"
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .ask: String(localized: .settingsFolderImportAsk)
+        case .direct: String(localized: .folderImportDirectTitle)
+        case .folderTags: String(localized: .folderImportTagsTitle)
+        }
+    }
+}
+
 @MainActor
 final class PreferencesStore: ObservableObject {
     enum Key {
         static let authenticationEnabled = "authenticationEnabled"
         static let idleLockInterval = "idleLockInterval"
+        static let folderImportPreference = "folderImportPreference"
+        static let includeSelectedFolderAsRootTag = "includeSelectedFolderAsRootTag"
     }
 
     private let defaults: UserDefaults
@@ -33,6 +50,17 @@ final class PreferencesStore: ObservableObject {
     @Published var idleLockInterval: IdleLockInterval {
         didSet { defaults.set(idleLockInterval.rawValue, forKey: Key.idleLockInterval) }
     }
+    @Published var folderImportPreference: FolderImportPreference {
+        didSet { defaults.set(folderImportPreference.rawValue, forKey: Key.folderImportPreference) }
+    }
+    @Published var includeSelectedFolderAsRootTag: Bool {
+        didSet {
+            defaults.set(
+                includeSelectedFolderAsRootTag,
+                forKey: Key.includeSelectedFolderAsRootTag
+            )
+        }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -40,6 +68,12 @@ final class PreferencesStore: ObservableObject {
         idleLockInterval = IdleLockInterval(
             rawValue: defaults.object(forKey: Key.idleLockInterval) as? Int ?? IdleLockInterval.never.rawValue
         ) ?? .never
+        folderImportPreference = FolderImportPreference(
+            rawValue: defaults.string(forKey: Key.folderImportPreference) ?? ""
+        ) ?? .ask
+        includeSelectedFolderAsRootTag = defaults.object(
+            forKey: Key.includeSelectedFolderAsRootTag
+        ) as? Bool ?? false
     }
 
     func setAuthenticationEnabled(_ enabled: Bool) {

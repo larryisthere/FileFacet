@@ -24,6 +24,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     private let databaseStore: DatabaseStore?
     private let windowController = MainWindowController()
     private let quickLookCoordinator = QuickLookPreviewCoordinator()
+    private let folderImportMethodPresenter = FolderImportMethodPresenter()
     private var privacyShield: NSView?
     private var idleTimer: Timer?
 
@@ -72,7 +73,12 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
 
     private lazy var libraryAccessCoordinator: LibraryAccessCoordinator? = {
         guard let databaseStore else { return nil }
-        return LibraryAccessCoordinator(database: databaseStore)
+        return LibraryAccessCoordinator(
+            database: databaseStore,
+            resolveFolderImportMethod: { [weak self] in
+                await self?.resolveFolderImportMethod()
+            }
+        )
     }()
 
     private lazy var settingsNavigation = SettingsNavigationModel()
@@ -270,6 +276,35 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
             return
         }
         libraryAccessCoordinator.importVideos()
+    }
+
+    private func resolveFolderImportMethod() async -> FolderImportMethod? {
+        switch preferencesStore.folderImportPreference {
+        case .direct:
+            return .direct
+        case .folderTags:
+            return .folderTags(
+                includeSelectedRoot: preferencesStore.includeSelectedFolderAsRootTag
+            )
+        case .ask:
+            guard let window = windowController.window else { return nil }
+            guard let decision = await folderImportMethodPresenter.present(
+                on: window,
+                includeSelectedRootByDefault: preferencesStore.includeSelectedFolderAsRootTag
+            ) else {
+                return nil
+            }
+            if decision.remember {
+                switch decision.method {
+                case .direct:
+                    preferencesStore.folderImportPreference = .direct
+                case let .folderTags(includeSelectedRoot):
+                    preferencesStore.folderImportPreference = .folderTags
+                    preferencesStore.includeSelectedFolderAsRootTag = includeSelectedRoot
+                }
+            }
+            return decision.method
+        }
     }
 
     @objc private func undoLastMutation() {

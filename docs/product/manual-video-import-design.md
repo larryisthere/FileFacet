@@ -4,6 +4,8 @@
 
 关联需求：`docs/product/manual-video-import-requirements.md`
 
+后续扩展：`docs/product/folder-structure-tag-import-design.md`
+
 ## 1. 设计目标
 
 - 将现有单根目录替换模型改为统一视频集合。

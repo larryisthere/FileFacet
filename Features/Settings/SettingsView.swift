@@ -2,18 +2,21 @@ import AppKit
 import SwiftUI
 
 enum SettingsSection: String, CaseIterable, Identifiable {
+    case importOptions
     case privacy
     case about
 
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .importOptions: String(localized: .settingsImport)
         case .privacy: String(localized: .settingsPrivacy)
         case .about: String(localized: .settingsAbout)
         }
     }
     var systemImage: String {
         switch self {
+        case .importOptions: "tray.and.arrow.down"
         case .privacy: "lock"
         case .about: "info.circle"
         }
@@ -40,6 +43,8 @@ struct SettingsView: View {
             .navigationSplitViewColumnWidth(min: 160, ideal: 188, max: 220)
         } detail: {
             switch navigation.selection ?? .privacy {
+            case .importOptions:
+                importView
             case .privacy:
                 privacyView
             case .about:
@@ -47,6 +52,43 @@ struct SettingsView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+    }
+
+    private var importView: some View {
+        Form {
+            Section {
+                Picker(
+                    String(localized: .settingsFolderImportMethod),
+                    selection: $preferences.folderImportPreference
+                ) {
+                    ForEach(FolderImportPreference.allCases) { preference in
+                        Text(preference.title).tag(preference)
+                    }
+                }
+
+                Text(String(localized: .settingsFolderImportMethodHelp))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                Toggle(
+                    String(localized: .folderImportIncludeRoot),
+                    isOn: $preferences.includeSelectedFolderAsRootTag
+                )
+                .disabled(preferences.folderImportPreference == .direct)
+
+                Text(String(localized: .settingsIncludeSelectedFolderHelp))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(String(localized: .settingsImport))
+        .frame(maxWidth: 680, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 24)
     }
 
     private var privacyView: some View {

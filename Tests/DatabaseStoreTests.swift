@@ -342,6 +342,189 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertEqual(states[imported.id], .on)
     }
 
+    func testFolderTagImportExcludesRootAndPreservesExistingAssignments() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "source-a", name: "Travel"))
+        let discovered = [
+            makeDiscoveredVideo(path: "Root.mp4", size: 10),
+            makeDiscoveredVideo(path: "Japan/Tokyo/Clip.mp4", size: 20, finderTags: ["Finder"]),
+        ]
+        let initial = try await store.importVideos(
+            sourceID: "source-a",
+            discoveredVideos: discovered
+        )
+        let nestedVideo = try XCTUnwrap(
+            initial.importedVideos.first(where: { $0.filename == "Clip.mp4" })
+        )
+        let userTagID = try await store.createTag(
+            libraryID: LibraryRecord.primaryID,
+            name: "Existing",
+            parentID: nil
+        )
+        try await store.setTagAssignment(
+            tagID: userTagID,
+            videoIDs: [nestedVideo.id],
+            enabled: true
+        )
+
+        let folderImport = try await store.importVideos(
+            sourceID: "source-a",
+            discoveredVideos: discovered,
+            folderTagOptions: FolderTagImportOptions(selectedRootName: nil)
+        )
+        let repeatedImport = try await store.importVideos(
+            sourceID: "source-a",
+            discoveredVideos: discovered,
+            folderTagOptions: FolderTagImportOptions(selectedRootName: nil)
+        )
+
+        let videos = try await store.fetchVideos(libraryID: LibraryRecord.primaryID)
+        let tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        let japan = try XCTUnwrap(tags.first(where: { $0.name == "Japan" }))
+        let tokyo = try XCTUnwrap(tags.first(where: { $0.name == "Tokyo" }))
+        let finder = try XCTUnwrap(tags.first(where: { $0.name == "Finder" }))
+        let rootVideo = try XCTUnwrap(videos.first(where: { $0.filename == "Root.mp4" }))
+        let nestedStates = try await store.tagAssignmentStates(
+            videoIDs: [nestedVideo.id],
+            tags: tags
+        )
+        let rootStates = try await store.tagAssignmentStates(
+            videoIDs: [rootVideo.id],
+            tags: tags
+        )
+
+        XCTAssertEqual(folderImport.existingCount, 2)
+        XCTAssertEqual(folderImport.createdFolderTagIDs.count, 2)
+        XCTAssertTrue(repeatedImport.createdFolderTagIDs.isEmpty)
+        XCTAssertEqual(videos.count, 2)
+        XCTAssertEqual(tokyo.parentID, japan.id)
+        XCTAssertEqual(japan.videoCount, 1)
+        XCTAssertEqual(tokyo.videoCount, 1)
+        XCTAssertEqual(nestedStates[japan.id], .off)
+        XCTAssertEqual(nestedStates[tokyo.id], .on)
+        XCTAssertEqual(nestedStates[finder.id], .on)
+        XCTAssertEqual(nestedStates[userTagID], .on)
+        XCTAssertEqual(rootStates[japan.id], .off)
+        XCTAssertEqual(rootStates[tokyo.id], .off)
+    }
+
+    func testFolderTagImportIncludesSelectedRootForDirectVideos() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "source-a", name: "Travel"))
+        let result = try await store.importVideos(
+            sourceID: "source-a",
+            discoveredVideos: [
+                makeDiscoveredVideo(path: "Root.mp4", size: 10),
+                makeDiscoveredVideo(path: "Japan/Tokyo/Clip.mp4", size: 20),
+            ],
+            folderTagOptions: FolderTagImportOptions(selectedRootName: "Travel")
+        )
+
+        let tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        let travel = try XCTUnwrap(tags.first(where: { $0.name == "Travel" }))
+        let japan = try XCTUnwrap(tags.first(where: { $0.name == "Japan" }))
+        let tokyo = try XCTUnwrap(tags.first(where: { $0.name == "Tokyo" }))
+        let rootVideo = try XCTUnwrap(
+            result.importedVideos.first(where: { $0.filename == "Root.mp4" })
+        )
+        let nestedVideo = try XCTUnwrap(
+            result.importedVideos.first(where: { $0.filename == "Clip.mp4" })
+        )
+        let rootStates = try await store.tagAssignmentStates(
+            videoIDs: [rootVideo.id],
+            tags: tags
+        )
+        let nestedStates = try await store.tagAssignmentStates(
+            videoIDs: [nestedVideo.id],
+            tags: tags
+        )
+
+        XCTAssertEqual(result.createdFolderTagIDs.count, 3)
+        XCTAssertNil(travel.parentID)
+        XCTAssertEqual(japan.parentID, travel.id)
+        XCTAssertEqual(tokyo.parentID, japan.id)
+        XCTAssertEqual(travel.videoCount, 2)
+        XCTAssertEqual(rootStates[travel.id], .on)
+        XCTAssertEqual(rootStates[tokyo.id], .off)
+        XCTAssertEqual(nestedStates[travel.id], .off)
+        XCTAssertEqual(nestedStates[tokyo.id], .on)
+    }
+
+    func testFolderTagImportReusesNormalizedSiblingsAcrossPaths() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "source-a", name: "Source"))
+
+        _ = try await store.importVideos(
+            sourceID: "source-a",
+            discoveredVideos: [
+                makeDiscoveredVideo(path: "Japan/Tokyo/A.mp4", size: 10),
+                makeDiscoveredVideo(path: "JAPAN/Tokyó/B.mp4", size: 20),
+                makeDiscoveredVideo(path: "Work/Tokyo/C.mp4", size: 30),
+            ],
+            folderTagOptions: FolderTagImportOptions(selectedRootName: nil)
+        )
+
+        let tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        let japan = try XCTUnwrap(
+            tags.first { $0.name.localizedCaseInsensitiveCompare("Japan") == .orderedSame }
+        )
+        let work = try XCTUnwrap(tags.first(where: { $0.name == "Work" }))
+        let tokyoTags = tags.filter {
+            $0.name.compare(
+                "Tokyo",
+                options: [.caseInsensitive, .diacriticInsensitive]
+            ) == .orderedSame
+        }
+
+        XCTAssertEqual(tags.count, 4)
+        XCTAssertEqual(tokyoTags.count, 2)
+        XCTAssertEqual(Set(tokyoTags.compactMap(\.parentID)), Set([japan.id, work.id]))
+        XCTAssertEqual(japan.videoCount, 2)
+        XCTAssertEqual(work.videoCount, 1)
+    }
+
+    func testFolderTagImportHandlesDeepHierarchyIteratively() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "source-a", name: "Source"))
+        let components = (0..<128).map { String(format: "Level-%03d", $0) }
+
+        let result = try await store.importVideos(
+            sourceID: "source-a",
+            discoveredVideos: [
+                makeDiscoveredVideo(
+                    path: components.joined(separator: "/") + "/Deep.mp4",
+                    size: 10
+                ),
+            ],
+            folderTagOptions: FolderTagImportOptions(selectedRootName: nil)
+        )
+
+        let video = try XCTUnwrap(result.importedVideos.first)
+        let tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        let first = try XCTUnwrap(tags.first(where: { $0.name == components[0] }))
+        let leaf = try XCTUnwrap(tags.first(where: { $0.name == components[components.count - 1] }))
+        let states = try await store.tagAssignmentStates(videoIDs: [video.id], tags: tags)
+
+        XCTAssertEqual(result.createdFolderTagIDs.count, components.count)
+        XCTAssertEqual(tags.count, components.count)
+        XCTAssertEqual(first.videoCount, 1)
+        XCTAssertEqual(leaf.videoCount, 1)
+        XCTAssertEqual(states[first.id], .off)
+        XCTAssertEqual(states[leaf.id], .on)
+    }
+
     func testRestoredTagSnapshotKeepsFinderMappingForNewVideos() async throws {
         let fixture = try DatabaseFixture()
         defer { fixture.remove() }
