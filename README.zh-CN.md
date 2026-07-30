@@ -12,6 +12,10 @@ FileFacet 是一款原生、以本地数据为基础的 macOS 视频标签管理
 
 > FileFacet 支持英文和简体中文，并跟随 macOS 中为该 App 设置的语言。
 
+<p align="center">
+  <img src="docs/assets/readme/filefacet-video-tag-manager.png" alt="FileFacet macOS 本地视频标签管理器，展示层级标签树、可搜索视频网格和批量标签编辑">
+</p>
+
 ## FileFacet 适合谁
 
 FileFacet 面向在本地保存视频，并希望灵活整理视频且保持现有文件夹结构的用户：
