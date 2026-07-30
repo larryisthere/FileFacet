@@ -190,6 +190,8 @@
     .demo-bar span { padding: 0 6px; color: rgba(255,255,255,.66); font-size: 10px; }
     .demo-bar button { height: 25px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: #fff; font-size: 11px; }
     .demo-bar button:hover { background: rgba(255,255,255,.14); }
+    .demo-bar a { display: inline-flex; height: 25px; align-items: center; padding: 0 10px; border-radius: 5px; color: #fff; font-size: 11px; text-decoration: none; white-space: nowrap; }
+    .demo-bar a:hover { background: rgba(255,255,255,.14); }
   </style>
 </head>
 <body>
@@ -284,7 +286,7 @@
     </section>
   </main>
 
-  <nav class="demo-bar" aria-label="原型演示控制"><span>原型操作</span><button id="makeDraft">模拟勾选</button><button id="tryNewTag">演示新建</button><button id="resetDemo">重置</button></nav>
+  <nav class="demo-bar" aria-label="原型演示控制"><span>原型操作</span><button id="makeDraft">模拟勾选</button><button id="tryNewTag">演示新建</button><button id="resetDemo">重置</button><span>关联原型</span><a href="../folder-structure-tags/index.html">目录标签导入</a><a href="../manual-video-import/index.html">基础导入</a></nav>
 
   <script>
     const initialVideos = [

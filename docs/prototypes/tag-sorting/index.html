@@ -189,6 +189,8 @@
     .demo-button { min-height: 28px; padding: 4px 11px; border: 0; border-radius: 6px; background: transparent; }
     .demo-button:hover { background: var(--hover); }
     .demo-button.active { color: #fff; background: var(--accent); }
+    .demo-link { min-height: 28px; padding: 4px 11px; border-radius: 6px; color: inherit; font-size: 12px; text-decoration: none; white-space: nowrap; }
+    .demo-link:hover { background: var(--hover); }
   </style>
 </head>
 <body>
@@ -273,6 +275,8 @@
     <button class="demo-button active" data-demo-mode="custom">自定义</button>
     <button class="demo-button" data-demo-mode="name">按名称</button>
     <button class="demo-button" data-demo-mode="count">按数量 ↓</button>
+    <span class="demo-label">关联原型</span>
+    <a class="demo-link" href="../folder-structure-tags/index.html">目录标签导入</a>
   </nav>
 
   <script>

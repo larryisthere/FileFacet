@@ -568,6 +568,8 @@
     .demo-button { height: 26px; padding: 0 9px; border-radius: 6px; background: transparent; color: white; font-size: 11px; }
     .demo-button:hover { background: rgba(255,255,255,.12); }
     .demo-button.active { background: rgba(255,255,255,.2); }
+    .demo-link { display: inline-flex; height: 26px; align-items: center; padding: 0 9px; border-radius: 6px; color: white; font-size: 11px; text-decoration: none; white-space: nowrap; }
+    .demo-link:hover { background: rgba(255,255,255,.12); }
     .demo-separator { width: 1px; height: 18px; background: rgba(255,255,255,.22); }
 
     @media (max-width: 1080px) {
@@ -796,6 +798,10 @@
     <button class="demo-button" id="simulateMove">模拟移动</button>
     <button class="demo-button" id="simulateDelete">模拟原文件删除</button>
     <button class="demo-button" id="resetDemo">重置</button>
+    <span class="demo-separator"></span>
+    <span class="demo-label">关联原型</span>
+    <a class="demo-link" href="../folder-structure-tags/index.html">目录标签导入</a>
+    <a class="demo-link" href="../deferred-tag-editing/index.html">标签编辑</a>
   </nav>
 
   <script>
