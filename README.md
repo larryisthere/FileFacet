@@ -31,6 +31,7 @@ FileFacet is designed for people who keep videos locally and want a flexible way
 - **Folder structure to tags** — optionally turn nested folders into hierarchical tags while importing, with control over whether each selected folder becomes a root tag.
 - **Offline external libraries** — keep browsing, searching, and tagging indexed videos while an external drive is disconnected, then restore file access automatically when it reconnects.
 - **Hierarchical video tags** — build multi-level tag trees, batch-edit assignments, merge tags, add colors, and organize tags with drag and drop.
+- **Smart filters and collections** — combine tags, filename, dates, media properties, and sorting, then save a reusable Smart Collection with live results.
 - **Files stay where they are** — FileFacet reads original videos without moving, renaming, modifying, or deleting them.
 - **Local-first and private** — the library index, tags, access permissions, and thumbnails stay on your Mac. FileFacet makes no network requests by default.
 - **Native macOS workflow** — use Quick Look, open videos in your default player, reveal files in Finder, and protect the library with optional system authentication.
@@ -42,8 +43,9 @@ If FileFacet fits your workflow, [star the repository](https://github.com/larryi
 1. Choose **File > Import Videos and Folders…** or drag videos and folders into FileFacet.
 2. For folder imports, choose direct import or create hierarchical tags from the directory structure. FileFacet can remember this preference.
 3. Existing Finder tags are imported once when a video first enters the library.
-4. Create hierarchical tags, apply them to one or many videos, and filter the library by tag or filename.
-5. Preview with Quick Look, open a video in your default player, or reveal it in Finder.
+4. Create hierarchical tags, apply them to one or many videos, and combine filename, tag, date, duration, file-size, or resolution filters.
+5. Save a useful combination as a Smart Collection, or keep it as a temporary view.
+6. Preview with Quick Look, open a video in your default player, or reveal it in Finder.
 
 Repeated imports are safe: the same file keeps a single library record, including when parent folders, child folders, and individual videos overlap.
 
@@ -60,9 +62,12 @@ Repeated imports are safe: the same file keeps a single library record, includin
 
 ### Find and browse
 
-- Filename search
+- Temporary filename search with `Command-F`
+- Combined filename, tag, untagged, date, duration, file-size, and resolution filters
+- Visible all/any condition relationships that remain within the selected category or tag scope
+- Sorting by filename, dates, duration, file size, or resolution
+- Saved Smart Collections with live counts, preview, revert, update, save-as, rename, and deletion
 - Recursive parent-tag filtering
-- Multi-tag AND filtering
 - Untagged and recently added collections
 - A conditional Offline collection for videos whose external drive is disconnected
 - Video thumbnails plus grouped file, video-codec, and audio-codec source information

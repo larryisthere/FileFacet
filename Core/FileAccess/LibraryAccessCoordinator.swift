@@ -116,15 +116,20 @@ final class LibraryAccessCoordinator {
     private var maintenanceDebounceTask: Task<Void, Never>?
     private var volumeAvailabilityTask: Task<Void, Never>?
     private var mediaTask: Task<Void, Never>?
+    private var mediaFactsRefreshTask: Task<Void, Never>?
+    private var mediaFactsRefreshRevision = 0
     private var artifactCleanupTask: Task<Void, Never>?
     private var pendingMediaVideos: [String: VideoRecord] = [:]
     private var queryTask: Task<Void, Never>?
+    private var smartCollectionTask: Task<Void, Never>?
     private var tagMutationTask: Task<Void, Never>?
     private var pendingTagMutationCount = 0
     private var tagStateRevision = 0
     private var tags: [TagRecord] = []
+    private var smartCollections: [SmartCollectionRecord] = []
     private var currentFilter: LibraryFilter = .all
     private var currentSearch = ""
+    private var currentRule = LibraryQueryRule.standard
 
     var onVideosChanged: (([VideoRecord]) -> Void)?
     var onSidebarFilterCountsChanged: ((SidebarFilterCounts) -> Void)?
@@ -132,6 +137,7 @@ final class LibraryAccessCoordinator {
     var onVideoChanged: ((VideoRecord) -> Void)?
     var onImportStateChanged: ((LibraryImportState) -> Void)?
     var onTagsChanged: (([TagRecord]) -> Void)?
+    var onSmartCollectionsChanged: (([SmartCollectionRecord]) -> Void)?
     var onTagAssignmentsChanged: (() -> Void)?
     var onError: ((String) -> Void)?
     var onOperationError: ((String) -> Void)?
@@ -494,14 +500,97 @@ final class LibraryAccessCoordinator {
         }
     }
 
-    func applyFilter(_ filter: LibraryFilter) {
-        currentFilter = filter
-        refreshVisibleVideos()
+    func applyQuery(_ query: LibraryQueryRequest, debounceSearch: Bool = false) {
+        currentFilter = query.baseFilter
+        currentSearch = query.temporaryFilenameSearch
+        currentRule = query.rule.normalized()
+        refreshVisibleVideos(
+            debounceNanoseconds: debounceSearch ? 150_000_000 : 0
+        )
     }
 
-    func applySearch(_ searchText: String) {
-        currentSearch = searchText
-        refreshVisibleVideos(debounceNanoseconds: 150_000_000)
+    func createSmartCollection(
+        name: String,
+        rule: LibraryQueryRule,
+        completion: @escaping (SmartCollectionRecord?) -> Void
+    ) {
+        let now = Date()
+        let nextOrder = (smartCollections.map(\.sortOrder).max() ?? -1) + 1
+        persistSmartCollection(
+            SmartCollectionRecord(
+                id: UUID().uuidString,
+                libraryID: LibraryRecord.primaryID,
+                name: name,
+                rule: rule.normalized(),
+                sortOrder: nextOrder,
+                createdAt: now,
+                updatedAt: now
+            ),
+            completion: completion
+        )
+    }
+
+    func updateSmartCollection(
+        id: String,
+        name: String? = nil,
+        rule: LibraryQueryRule? = nil,
+        completion: @escaping (SmartCollectionRecord?) -> Void
+    ) {
+        guard var record = smartCollections.first(where: { $0.id == id }) else {
+            completion(nil)
+            return
+        }
+        if let name { record.name = name }
+        if let rule { record.rule = rule.normalized() }
+        record.updatedAt = Date()
+        persistSmartCollection(record, completion: completion)
+    }
+
+    func deleteSmartCollection(id: String, completion: @escaping (Bool) -> Void) {
+        let previousTask = smartCollectionTask
+        smartCollectionTask = Task { [weak self] in
+            _ = await previousTask?.value
+            guard let self else {
+                completion(false)
+                return
+            }
+            do {
+                try await database.deleteSmartCollection(id: id)
+                try await refreshSmartCollections(libraryID: LibraryRecord.primaryID)
+                completion(true)
+            } catch {
+                AppLogger.database.error(
+                    "Smart collection deletion failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                )
+                onOperationError?(String(localized: .errorDatabaseOperation))
+                completion(false)
+            }
+        }
+    }
+
+    private func persistSmartCollection(
+        _ record: SmartCollectionRecord,
+        completion: @escaping (SmartCollectionRecord?) -> Void
+    ) {
+        let previousTask = smartCollectionTask
+        smartCollectionTask = Task { [weak self] in
+            _ = await previousTask?.value
+            guard let self else {
+                completion(nil)
+                return
+            }
+            do {
+                try await database.saveSmartCollection(record)
+                try await refreshSmartCollections(libraryID: LibraryRecord.primaryID)
+                completion(smartCollections.first(where: { $0.id == record.id }))
+            } catch {
+                AppLogger.database.error(
+                    "Smart collection persistence failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                )
+                onOperationError?(String(localized: .errorDatabaseOperation))
+                completion(nil)
+            }
+        }
     }
 
     func refreshVolumeAvailability(interruptMediaProcessing: Bool) {
@@ -1162,6 +1251,7 @@ final class LibraryAccessCoordinator {
                     try Task.checkCancellation()
                     if let updated = try await database.updateMediaInfo(videoID: video.id, result: result) {
                         onVideoChanged?(presentedVideo(updated))
+                        scheduleMediaFactsRefresh()
                     } else if let thumbnailID = result.thumbnailID {
                         try? await mediaService.removeThumbnails(identifiers: [thumbnailID])
                     }
@@ -1175,9 +1265,46 @@ final class LibraryAccessCoordinator {
         }
     }
 
+    private func scheduleMediaFactsRefresh() {
+        mediaFactsRefreshTask?.cancel()
+        mediaFactsRefreshRevision += 1
+        let revision = mediaFactsRefreshRevision
+        mediaFactsRefreshTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 300_000_000)
+                guard let self, mediaFactsRefreshRevision == revision else { return }
+                try await refreshVisibleVideosNow()
+            } catch is CancellationError {
+                return
+            } catch {
+                AppLogger.database.error(
+                    "Media fact refresh failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                )
+            }
+            guard let self, mediaFactsRefreshRevision == revision else { return }
+            mediaFactsRefreshTask = nil
+        }
+    }
+
     private func refreshTags(libraryID: String) async throws {
         tags = try await database.fetchTags(libraryID: libraryID)
         onTagsChanged?(tags)
+    }
+
+    private func refreshSmartCollections(libraryID: String) async throws {
+        smartCollections = try await database.fetchSmartCollections(libraryID: libraryID)
+        for index in smartCollections.indices {
+            let videos = try await database.fetchVideos(
+                libraryID: libraryID,
+                query: LibraryQueryRequest(
+                    baseFilter: .all,
+                    temporaryFilenameSearch: "",
+                    rule: smartCollections[index].rule
+                )
+            )
+            smartCollections[index].videoCount = videos.count
+        }
+        onSmartCollectionsChanged?(smartCollections)
     }
 
     private func mutateTags(
@@ -1243,14 +1370,17 @@ final class LibraryAccessCoordinator {
         let database = self.database
         let filter = currentFilter
         let search = currentSearch
+        let rule = currentRule
         queryTask = Task {
             do {
                 if debounceNanoseconds > 0 { try await Task.sleep(nanoseconds: debounceNanoseconds) }
-                let databaseFilter: LibraryFilter = filter == .offline ? .all : filter
                 let records = try await database.fetchVideos(
                     libraryID: LibraryRecord.primaryID,
-                    filter: databaseFilter,
-                    searchText: search
+                    query: LibraryQueryRequest(
+                        baseFilter: filter == .offline ? .all : filter,
+                        temporaryFilenameSearch: search,
+                        rule: rule
+                    )
                 )
                 try Task.checkCancellation()
                 let videos = presentedVideos(records)
@@ -1269,12 +1399,15 @@ final class LibraryAccessCoordinator {
     }
 
     private func refreshVisibleVideosNow() async throws {
+        queryTask?.cancel()
         let filter = currentFilter
-        let databaseFilter: LibraryFilter = filter == .offline ? .all : filter
         let records = try await database.fetchVideos(
             libraryID: LibraryRecord.primaryID,
-            filter: databaseFilter,
-            searchText: currentSearch
+            query: LibraryQueryRequest(
+                baseFilter: filter == .offline ? .all : filter,
+                temporaryFilenameSearch: currentSearch,
+                rule: currentRule
+            )
         )
         let videos = presentedVideos(records)
         onVideosChanged?(
@@ -1283,6 +1416,7 @@ final class LibraryAccessCoordinator {
                 : videos
         )
         try await refreshSidebarFilterCounts()
+        try await refreshSmartCollections(libraryID: LibraryRecord.primaryID)
     }
 
     private func refreshSidebarFilterCounts() async throws {

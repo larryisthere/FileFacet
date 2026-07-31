@@ -56,6 +56,7 @@ struct SidebarFilterCounts: Equatable, Sendable {
 
 enum SidebarGroupKind {
     case library
+    case smartCollections
     case tags
 }
 
@@ -94,6 +95,14 @@ final class SidebarPlaceholderNode {
 }
 
 final class SidebarDraftTagNode {}
+
+final class SmartCollectionNode {
+    let collection: SmartCollectionRecord
+
+    init(collection: SmartCollectionRecord) {
+        self.collection = collection
+    }
+}
 
 final class TagNode {
     let tag: TagRecord

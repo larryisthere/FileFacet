@@ -8,10 +8,13 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     private let outlineView = NSOutlineView()
     private var tags: [TagRecord] = []
+    private var smartCollections: [SmartCollectionRecord] = []
     private var filterCounts = SidebarFilterCounts.zero
     private var groups: [SidebarGroupNode] = []
-    private let onFilterChanged: (LibraryFilter) -> Void
-    private var onSelectionTitleChanged: (String, TagRecord?) -> Void
+    private var onFilterChanged: (LibraryFilter) -> Void
+    private var onSmartCollectionSelected: (SmartCollectionRecord) -> Void
+    private var onRenameSmartCollection: (SmartCollectionRecord, String) -> Void
+    private var onDeleteSmartCollection: (SmartCollectionRecord) -> Void
     private let onCreateTag: (String, String?) -> Void
     private let onRenameTag: (TagRecord, String) -> Void
     private let onDeleteTag: (TagRecord) -> Void
@@ -23,15 +26,17 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var tagGroupExpansionPreference = true
     private var pendingRootTagDraft: SidebarDraftTagNode?
     private var isResolvingRootTagDraft = false
-    private var editingTagID: String?
-    private var editingTagName: String?
-    private var hasEditedTagName = false
-    private var isResolvingTagRename = false
+    private var inlineRenameTarget: SidebarInlineRenameTarget?
+    private var inlineRenameName: String?
+    private var hasEditedInlineRenameName = false
+    private var isResolvingInlineRename = false
     private var tagSortMode: TagSortMode
 
     init(
         onFilterChanged: @escaping (LibraryFilter) -> Void,
-        onSelectionTitleChanged: @escaping (String, TagRecord?) -> Void,
+        onSmartCollectionSelected: @escaping (SmartCollectionRecord) -> Void,
+        onRenameSmartCollection: @escaping (SmartCollectionRecord, String) -> Void,
+        onDeleteSmartCollection: @escaping (SmartCollectionRecord) -> Void,
         onCreateTag: @escaping (String, String?) -> Void,
         onRenameTag: @escaping (TagRecord, String) -> Void,
         onDeleteTag: @escaping (TagRecord) -> Void,
@@ -41,7 +46,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         onAssignVideos: @escaping (TagRecord, [String]) -> Void
     ) {
         self.onFilterChanged = onFilterChanged
-        self.onSelectionTitleChanged = onSelectionTitleChanged
+        self.onSmartCollectionSelected = onSmartCollectionSelected
+        self.onRenameSmartCollection = onRenameSmartCollection
+        self.onDeleteSmartCollection = onDeleteSmartCollection
         self.onCreateTag = onCreateTag
         self.onRenameTag = onRenameTag
         self.onDeleteTag = onDeleteTag
@@ -76,6 +83,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         outlineView.backgroundColor = .clear
         outlineView.dataSource = self
         outlineView.delegate = self
+        outlineView.target = self
+        outlineView.doubleAction = #selector(beginInlineRenameFromDoubleClick(_:))
         outlineView.allowsMultipleSelection = true
         outlineView.registerForDraggedTypes([Self.tagPasteboardType, Self.videoPasteboardType])
         outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
@@ -105,16 +114,31 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     func setTags(_ tags: [TagRecord]) {
         let selection = selectedItemKeys()
         self.tags = tags
-        if let editingTagID, tags.contains(where: { $0.id == editingTagID }) == false {
-            self.editingTagID = nil
-            editingTagName = nil
+        if case let .tag(tagID) = inlineRenameTarget,
+           tags.contains(where: { $0.id == tagID }) == false {
+            clearInlineRenameState()
         }
         rebuildNodes()
         loadViewIfNeeded()
         outlineView.reloadData()
         restoreExpansionState()
         restoreSelection(selection)
-        refocusTagRenameIfNeeded()
+        refocusInlineRenameIfNeeded()
+    }
+
+    func setSmartCollections(_ collections: [SmartCollectionRecord]) {
+        let selection = selectedItemKeys()
+        smartCollections = collections
+        if case let .smartCollection(collectionID) = inlineRenameTarget,
+           collections.contains(where: { $0.id == collectionID }) == false {
+            clearInlineRenameState()
+        }
+        rebuildNodes()
+        loadViewIfNeeded()
+        outlineView.reloadData()
+        restoreExpansionState()
+        restoreSelection(selection)
+        refocusInlineRenameIfNeeded()
     }
 
     func setFilterCounts(_ counts: SidebarFilterCounts) {
@@ -126,7 +150,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         outlineView.reloadData()
         restoreExpansionState()
         restoreSelection(selection)
-        refocusTagRenameIfNeeded()
+        refocusInlineRenameIfNeeded()
     }
 
     func selectFilter(_ filter: LibraryFilter) {
@@ -139,8 +163,26 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         isRestoringSelection = false
     }
 
-    func setSelectionTitleHandler(_ handler: @escaping (String, TagRecord?) -> Void) {
-        onSelectionTitleChanged = handler
+    func selectSmartCollection(id: String) {
+        loadViewIfNeeded()
+        guard let row = (0..<outlineView.numberOfRows).first(where: { row in
+            (outlineView.item(atRow: row) as? SmartCollectionNode)?.collection.id == id
+        }) else { return }
+        isRestoringSelection = true
+        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        isRestoringSelection = false
+    }
+
+    func setNavigationHandlers(
+        filter: @escaping (LibraryFilter) -> Void,
+        smartCollection: @escaping (SmartCollectionRecord) -> Void,
+        renameSmartCollection: @escaping (SmartCollectionRecord, String) -> Void,
+        deleteSmartCollection: @escaping (SmartCollectionRecord) -> Void
+    ) {
+        onFilterChanged = filter
+        onSmartCollectionSelected = smartCollection
+        onRenameSmartCollection = renameSmartCollection
+        onDeleteSmartCollection = deleteSmartCollection
     }
 
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
@@ -171,7 +213,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
-        item is SidebarFilterNode || item is TagNode
+        item is SidebarFilterNode || item is SmartCollectionNode || item is TagNode
     }
 
     func outlineView(
@@ -180,14 +222,19 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         item: Any
     ) -> Bool {
         if item is SidebarDraftTagNode { return true }
-        guard let tag = item as? TagNode else { return false }
-        return tag.tag.id == editingTagID
+        if let smartCollection = item as? SmartCollectionNode {
+            return inlineRenameTarget == .smartCollection(smartCollection.collection.id)
+        }
+        if let tag = item as? TagNode { return inlineRenameTarget == .tag(tag.tag.id) }
+        return false
     }
 
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
         let rowView = SidebarCountRowView()
         if let filter = item as? SidebarFilterNode {
             rowView.configure(count: filter.videoCount)
+        } else if let smartCollection = item as? SmartCollectionNode {
+            rowView.configure(count: smartCollection.collection.videoCount)
         } else if let tag = item as? TagNode {
             rowView.configure(count: tag.tag.videoCount)
         } else {
@@ -199,19 +246,20 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     func outlineViewSelectionDidChange(_ notification: Notification) {
         guard isRestoringSelection == false else { return }
         let selectedItems = outlineView.selectedRowIndexes.map { outlineView.item(atRow: $0) }
+        if let smartCollection = selectedItems.compactMap({ $0 as? SmartCollectionNode }).first {
+            onSmartCollectionSelected(smartCollection.collection)
+            return
+        }
         let selectedTags = selectedItems.compactMap { ($0 as? TagNode)?.tag }
         if selectedTags.count == 1, let tag = selectedTags.first {
-            onSelectionTitleChanged(tag.name, tag)
             onFilterChanged(.tag(tag.id))
             return
         }
         if selectedTags.count > 1 {
-            onSelectionTitleChanged(String(localized: .selectionTagCount(selectedTags.count)), nil)
             onFilterChanged(.tags(selectedTags.map(\.id)))
             return
         }
         if let filter = selectedItems.compactMap({ $0 as? SidebarFilterNode }).first {
-            onSelectionTitleChanged(filter.title, nil)
             onFilterChanged(filter.filter)
         }
     }
@@ -263,31 +311,44 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         cell.textField?.target = nil
         cell.textField?.action = nil
         cell.textField?.delegate = nil
-        (cell.textField as? SidebarInlineTagTextField)?.onCancel = nil
         cell.imageView?.isHidden = false
         cell.imageView?.imageAlignment = .alignCenter
         cell.imageView?.contentTintColor = .secondaryLabelColor
+        cell.smartCollectionActionButton.isHidden = true
+        cell.smartCollectionActionButton.identifier = nil
+        cell.smartCollectionActionButton.target = nil
+        cell.smartCollectionActionButton.action = nil
 
         if let filter = item as? SidebarFilterNode {
             cell.textField?.stringValue = filter.title
             cell.imageView?.image = sidebarSymbol(named: filter.systemImageName, description: filter.title)
+        } else if let smartCollection = item as? SmartCollectionNode {
+            let name = smartCollection.collection.name
+            if inlineRenameTarget == .smartCollection(smartCollection.collection.id) {
+                cell.textField?.identifier = SidebarInlineTextField.renameIdentifier
+                cell.textField?.stringValue = inlineRenameName ?? name
+                configureInlineRenameField(cell.textField, action: #selector(commitInlineRename(_:)))
+            } else {
+                cell.textField?.stringValue = name
+            }
+            cell.imageView?.image = sidebarSymbol(
+                named: "line.3.horizontal.decrease.circle",
+                description: name
+            )
+            if inlineRenameTarget != .smartCollection(smartCollection.collection.id) {
+                cell.smartCollectionActionButton.isHidden = false
+                cell.smartCollectionActionButton.identifier = NSUserInterfaceItemIdentifier(
+                    smartCollection.collection.id
+                )
+                cell.smartCollectionActionButton.target = self
+                cell.smartCollectionActionButton.action = #selector(showSmartCollectionActions(_:))
+            }
         } else if let tag = item as? TagNode {
             let name = tag.tag.name
-            if tag.tag.id == editingTagID {
-                cell.textField?.identifier = SidebarInlineTagTextField.renameIdentifier
-                cell.textField?.stringValue = editingTagName ?? name
-                cell.textField?.isEditable = true
-                cell.textField?.isSelectable = true
-                cell.textField?.isBordered = true
-                cell.textField?.drawsBackground = true
-                cell.textField?.backgroundColor = .controlBackgroundColor
-                cell.textField?.focusRingType = .default
-                cell.textField?.target = self
-                cell.textField?.action = #selector(commitTagRename(_:))
-                cell.textField?.delegate = self
-                (cell.textField as? SidebarInlineTagTextField)?.onCancel = { [weak self] in
-                    self?.cancelTagRename()
-                }
+            if inlineRenameTarget == .tag(tag.tag.id) {
+                cell.textField?.identifier = SidebarInlineTextField.renameIdentifier
+                cell.textField?.stringValue = inlineRenameName ?? name
+                configureInlineRenameField(cell.textField, action: #selector(commitInlineRename(_:)))
             } else {
                 cell.textField?.stringValue = name
             }
@@ -295,7 +356,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.imageView?.imageAlignment = .alignRight
             cell.imageView?.contentTintColor = color(named: tag.tag.color) ?? .secondaryLabelColor
         } else if item is SidebarDraftTagNode {
-            cell.textField?.identifier = SidebarInlineTagTextField.draftIdentifier
+            cell.textField?.identifier = SidebarInlineTextField.draftIdentifier
             cell.textField?.stringValue = ""
             cell.textField?.placeholderString = String(localized: .tagCreateTitle)
             cell.textField?.isEditable = true
@@ -307,9 +368,6 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.textField?.target = self
             cell.textField?.action = #selector(commitRootTagDraft(_:))
             cell.textField?.delegate = self
-            (cell.textField as? SidebarInlineTagTextField)?.onCancel = { [weak self] in
-                self?.cancelRootTagDraft()
-            }
             cell.imageView?.image = tagDotSymbol(description: String(localized: .tagCreateTitle))
             cell.imageView?.imageAlignment = .alignRight
             cell.imageView?.contentTintColor = .controlAccentColor
@@ -324,7 +382,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
         guard let tag = item as? TagNode else { return nil }
         let draggedTags: [TagRecord]
-        if let row = rowForTag(id: tag.tag.id), outlineView.selectedRowIndexes.contains(row) {
+        if let row = row(for: .tag(tag.tag.id)), outlineView.selectedRowIndexes.contains(row) {
             draggedTags = topLevelTags(
                 from: outlineView.selectedRowIndexes.compactMap { selectedRow in
                     (outlineView.item(atRow: selectedRow) as? TagNode)?.tag
@@ -411,14 +469,55 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         return true
     }
 
+    private func configureInlineRenameField(_ field: NSTextField?, action: Selector) {
+        field?.isEditable = true
+        field?.isSelectable = true
+        field?.isBordered = true
+        field?.drawsBackground = true
+        field?.backgroundColor = .controlBackgroundColor
+        field?.focusRingType = .default
+        field?.target = self
+        field?.action = action
+        field?.delegate = self
+    }
+
     private func canDropTagsInCurrentSortMode(_ tagIDs: Set<String>, toParentID parentID: String?) -> Bool {
         guard tagSortMode != .custom else { return true }
         let tagsByID = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, $0) })
         return tagIDs.allSatisfy { tagsByID[$0]?.parentID != parentID }
     }
 
+    @objc private func beginInlineRenameFromDoubleClick(_ sender: NSOutlineView) {
+        guard sender.clickedRow >= 0 else { return }
+        if let collection = (sender.item(atRow: sender.clickedRow) as? SmartCollectionNode)?.collection {
+            beginRenamingSmartCollection(collection)
+        } else if let tag = (sender.item(atRow: sender.clickedRow) as? TagNode)?.tag {
+            beginRenamingTag(tag)
+        }
+    }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        if let smartCollection = clickedSmartCollection() {
+            let renameItem = NSMenuItem(
+                title: String(localized: "smartCollection.rename.action", defaultValue: "Rename"),
+                action: #selector(renameSmartCollection(_:)),
+                keyEquivalent: ""
+            )
+            renameItem.target = self
+            renameItem.representedObject = smartCollection
+            let deleteItem = NSMenuItem(
+                title: String(localized: "smartCollection.delete.action", defaultValue: "Delete"),
+                action: #selector(deleteSmartCollection(_:)),
+                keyEquivalent: ""
+            )
+            deleteItem.target = self
+            deleteItem.representedObject = smartCollection
+            menu.addItem(renameItem)
+            menu.addItem(.separator())
+            menu.addItem(deleteItem)
+            return
+        }
         guard let tag = clickedTag() else {
             guard canCreateRootTagFromContextMenu else { return }
             let item = NSMenuItem(
@@ -536,10 +635,20 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if tagChildren.isEmpty {
             tagChildren = [SidebarPlaceholderNode(title: String(localized: .sidebarNoTags))]
         }
-        groups = [
-            library,
-            SidebarGroupNode(kind: .tags, title: String(localized: .sidebarTags), children: tagChildren),
-        ]
+        groups = [library]
+        if smartCollections.isEmpty == false {
+            groups.append(SidebarGroupNode(
+                kind: .smartCollections,
+                title: String(
+                    localized: "smartCollection.group",
+                    defaultValue: "Smart Collections"
+                ),
+                children: smartCollections.map(SmartCollectionNode.init)
+            ))
+        }
+        groups.append(
+            SidebarGroupNode(kind: .tags, title: String(localized: .sidebarTags), children: tagChildren)
+        )
     }
 
     private func sortTagNodes(_ nodes: inout [TagNode]) {
@@ -561,8 +670,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     func beginCreatingRootTag() {
-        guard resolveActiveTagRenameIfNeeded() else {
-            focusTagRename(selectAll: true)
+        guard resolveActiveInlineRenameIfNeeded() else {
+            focusInlineRename(selectAll: true)
             return
         }
         guard canBeginCreatingRootTag else {
@@ -679,22 +788,40 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     func controlTextDidEndEditing(_ notification: Notification) {
         guard let field = notification.object as? NSTextField else { return }
         switch field.identifier {
-        case SidebarInlineTagTextField.draftIdentifier:
+        case SidebarInlineTextField.draftIdentifier:
             resolveRootTagDraft(name: field.stringValue)
-        case SidebarInlineTagTextField.renameIdentifier:
-            resolveTagRename(name: field.stringValue)
+        case SidebarInlineTextField.renameIdentifier:
+            resolveInlineRename(name: field.stringValue, endEditing: false)
         default:
             break
         }
     }
 
     func controlTextDidChange(_ notification: Notification) {
-        guard let field = notification.object as? NSTextField,
-              field.identifier == SidebarInlineTagTextField.renameIdentifier else { return }
-        editingTagName = field.stringValue
-        hasEditedTagName = true
+        guard let field = notification.object as? NSTextField else { return }
+        guard field.identifier == SidebarInlineTextField.renameIdentifier else { return }
+        inlineRenameName = field.stringValue
+        hasEditedInlineRenameName = true
         field.toolTip = nil
         field.textColor = .labelColor
+    }
+
+    func control(
+        _ control: NSControl,
+        textView: NSTextView,
+        doCommandBy commandSelector: Selector
+    ) -> Bool {
+        guard commandSelector == #selector(NSResponder.cancelOperation(_:)),
+              let field = control as? NSTextField else { return false }
+        switch field.identifier {
+        case SidebarInlineTextField.draftIdentifier:
+            cancelRootTagDraft()
+        case SidebarInlineTextField.renameIdentifier:
+            cancelInlineRename()
+        default:
+            return false
+        }
+        return true
     }
 
     private func cancelRootTagDraft() {
@@ -718,79 +845,118 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         onCreateTag(cleanName, nil)
     }
 
-    private func beginRenamingTag(_ tag: TagRecord) {
-        if pendingRootTagDraft != nil { cancelRootTagDraft() }
-        if editingTagID == tag.id {
-            focusTagRename(selectAll: true)
-            return
-        }
-        guard resolveActiveTagRenameIfNeeded() else {
-            focusTagRename(selectAll: true)
-            return
-        }
+    private func beginRenamingSmartCollection(_ collection: SmartCollectionRecord) {
+        beginInlineRename(.smartCollection(collection.id), currentName: collection.name)
+    }
 
-        editingTagID = tag.id
-        editingTagName = tag.name
-        hasEditedTagName = false
+    private func beginRenamingTag(_ tag: TagRecord) {
         tagGroupExpansionPreference = true
         restoreExpansionState()
+        beginInlineRename(.tag(tag.id), currentName: tag.name)
+    }
 
-        if let row = rowForTag(id: tag.id) {
+    private func beginInlineRename(_ target: SidebarInlineRenameTarget, currentName: String) {
+        if pendingRootTagDraft != nil { cancelRootTagDraft() }
+        if inlineRenameTarget == target {
+            focusInlineRename(selectAll: true)
+            return
+        }
+        guard resolveActiveInlineRenameIfNeeded() else {
+            focusInlineRename(selectAll: true)
+            return
+        }
+
+        inlineRenameTarget = target
+        inlineRenameName = currentName
+        hasEditedInlineRenameName = false
+        if let row = row(for: target) {
             outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             outlineView.reloadItem(outlineView.item(atRow: row), reloadChildren: false)
         }
         DispatchQueue.main.async { [weak self] in
-            self?.focusTagRename(selectAll: true)
+            self?.focusInlineRename(selectAll: true)
         }
     }
 
-    @objc private func commitTagRename(_ sender: NSTextField) {
-        resolveTagRename(name: sender.stringValue)
+    @objc private func commitInlineRename(_ sender: NSTextField) {
+        resolveInlineRename(name: sender.stringValue, endEditing: true)
     }
 
-    private func resolveTagRename(name: String) {
-        guard let tagID = editingTagID, isResolvingTagRename == false else { return }
-        isResolvingTagRename = true
-        editingTagName = name
-        view.window?.makeFirstResponder(outlineView)
+    private func resolveInlineRename(name: String, endEditing: Bool) {
+        guard let target = inlineRenameTarget, isResolvingInlineRename == false else { return }
+        isResolvingInlineRename = true
+        inlineRenameName = name
+        if endEditing { view.window?.makeFirstResponder(outlineView) }
 
-        guard let tag = tags.first(where: { $0.id == tagID }) else {
-            finishTagRename(reloadTagID: tagID)
-            return
-        }
-        guard hasEditedTagName else {
-            finishTagRename(reloadTagID: tagID)
+        guard hasEditedInlineRenameName else {
+            finishInlineRename(target)
             return
         }
 
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard cleanName.isEmpty == false else {
-            keepTagRenameActive(message: String(localized: .tagValidationEmpty))
-            return
-        }
-        let hasSiblingWithSameName = tags.contains { candidate in
-            candidate.id != tag.id
-                && candidate.parentID == tag.parentID
-                && candidate.name.compare(
-                    cleanName,
-                    options: [.caseInsensitive, .diacriticInsensitive]
-                ) == .orderedSame
-        }
-        guard hasSiblingWithSameName == false else {
-            keepTagRenameActive(message: String(localized: .tagValidationDuplicate))
+            keepInlineRenameActive(message: emptyNameMessage(for: target))
             return
         }
 
-        finishTagRename(reloadTagID: tagID)
-        if cleanName != tag.name { onRenameTag(tag, cleanName) }
+        switch target {
+        case let .smartCollection(collectionID):
+            guard let collection = smartCollections.first(where: { $0.id == collectionID }) else {
+                finishInlineRename(target)
+                return
+            }
+            let normalizedName = normalizedSmartCollectionName(cleanName)
+            let hasDuplicateName = smartCollections.contains { candidate in
+                candidate.id != collection.id
+                    && normalizedSmartCollectionName(candidate.name) == normalizedName
+            }
+            guard hasDuplicateName == false else {
+                keepInlineRenameActive(message: String(
+                    localized: "smartCollection.name.duplicate",
+                    defaultValue: "A smart collection with this name already exists."
+                ))
+                return
+            }
+            finishInlineRename(target)
+            if cleanName != collection.name { onRenameSmartCollection(collection, cleanName) }
+
+        case let .tag(tagID):
+            guard let tag = tags.first(where: { $0.id == tagID }) else {
+                finishInlineRename(target)
+                return
+            }
+            let hasSiblingWithSameName = tags.contains { candidate in
+                candidate.id != tag.id
+                    && candidate.parentID == tag.parentID
+                    && candidate.name.compare(
+                        cleanName,
+                        options: [.caseInsensitive, .diacriticInsensitive]
+                    ) == .orderedSame
+            }
+            guard hasSiblingWithSameName == false else {
+                keepInlineRenameActive(message: String(localized: .tagValidationDuplicate))
+                return
+            }
+            finishInlineRename(target)
+            if cleanName != tag.name { onRenameTag(tag, cleanName) }
+        }
     }
 
-    private func keepTagRenameActive(message: String) {
+    private func emptyNameMessage(for target: SidebarInlineRenameTarget) -> String {
+        switch target {
+        case .smartCollection:
+            String(localized: "smartCollection.name.empty", defaultValue: "Enter a name.")
+        case .tag:
+            String(localized: .tagValidationEmpty)
+        }
+    }
+
+    private func keepInlineRenameActive(message: String) {
         NSSound.beep()
-        isResolvingTagRename = false
+        isResolvingInlineRename = false
         DispatchQueue.main.async { [weak self] in
             guard let self,
-                  let field = self.tagRenameField() else { return }
+                  let field = self.inlineRenameField() else { return }
             field.toolTip = message
             field.textColor = .systemRed
             self.view.window?.makeFirstResponder(field)
@@ -798,49 +964,51 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         }
     }
 
-    private func cancelTagRename() {
-        guard let tagID = editingTagID, isResolvingTagRename == false else { return }
-        isResolvingTagRename = true
+    private func cancelInlineRename() {
+        guard let target = inlineRenameTarget, isResolvingInlineRename == false else { return }
+        isResolvingInlineRename = true
         view.window?.makeFirstResponder(outlineView)
-        finishTagRename(reloadTagID: tagID)
+        finishInlineRename(target)
     }
 
-    private func resolveActiveTagRenameIfNeeded() -> Bool {
-        guard editingTagID != nil else { return true }
-        guard let field = tagRenameField() else {
-            cancelTagRename()
+    private func resolveActiveInlineRenameIfNeeded() -> Bool {
+        guard inlineRenameTarget != nil else { return true }
+        guard let field = inlineRenameField() else {
+            cancelInlineRename()
             return true
         }
-        resolveTagRename(name: field.stringValue)
-        return editingTagID == nil
+        resolveInlineRename(name: field.stringValue, endEditing: true)
+        return inlineRenameTarget == nil
     }
 
-    private func finishTagRename(reloadTagID tagID: String) {
-        editingTagID = nil
-        editingTagName = nil
-        hasEditedTagName = false
-        if let row = rowForTag(id: tagID) {
+    private func finishInlineRename(_ target: SidebarInlineRenameTarget) {
+        clearInlineRenameState()
+        if let row = row(for: target) {
             outlineView.reloadItem(outlineView.item(atRow: row), reloadChildren: false)
         }
-        isResolvingTagRename = false
     }
 
-    private func refocusTagRenameIfNeeded() {
-        guard editingTagID != nil else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.focusTagRename(selectAll: false)
-        }
+    private func clearInlineRenameState() {
+        inlineRenameTarget = nil
+        inlineRenameName = nil
+        hasEditedInlineRenameName = false
+        isResolvingInlineRename = false
     }
 
-    private func focusTagRename(selectAll: Bool) {
-        guard let editingTagID,
-              let row = rowForTag(id: editingTagID) else { return }
+    private func refocusInlineRenameIfNeeded() {
+        guard inlineRenameTarget != nil else { return }
+        DispatchQueue.main.async { [weak self] in self?.focusInlineRename(selectAll: false) }
+    }
+
+    private func focusInlineRename(selectAll: Bool) {
+        guard let inlineRenameTarget,
+              let row = row(for: inlineRenameTarget) else { return }
         outlineView.editColumn(0, row: row, with: nil, select: selectAll)
     }
 
-    private func tagRenameField() -> NSTextField? {
-        guard let editingTagID,
-              let row = rowForTag(id: editingTagID),
+    private func inlineRenameField() -> NSTextField? {
+        guard let inlineRenameTarget,
+              let row = row(for: inlineRenameTarget),
               let cell = outlineView.view(
                 atColumn: 0,
                 row: row,
@@ -849,9 +1017,14 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         return cell.textField
     }
 
-    private func rowForTag(id: String) -> Int? {
+    private func row(for target: SidebarInlineRenameTarget) -> Int? {
         (0..<outlineView.numberOfRows).first { row in
-            (outlineView.item(atRow: row) as? TagNode)?.tag.id == id
+            switch target {
+            case let .smartCollection(collectionID):
+                (outlineView.item(atRow: row) as? SmartCollectionNode)?.collection.id == collectionID
+            case let .tag(tagID):
+                (outlineView.item(atRow: row) as? TagNode)?.tag.id == tagID
+            }
         }
     }
 
@@ -873,6 +1046,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         isRestoringSelection = false
     }
     private func selectionKey(for item: Any?) -> SidebarSelectionKey? {
+        if let smartCollection = item as? SmartCollectionNode {
+            return .smartCollection(smartCollection.collection.id)
+        }
         if let tag = item as? TagNode {
             return .tag(tag.tag.id)
         }
@@ -893,6 +1069,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         guard outlineView.clickedRow >= 0 else { return nil }
         return (outlineView.item(atRow: outlineView.clickedRow) as? TagNode)?.tag
     }
+    private func clickedSmartCollection() -> SmartCollectionRecord? {
+        guard outlineView.clickedRow >= 0 else { return nil }
+        return (outlineView.item(atRow: outlineView.clickedRow) as? SmartCollectionNode)?.collection
+    }
     private var canCreateRootTagFromContextMenu: Bool {
         guard outlineView.clickedRow >= 0 else { return true }
         if let group = outlineView.item(atRow: outlineView.clickedRow) as? SidebarGroupNode {
@@ -912,6 +1092,40 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
     @objc private func createRootTag() {
         beginCreatingRootTag()
+    }
+    @objc private func renameSmartCollection(_ sender: NSMenuItem) {
+        guard let collection = sender.representedObject as? SmartCollectionRecord else { return }
+        beginRenamingSmartCollection(collection)
+    }
+    @objc private func showSmartCollectionActions(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue,
+              let collection = smartCollections.first(where: { $0.id == id }) else { return }
+        let menu = NSMenu()
+        let rename = NSMenuItem(
+            title: String(localized: "smartCollection.rename.action", defaultValue: "Rename"),
+            action: #selector(renameSmartCollection(_:)),
+            keyEquivalent: ""
+        )
+        rename.target = self
+        rename.representedObject = collection
+        menu.addItem(rename)
+        let delete = NSMenuItem(
+            title: String(localized: "smartCollection.delete.action", defaultValue: "Delete"),
+            action: #selector(deleteSmartCollection(_:)),
+            keyEquivalent: ""
+        )
+        delete.target = self
+        delete.representedObject = collection
+        menu.addItem(delete)
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: sender.bounds.height + 4),
+            in: sender
+        )
+    }
+    @objc private func deleteSmartCollection(_ sender: NSMenuItem) {
+        guard let collection = sender.representedObject as? SmartCollectionRecord else { return }
+        onDeleteSmartCollection(collection)
     }
     @objc private func renameTag(_ sender: NSMenuItem) {
         guard let context = sender.representedObject as? TagActionContext else { return }
@@ -990,9 +1204,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private func makeItemCell(identifier: NSUserInterfaceItemIdentifier) -> SidebarItemCellView {
         let cell = SidebarItemCellView(); cell.identifier = identifier
         let imageView = NSImageView(); imageView.translatesAutoresizingMaskIntoConstraints = false; imageView.imageScaling = .scaleProportionallyDown
-        let textField = SidebarInlineTagTextField(); textField.translatesAutoresizingMaskIntoConstraints = false; textField.lineBreakMode = .byTruncatingTail
+        let textField = SidebarInlineTextField(); textField.translatesAutoresizingMaskIntoConstraints = false; textField.lineBreakMode = .byTruncatingTail
         textField.isEditable = false; textField.isSelectable = false; textField.isBordered = false; textField.drawsBackground = false
-        cell.addSubview(imageView); cell.addSubview(textField)
+        cell.addSubview(imageView); cell.addSubview(textField); cell.addSubview(cell.smartCollectionActionButton)
         cell.imageView = imageView; cell.textField = textField
         NSLayoutConstraint.activate([
             imageView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: -6),
@@ -1001,7 +1215,17 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             imageView.heightAnchor.constraint(equalToConstant: 16),
             textField.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 8),
             textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            textField.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -50),
+            textField.trailingAnchor.constraint(
+                lessThanOrEqualTo: cell.smartCollectionActionButton.leadingAnchor,
+                constant: -4
+            ),
+            cell.smartCollectionActionButton.trailingAnchor.constraint(
+                equalTo: cell.trailingAnchor,
+                constant: -(SidebarTagGroupCellView.trailingInset + SidebarTagGroupCellView.trailingColumnWidth)
+            ),
+            cell.smartCollectionActionButton.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            cell.smartCollectionActionButton.widthAnchor.constraint(equalToConstant: 22),
+            cell.smartCollectionActionButton.heightAnchor.constraint(equalToConstant: 22),
         ])
         return cell
     }
@@ -1012,10 +1236,38 @@ private enum SidebarSelectionKey: Hashable {
     case offline
     case untagged
     case recent
+    case smartCollection(String)
     case tag(String)
 }
 
-private final class SidebarItemCellView: NSTableCellView {}
+private enum SidebarInlineRenameTarget: Equatable {
+    case smartCollection(String)
+    case tag(String)
+}
+
+private final class SidebarItemCellView: NSTableCellView {
+    let smartCollectionActionButton: NSButton = {
+        let description = String(
+            localized: "smartCollection.actions",
+            defaultValue: "Smart collection actions"
+        )
+        let image = NSImage(
+            systemSymbolName: "ellipsis",
+            accessibilityDescription: description
+        )?.withSymbolConfiguration(.init(pointSize: 12, weight: .semibold)) ?? NSImage()
+        let button = NSButton(image: image, target: nil, action: nil)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.title = ""
+        button.imagePosition = .imageOnly
+        button.bezelStyle = .accessoryBarAction
+        button.isBordered = false
+        button.contentTintColor = .secondaryLabelColor
+        button.toolTip = description
+        button.setAccessibilityLabel(description)
+        button.isHidden = true
+        return button
+    }()
+}
 
 private final class SidebarCountRowView: NSTableRowView {
     private let countLabel = NSTextField(labelWithString: "")
@@ -1148,18 +1400,9 @@ private final class SidebarTagGroupCellView: NSTableCellView {
     }
 }
 
-private final class SidebarInlineTagTextField: NSTextField {
+private final class SidebarInlineTextField: NSTextField {
     static let draftIdentifier = NSUserInterfaceItemIdentifier("SidebarRootTagDraftField")
-    static let renameIdentifier = NSUserInterfaceItemIdentifier("SidebarTagRenameField")
-    var onCancel: (() -> Void)?
-
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 {
-            onCancel?()
-            return
-        }
-        super.keyDown(with: event)
-    }
+    static let renameIdentifier = NSUserInterfaceItemIdentifier("SidebarInlineRenameField")
 }
 
 private final class TagActionContext: NSObject {

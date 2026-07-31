@@ -55,13 +55,19 @@ private struct FolderTagLookupKey: Hashable {
     let normalizedName: String
 }
 
+private enum LibraryQueryBinding {
+    case text(String)
+    case integer(Int64)
+    case double(Double)
+}
+
 struct LibraryMaintenanceResult: Equatable, Sendable {
     let updatedVideoIDs: [String]
     let deletedThumbnailIDs: [String]
 }
 
 actor DatabaseStore {
-    static let currentSchemaVersion = 8
+    static let currentSchemaVersion = 9
 
     private let connection: SQLiteConnection
     private var isPrepared = false
@@ -1013,53 +1019,80 @@ actor DatabaseStore {
 
     func fetchVideos(
         libraryID: String,
-        filter: LibraryFilter,
-        searchText: String = "",
+        query: LibraryQueryRequest,
         now: Date = Date()
     ) throws -> [VideoRecord] {
         try prepareIfNeeded()
+        let rule = query.rule.normalized()
         var conditions = ["videos.library_id = ?"]
-        var bindings = [libraryID]
-        var commonTableExpression = ""
+        var bindings: [LibraryQueryBinding] = [.text(libraryID)]
 
-        switch filter {
-        case .all:
-            conditions.append("videos.availability_status = 'available'")
-        case .offline:
-            conditions.append("videos.availability_status = 'available'")
+        conditions.append("videos.availability_status = 'available'")
+        switch query.baseFilter {
+        case .all, .offline:
+            break
         case .untagged:
-            conditions.append("videos.availability_status = 'available'")
-            conditions.append("NOT EXISTS (SELECT 1 FROM video_tags WHERE video_tags.video_id = videos.id)")
+            conditions.append(
+                "NOT EXISTS (SELECT 1 FROM video_tags WHERE video_tags.video_id = videos.id)"
+            )
         case .recent:
-            conditions.append("videos.availability_status = 'available'")
             conditions.append("videos.first_indexed_at >= ?")
-            bindings.append(String(now.addingTimeInterval(-30 * 24 * 60 * 60).timeIntervalSince1970))
+            bindings.append(.double(now.addingTimeInterval(-30 * 24 * 60 * 60).timeIntervalSince1970))
         case let .tag(tagID):
-            commonTableExpression = tagFilterCTE
-            conditions.append("videos.availability_status = 'available'")
-            conditions.append("videos.id IN (SELECT video_id FROM matching_videos)")
-            bindings.insert(tagID, at: 0)
-            bindings.insert("1", at: 1)
+            conditions.append(tagMatchPredicate(tagID: tagID, bindings: &bindings))
         case let .tags(tagIDs):
-            guard tagIDs.isEmpty == false else {
-                return try fetchVideos(libraryID: libraryID, filter: .all, searchText: searchText, now: now)
-            }
-            commonTableExpression = tagFilterCTE
-            conditions.append("videos.availability_status = 'available'")
-            conditions.append("videos.id IN (SELECT video_id FROM matching_videos)")
-            bindings.insert(tagIDs.joined(separator: "\u{1F}"), at: 0)
-            bindings.insert(String(tagIDs.count), at: 1)
+            conditions.append(contentsOf: tagIDs.map {
+                tagMatchPredicate(tagID: $0, bindings: &bindings)
+            })
         }
 
-        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedSearch.isEmpty == false {
+        let temporarySearch = query.temporaryFilenameSearch
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if temporarySearch.isEmpty == false {
             conditions.append("instr(lower(videos.filename), lower(?)) > 0")
-            bindings.append(trimmedSearch)
+            bindings.append(.text(temporarySearch))
+        }
+        for filenameRule in rule.filenameContains {
+            conditions.append("instr(lower(videos.filename), lower(?)) > 0")
+            bindings.append(.text(filenameRule))
         }
 
+        conditions.append(contentsOf: rule.requiredTagIDs.map {
+            tagMatchPredicate(tagID: $0, bindings: &bindings)
+        })
+
+        let referencedTagIDs = Array(Set(rule.referencedTagIDs)).sorted()
+        conditions.append(contentsOf: referencedTagIDs.map { tagID in
+            bindings.append(.text(tagID))
+            return "EXISTS (SELECT 1 FROM tags WHERE tags.id = ? AND tags.library_id = videos.library_id)"
+        })
+
+        conditions.append(contentsOf: rule.requiredConditions.map {
+            filterConditionPredicate($0, now: now, bindings: &bindings)
+        })
+
+        if rule.conditions.isEmpty == false {
+            let conditionSQL = rule.conditions.map {
+                filterConditionPredicate($0, now: now, bindings: &bindings)
+            }
+            let separator = rule.matchMode == .all ? " AND " : " OR "
+            conditions.append("(\(conditionSQL.joined(separator: separator)))")
+        }
+
+        let sortColumn: String
+        switch rule.sort.key {
+        case .filename: sortColumn = "videos.filename COLLATE NOCASE"
+        case .added: sortColumn = "videos.first_indexed_at"
+        case .created: sortColumn = "videos.creation_date"
+        case .modified: sortColumn = "videos.modification_date"
+        case .duration: sortColumn = "videos.duration"
+        case .fileSize: sortColumn = "videos.file_size"
+        case .resolution: sortColumn = "videos.width"
+        }
+        let sortDirection = rule.sort.direction == .ascending ? "ASC" : "DESC"
+        let nullOrdering = rule.sort.key == .filename ? "" : "\(sortColumn) IS NULL, "
         let statement = try prepare(
             """
-            \(commonTableExpression)
             SELECT videos.id, videos.library_id, videos.relative_path, videos.filename,
                    videos.file_extension, videos.file_size, videos.creation_date,
                    videos.modification_date, videos.duration, videos.width, videos.height,
@@ -1068,24 +1101,94 @@ actor DatabaseStore {
                    videos.media_source_info
             FROM videos
             WHERE \(conditions.joined(separator: " AND "))
-            ORDER BY videos.filename COLLATE NOCASE, videos.relative_path COLLATE NOCASE
+            ORDER BY \(nullOrdering)\(sortColumn) \(sortDirection),
+                     videos.filename COLLATE NOCASE,
+                     videos.relative_path COLLATE NOCASE
             """
         )
         defer { sqlite3_finalize(statement) }
-        for (offset, value) in bindings.enumerated() {
-            if (filter == .recent), offset == 1, let seconds = Double(value) {
-                sqlite3_bind_double(statement, Int32(offset + 1), seconds)
-            } else if case .tag = filter, offset == 1 {
-                sqlite3_bind_int(statement, Int32(offset + 1), Int32(value) ?? 1)
-            } else if case .tags = filter, offset == 1 {
-                sqlite3_bind_int(statement, Int32(offset + 1), Int32(value) ?? 1)
-            } else {
-                bindText(value, to: Int32(offset + 1), in: statement)
+        for (offset, binding) in bindings.enumerated() {
+            let index = Int32(offset + 1)
+            switch binding {
+            case let .text(value):
+                bindText(value, to: index, in: statement)
+            case let .integer(value):
+                sqlite3_bind_int64(statement, index, value)
+            case let .double(value):
+                sqlite3_bind_double(statement, index, value)
             }
         }
+
         var records: [VideoRecord] = []
-        while sqlite3_step(statement) == SQLITE_ROW { records.append(try videoRecord(from: statement)) }
+        while sqlite3_step(statement) == SQLITE_ROW {
+            records.append(try videoRecord(from: statement))
+        }
         return records
+    }
+
+    private func tagMatchPredicate(
+        tagID: String,
+        bindings: inout [LibraryQueryBinding]
+    ) -> String {
+        bindings.append(.text(tagID))
+        return """
+        EXISTS (
+            WITH RECURSIVE descendants(id) AS (
+                SELECT ?
+                UNION ALL
+                SELECT tags.id
+                FROM tags JOIN descendants ON tags.parent_id = descendants.id
+            )
+            SELECT 1
+            FROM video_tags
+            JOIN descendants ON descendants.id = video_tags.tag_id
+            WHERE video_tags.video_id = videos.id
+            LIMIT 1
+        )
+        """
+    }
+
+    private func filterConditionPredicate(
+        _ condition: LibraryFilterCondition,
+        now: Date,
+        bindings: inout [LibraryQueryBinding]
+    ) -> String {
+        switch condition {
+        case let .tags(tagOperator, tagIDs):
+            guard tagIDs.isEmpty == false else {
+                return tagOperator == .any ? "0" : "1"
+            }
+            let matches = tagIDs.map { tagMatchPredicate(tagID: $0, bindings: &bindings) }
+            switch tagOperator {
+            case .all:
+                return "(\(matches.joined(separator: " AND ")))"
+            case .any:
+                return "(\(matches.joined(separator: " OR ")))"
+            case .exclude:
+                return "NOT (\(matches.joined(separator: " OR ")))"
+            }
+        case .untagged:
+            return "NOT EXISTS (SELECT 1 FROM video_tags WHERE video_tags.video_id = videos.id)"
+        case let .addedWithinDays(days):
+            bindings.append(.double(
+                now.addingTimeInterval(-Double(max(1, days)) * 24 * 60 * 60).timeIntervalSince1970
+            ))
+            return "videos.first_indexed_at >= ?"
+        case let .createdWithinDays(days):
+            bindings.append(.double(
+                now.addingTimeInterval(-Double(max(1, days)) * 24 * 60 * 60).timeIntervalSince1970
+            ))
+            return "videos.creation_date >= ?"
+        case let .durationAtLeast(seconds):
+            bindings.append(.double(max(0, seconds)))
+            return "videos.duration >= ?"
+        case let .fileSizeAtLeast(bytes):
+            bindings.append(.integer(max(0, bytes)))
+            return "videos.file_size >= ?"
+        case let .resolutionWidthAtLeast(width):
+            bindings.append(.integer(Int64(max(0, width))))
+            return "videos.width >= ?"
+        }
     }
 
     func fetchSidebarFilterCounts(
@@ -1120,24 +1223,6 @@ actor DatabaseStore {
             untagged: Int(sqlite3_column_int(statement, 1)),
             recent: Int(sqlite3_column_int(statement, 2))
         )
-    }
-
-    private var tagFilterCTE: String {
-        """
-        WITH RECURSIVE requested_tags(id) AS (
-            SELECT value FROM json_each('["' || replace(?, char(31), '","') || '"]')
-        ), descendants(requested_id, id) AS (
-            SELECT id, id FROM requested_tags
-            UNION ALL
-            SELECT descendants.requested_id, tags.id
-            FROM tags JOIN descendants ON tags.parent_id = descendants.id
-        ), matching_videos(video_id) AS (
-            SELECT video_tags.video_id
-            FROM video_tags JOIN descendants ON descendants.id = video_tags.tag_id
-            GROUP BY video_tags.video_id
-            HAVING COUNT(DISTINCT descendants.requested_id) = ?
-        )
-        """
     }
 
     func fetchVideo(id: String) throws -> VideoRecord? {
@@ -1521,6 +1606,85 @@ actor DatabaseStore {
             ))
         }
         return tags
+    }
+
+    func fetchSmartCollections(libraryID: String) throws -> [SmartCollectionRecord] {
+        try prepareIfNeeded()
+        let statement = try prepare(
+            """
+            SELECT id, library_id, name, rule_json, sort_order, created_at, updated_at
+            FROM smart_collections
+            WHERE library_id = ?
+            ORDER BY sort_order, name COLLATE NOCASE
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bindText(libraryID, to: 1, in: statement)
+
+        var records: [SmartCollectionRecord] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let id = text(at: 0, in: statement),
+                let storedLibraryID = text(at: 1, in: statement),
+                let name = text(at: 2, in: statement),
+                let ruleJSON = text(at: 3, in: statement),
+                let rule = decodedLibraryQueryRule(ruleJSON)
+            else {
+                throw DatabaseError.statementFailed
+            }
+            records.append(SmartCollectionRecord(
+                id: id,
+                libraryID: storedLibraryID,
+                name: name,
+                rule: rule,
+                sortOrder: Int(sqlite3_column_int64(statement, 4)),
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)),
+                updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 6))
+            ))
+        }
+        return records
+    }
+
+    func saveSmartCollection(_ record: SmartCollectionRecord) throws {
+        try prepareIfNeeded()
+        let cleanName = record.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleanName.isEmpty == false else { throw DatabaseError.statementFailed }
+        let statement = try prepare(
+            """
+            INSERT INTO smart_collections (
+                id, library_id, name, normalized_name, rule_json,
+                sort_order, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                normalized_name = excluded.normalized_name,
+                rule_json = excluded.rule_json,
+                updated_at = excluded.updated_at
+            """
+        )
+        defer { sqlite3_finalize(statement) }
+        bindText(record.id, to: 1, in: statement)
+        bindText(record.libraryID, to: 2, in: statement)
+        bindText(cleanName, to: 3, in: statement)
+        bindText(normalizedTagName(cleanName), to: 4, in: statement)
+        bindText(try encodedLibraryQueryRule(record.rule.normalized()), to: 5, in: statement)
+        sqlite3_bind_int64(statement, 6, Int64(record.sortOrder))
+        sqlite3_bind_double(statement, 7, record.createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 8, record.updatedAt.timeIntervalSince1970)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw DatabaseError.statementFailed
+        }
+    }
+
+    func deleteSmartCollection(id: String) throws {
+        try prepareIfNeeded()
+        let statement = try prepare("DELETE FROM smart_collections WHERE id = ?")
+        defer { sqlite3_finalize(statement) }
+        bindText(id, to: 1, in: statement)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw DatabaseError.statementFailed
+        }
     }
 
     @discardableResult
@@ -2084,6 +2248,24 @@ actor DatabaseStore {
     }
 
     private func applyMigration(_ version: Int) throws {
+        if version == 9 {
+            try execute("""
+            CREATE TABLE smart_collections (
+                id TEXT PRIMARY KEY,
+                library_id TEXT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                normalized_name TEXT NOT NULL,
+                rule_json TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                UNIQUE(library_id, normalized_name)
+            );
+            CREATE INDEX smart_collections_sort_idx
+                ON smart_collections(library_id, sort_order);
+            """)
+            return
+        }
         if version == 8 {
             try execute("""
             ALTER TABLE videos ADD COLUMN media_source_info TEXT;
@@ -2645,6 +2827,21 @@ actor DatabaseStore {
     private func decodedMediaSourceInfo(_ value: String?) -> MediaSourceInfo? {
         guard let value, let data = value.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(MediaSourceInfo.self, from: data)
+    }
+
+    private func encodedLibraryQueryRule(_ rule: LibraryQueryRule) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(rule)
+        guard let value = String(data: data, encoding: .utf8) else {
+            throw DatabaseError.statementFailed
+        }
+        return value
+    }
+
+    private func decodedLibraryQueryRule(_ value: String) -> LibraryQueryRule? {
+        guard let data = value.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(LibraryQueryRule.self, from: data).normalized()
     }
 
     private func videoRecord(from statement: OpaquePointer) throws -> VideoRecord {

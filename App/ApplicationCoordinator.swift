@@ -48,8 +48,42 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         offlineSourceName: { [weak self] video in
             self?.libraryAccessCoordinator?.offlineSourceName(for: video)
         },
-        onFilterChanged: { [weak self] filter in self?.applyFilter(filter) },
-        onSearchChanged: { [weak self] text in self?.libraryAccessCoordinator?.applySearch(text) },
+        onQueryChanged: { [weak self] query, debounceSearch in
+            self?.libraryAccessCoordinator?.applyQuery(query, debounceSearch: debounceSearch)
+        },
+        onCreateSmartCollection: { [weak self] name, rule, completion in
+            guard let coordinator = self?.libraryAccessCoordinator else {
+                completion(nil)
+                return
+            }
+            coordinator.createSmartCollection(
+                name: name,
+                rule: rule,
+                completion: completion
+            )
+        },
+        onUpdateSmartCollection: { [weak self] id, name, rule, completion in
+            guard let coordinator = self?.libraryAccessCoordinator else {
+                completion(nil)
+                return
+            }
+            coordinator.updateSmartCollection(
+                id: id,
+                name: name,
+                rule: rule,
+                completion: completion
+            )
+        },
+        onDeleteSmartCollection: { [weak self] id, completion in
+            guard let coordinator = self?.libraryAccessCoordinator else {
+                completion(false)
+                return
+            }
+            coordinator.deleteSmartCollection(
+                id: id,
+                completion: completion
+            )
+        },
         onCreateTag: { [weak self] name, parentID in self?.libraryAccessCoordinator?.createTag(name: name, parentID: parentID) },
         onRenameTag: { [weak self] tag, name in self?.libraryAccessCoordinator?.renameTag(tag, name: name) },
         onDeleteTag: { [weak self] tag in self?.libraryAccessCoordinator?.deleteTag(tag) },
@@ -152,6 +186,9 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         }
         libraryAccessCoordinator?.onTagsChanged = { [weak self] tags in
             self?.libraryViewController.setTags(tags)
+        }
+        libraryAccessCoordinator?.onSmartCollectionsChanged = { [weak self] collections in
+            self?.libraryViewController.setSmartCollections(collections)
         }
         libraryAccessCoordinator?.onTagAssignmentsChanged = { [weak self] in
             self?.libraryViewController.refreshTagAssignments()
@@ -341,6 +378,16 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         libraryViewController.beginCreatingRootTag()
     }
 
+    @objc private func focusFilenameSearch() {
+        guard lockCoordinator.state == .unlocked else { return }
+        libraryViewController.focusFilenameSearch()
+    }
+
+    @objc private func presentAddFilterMenu() {
+        guard lockCoordinator.state == .unlocked else { return }
+        libraryViewController.presentAddFilterMenu()
+    }
+
     private func openVideo(_ video: VideoRecord) {
         guard let url = libraryAccessCoordinator?.fileURL(for: video) else { return }
         NSWorkspace.shared.open(url)
@@ -362,10 +409,6 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         quickLookCoordinator.toggle(urls: urls)
     }
 
-    private func applyFilter(_ filter: LibraryFilter) {
-        libraryAccessCoordinator?.applyFilter(filter)
-    }
-
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(importVideos) {
             return lockCoordinator.state == .unlocked && databaseStore != nil
@@ -378,6 +421,12 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
             return lockCoordinator.state == .unlocked
                 && databaseStore != nil
                 && libraryViewController.canBeginCreatingRootTag
+        }
+        if menuItem.action == #selector(focusFilenameSearch)
+            || menuItem.action == #selector(presentAddFilterMenu) {
+            return lockCoordinator.state == .unlocked
+                && databaseStore != nil
+                && libraryViewController.canUseRuleCommands
         }
         if menuItem.action == #selector(showSettings) || menuItem.action == #selector(showAbout) {
             return lockCoordinator.state == .unlocked
@@ -454,6 +503,29 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         )
         undoItem.target = self
         editMenu.addItem(undoItem)
+        editMenu.addItem(.separator())
+        let searchItem = NSMenuItem(
+            title: String(
+                localized: "menu.searchFilenames",
+                defaultValue: "Search Filenames"
+            ),
+            action: #selector(focusFilenameSearch),
+            keyEquivalent: "f"
+        )
+        searchItem.keyEquivalentModifierMask = [.command]
+        searchItem.target = self
+        editMenu.addItem(searchItem)
+        let addFilterItem = NSMenuItem(
+            title: String(
+                localized: "menu.addFilterCondition",
+                defaultValue: "Add Filter Condition"
+            ),
+            action: #selector(presentAddFilterMenu),
+            keyEquivalent: "f"
+        )
+        addFilterItem.keyEquivalentModifierMask = [.command, .shift]
+        addFilterItem.target = self
+        editMenu.addItem(addFilterItem)
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 

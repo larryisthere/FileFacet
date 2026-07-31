@@ -2,6 +2,11 @@ import AppKit
 
 @MainActor
 final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate, NSToolbarItemValidation {
+    private enum NavigationTarget {
+        case filter(LibraryFilter)
+        case smartCollection(SmartCollectionRecord)
+    }
+
     private static let toolbarIdentifier = NSToolbar.Identifier("LibraryToolbar")
     private static let settingsToolbarIdentifier = NSToolbar.Identifier("SettingsToolbar")
     private static let searchItemIdentifier = NSToolbarItem.Identifier("LibrarySearch")
@@ -18,15 +23,37 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private static let splitViewAutosaveDefaultsKey = "NSSplitView Subview Frames \(splitViewAutosaveName)"
 
     private let videoGridViewController: VideoGridViewController
+    private let ruleBarViewController = LibraryRuleBarViewController()
+    private let libraryContentViewController: LibraryContentViewController
     private let inspectorViewController: InspectorViewController
     private let sidebarViewController: SidebarViewController
     private let settingsViewController: NSViewController
-    private let onSearchChanged: (String) -> Void
+    private let onQueryChanged: (LibraryQueryRequest, Bool) -> Void
+    private let onCreateSmartCollection: (
+        String,
+        LibraryQueryRule,
+        @escaping (SmartCollectionRecord?) -> Void
+    ) -> Void
+    private let onUpdateSmartCollection: (
+        String,
+        String?,
+        LibraryQueryRule?,
+        @escaping (SmartCollectionRecord?) -> Void
+    ) -> Void
+    private let onDeleteSmartCollection: (String, @escaping (Bool) -> Void) -> Void
     private var contextTitle = String(localized: .libraryAllVideos)
     private var contextTagID: String?
     private var contextStatus: String?
     private var isImporting = false
     private var visibleVideoCount = 0
+    private var tags: [TagRecord] = []
+    private var smartCollections: [SmartCollectionRecord] = []
+    private var currentBaseFilter: LibraryFilter = .all
+    private var temporaryFilenameSearch = ""
+    private var currentRule = LibraryQueryRule.standard
+    private var selectedSmartCollection: SmartCollectionRecord?
+    private var pendingNavigationTarget: NavigationTarget?
+    private var isPresentingSmartCollectionAlert = false
     private var pendingVideoSelectionIDs: [String]?
     private var isPresentingSelectionAlert = false
     private var didApplyInitialLayout = false
@@ -73,8 +100,19 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         thumbnailURL: @escaping (VideoRecord) -> URL?,
         filePath: @escaping (VideoRecord) -> String?,
         offlineSourceName: @escaping (VideoRecord) -> String?,
-        onFilterChanged: @escaping (LibraryFilter) -> Void,
-        onSearchChanged: @escaping (String) -> Void,
+        onQueryChanged: @escaping (LibraryQueryRequest, Bool) -> Void,
+        onCreateSmartCollection: @escaping (
+            String,
+            LibraryQueryRule,
+            @escaping (SmartCollectionRecord?) -> Void
+        ) -> Void,
+        onUpdateSmartCollection: @escaping (
+            String,
+            String?,
+            LibraryQueryRule?,
+            @escaping (SmartCollectionRecord?) -> Void
+        ) -> Void,
+        onDeleteSmartCollection: @escaping (String, @escaping (Bool) -> Void) -> Void,
         onCreateTag: @escaping (String, String?) -> Void,
         onRenameTag: @escaping (TagRecord, String) -> Void,
         onDeleteTag: @escaping (TagRecord) -> Void,
@@ -87,7 +125,10 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         loadTagStates: @escaping ([String], @escaping ([String: TagAssignmentState]) -> Void) -> Void,
         settingsViewController: NSViewController
     ) {
-        self.onSearchChanged = onSearchChanged
+        self.onQueryChanged = onQueryChanged
+        self.onCreateSmartCollection = onCreateSmartCollection
+        self.onUpdateSmartCollection = onUpdateSmartCollection
+        self.onDeleteSmartCollection = onDeleteSmartCollection
         self.settingsViewController = settingsViewController
         let inspector = InspectorViewController(
             onApplyTagDraft: onApplyTagDraft,
@@ -97,8 +138,10 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         )
         inspectorViewController = inspector
         sidebarViewController = SidebarViewController(
-            onFilterChanged: onFilterChanged,
-            onSelectionTitleChanged: { _, _ in },
+            onFilterChanged: { _ in },
+            onSmartCollectionSelected: { _ in },
+            onRenameSmartCollection: { _, _ in },
+            onDeleteSmartCollection: { _ in },
             onCreateTag: onCreateTag,
             onRenameTag: onRenameTag,
             onDeleteTag: onDeleteTag,
@@ -128,6 +171,10 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             },
             onUndoLastMutation: onUndoLastMutation
         )
+        libraryContentViewController = LibraryContentViewController(
+            ruleBarViewController: ruleBarViewController,
+            videoGridViewController: videoGridViewController
+        )
         super.init(nibName: nil, bundle: nil)
         videoGridViewController.onSelectionChanged = { [weak self] videos in
             self?.handleVideoSelectionChange(videos)
@@ -136,9 +183,19 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             guard succeeded else { return }
             self?.syncInspectorSelectionFromGrid()
         }
-        sidebarViewController.setSelectionTitleHandler { [weak self] title, tag in
-            self?.setContextTitle(title, tagID: tag?.id)
-        }
+        sidebarViewController.setNavigationHandlers(
+            filter: { [weak self] filter in self?.requestNavigation(to: .filter(filter)) },
+            smartCollection: { [weak self] collection in
+                self?.requestNavigation(to: .smartCollection(collection))
+            },
+            renameSmartCollection: { [weak self] collection, name in
+                self?.renameSmartCollection(collection, to: name)
+            },
+            deleteSmartCollection: { [weak self] collection in
+                self?.presentDeleteSmartCollection(collection)
+            }
+        )
+        configureRuleBarCallbacks()
     }
 
     func showRestoredVideos(_ videoIDs: [String]) {
@@ -151,6 +208,21 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
 
     func removeVideoRemovalUndoOffer() {
         videoGridViewController.removeVideoRemovalUndoOffer()
+    }
+
+    var canUseRuleCommands: Bool {
+        isShowingSettings == false && isLibraryAvailable
+    }
+
+    func focusFilenameSearch() {
+        guard canUseRuleCommands, let searchField = searchToolbarItem?.searchField else { return }
+        view.window?.makeFirstResponder(searchField)
+        searchField.selectText(nil)
+    }
+
+    func presentAddFilterMenu() {
+        guard canUseRuleCommands else { return }
+        ruleBarViewController.presentAddFilterMenu()
     }
 
     @available(*, unavailable)
@@ -167,7 +239,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         sidebarItem.preferredThicknessFraction = 0.2
         sidebarSplitViewItem = sidebarItem
 
-        let gridItem = NSSplitViewItem(viewController: videoGridViewController)
+        let gridItem = NSSplitViewItem(viewController: libraryContentViewController)
         gridItem.minimumThickness = 420
         gridSplitViewItem = gridItem
 
@@ -266,10 +338,11 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     }
 
     func setFilterFromSystem(_ filter: LibraryFilter) {
+        currentBaseFilter = filter
+        selectedSmartCollection = nil
         sidebarViewController.selectFilter(filter)
-        if filter == .all {
-            setContextTitle(String(localized: .libraryAllVideos), tagID: nil)
-        }
+        updateContext(for: filter)
+        refreshRuleBar()
     }
 
     func updateVideo(_ video: VideoRecord) {
@@ -277,13 +350,403 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     }
 
     func setTags(_ tags: [TagRecord]) {
+        self.tags = tags
         if let contextTagID,
            let selectedTag = tags.first(where: { $0.id == contextTagID }) {
             contextTitle = selectedTag.name
         }
         sidebarViewController.setTags(tags)
         inspectorViewController.setTags(tags)
+        refreshRuleBar()
         updateWindowTitle()
+    }
+
+    func setSmartCollections(_ collections: [SmartCollectionRecord]) {
+        smartCollections = collections
+        if let selectedID = selectedSmartCollection?.id,
+           let updated = collections.first(where: { $0.id == selectedID }) {
+            selectedSmartCollection = updated
+        }
+        sidebarViewController.setSmartCollections(collections)
+        refreshRuleBar()
+    }
+
+    private var smartCollectionIsDirty: Bool {
+        guard let selectedSmartCollection else { return false }
+        return currentRule.normalized() != selectedSmartCollection.rule.normalized()
+    }
+
+    private func configureRuleBarCallbacks() {
+        ruleBarViewController.onRuleChanged = { [weak self] rule in
+            guard let self else { return }
+            currentRule = rule.normalized()
+            refreshRuleBar()
+            applyCurrentQuery(debounce: true)
+        }
+        ruleBarViewController.onClearTemporarySearch = { [weak self] in
+            self?.setTemporaryFilenameSearch("")
+        }
+        ruleBarViewController.onClearRules = { [weak self] in
+            guard let self else { return }
+            currentRule = .standard
+            setTemporaryFilenameSearch("", applyQuery: false)
+            refreshRuleBar()
+            applyCurrentQuery()
+        }
+        ruleBarViewController.onSaveAs = { [weak self] in
+            self?.presentSaveSmartCollection()
+        }
+        ruleBarViewController.onRevert = { [weak self] in
+            guard let self, let selectedSmartCollection else { return }
+            currentRule = selectedSmartCollection.rule
+            refreshRuleBar()
+            applyCurrentQuery()
+        }
+        ruleBarViewController.onUpdate = { [weak self] in
+            self?.updateCurrentSmartCollection()
+        }
+    }
+
+    private func refreshRuleBar() {
+        ruleBarViewController.configure(LibraryRuleBarContext(
+            scopeTitle: selectedSmartCollection == nil ? currentScopeTitle : nil,
+            temporarySearch: temporaryFilenameSearch,
+            rule: currentRule,
+            tags: tags,
+            smartCollection: selectedSmartCollection,
+            isDirty: smartCollectionIsDirty,
+            hasPersistableBaseScope: hasPersistableBaseScope,
+            canSaveAsSmartCollection: canSaveCurrentContext
+        ))
+    }
+
+    private var hasPersistableBaseScope: Bool {
+        guard selectedSmartCollection == nil else { return false }
+        switch currentBaseFilter {
+        case .tag, .tags, .untagged, .recent:
+            return true
+        case .all, .offline:
+            return false
+        }
+    }
+
+    private var canSaveCurrentContext: Bool {
+        selectedSmartCollection != nil || currentBaseFilter != .offline
+    }
+
+    private var currentScopeTitle: String? {
+        switch currentBaseFilter {
+        case let .tag(tagID):
+            tags.first(where: { $0.id == tagID })?.name
+        case let .tags(tagIDs):
+            String(localized: .selectionTagCount(tagIDs.count))
+        case .all, .offline, .untagged, .recent:
+            nil
+        }
+    }
+
+    private func applyCurrentQuery(debounce: Bool = false) {
+        onQueryChanged(
+            LibraryQueryRequest(
+                baseFilter: selectedSmartCollection == nil ? currentBaseFilter : .all,
+                temporaryFilenameSearch: temporaryFilenameSearch,
+                rule: currentRule
+            ),
+            debounce
+        )
+    }
+
+    private func setTemporaryFilenameSearch(
+        _ value: String,
+        applyQuery: Bool = true
+    ) {
+        temporaryFilenameSearch = value
+        if searchToolbarItem?.searchField.stringValue != value {
+            searchToolbarItem?.searchField.stringValue = value
+        }
+        refreshRuleBar()
+        if applyQuery { applyCurrentQuery(debounce: true) }
+    }
+
+    private func requestNavigation(to target: NavigationTarget) {
+        guard isSameNavigationTarget(target) == false else {
+            restoreCurrentSidebarSelection()
+            return
+        }
+        if smartCollectionIsDirty {
+            pendingNavigationTarget = target
+            restoreCurrentSidebarSelection()
+            presentSmartCollectionLeaveConfirmation()
+            return
+        }
+        performNavigation(to: target)
+    }
+
+    private func isSameNavigationTarget(_ target: NavigationTarget) -> Bool {
+        switch target {
+        case let .filter(filter):
+            return selectedSmartCollection == nil && currentBaseFilter == filter
+        case let .smartCollection(collection):
+            return selectedSmartCollection?.id == collection.id
+        }
+    }
+
+    private func performNavigation(to target: NavigationTarget) {
+        pendingNavigationTarget = nil
+        switch target {
+        case let .filter(filter):
+            if selectedSmartCollection != nil {
+                currentRule = .standard
+            }
+            selectedSmartCollection = nil
+            currentBaseFilter = filter
+            sidebarViewController.selectFilter(filter)
+            updateContext(for: filter)
+        case let .smartCollection(collection):
+            selectedSmartCollection = collection
+            currentBaseFilter = .all
+            currentRule = collection.rule
+            setTemporaryFilenameSearch("", applyQuery: false)
+            sidebarViewController.selectSmartCollection(id: collection.id)
+            setContextTitle(collection.name, tagID: nil)
+        }
+        refreshRuleBar()
+        applyCurrentQuery()
+    }
+
+    private func restoreCurrentSidebarSelection() {
+        if let selectedSmartCollection {
+            sidebarViewController.selectSmartCollection(id: selectedSmartCollection.id)
+        } else {
+            sidebarViewController.selectFilter(currentBaseFilter)
+        }
+    }
+
+    private func updateContext(for filter: LibraryFilter) {
+        switch filter {
+        case .all:
+            setContextTitle(String(localized: .libraryAllVideos), tagID: nil)
+        case .offline:
+            setContextTitle(String(localized: .libraryOffline), tagID: nil)
+        case .untagged:
+            setContextTitle(String(localized: .libraryUntagged), tagID: nil)
+        case .recent:
+            setContextTitle(String(localized: .libraryRecent), tagID: nil)
+        case let .tag(tagID):
+            let title = tags.first(where: { $0.id == tagID })?.name
+                ?? String(localized: "filter.deletedTag", defaultValue: "Deleted Tag")
+            setContextTitle(title, tagID: tagID)
+        case let .tags(tagIDs):
+            setContextTitle(String(localized: .selectionTagCount(tagIDs.count)), tagID: nil)
+        }
+    }
+
+    private func presentSmartCollectionLeaveConfirmation() {
+        guard isPresentingSmartCollectionAlert == false,
+              let selectedSmartCollection,
+              let window = view.window else { return }
+        isPresentingSmartCollectionAlert = true
+        let alert = NSAlert()
+        alert.messageText = String(
+            localized: "smartCollection.leave.title",
+            defaultValue: "Save changes to “\(selectedSmartCollection.name)”?"
+        )
+        alert.informativeText = String(
+            localized: "smartCollection.leave.detail",
+            defaultValue: "The current results use rules that have not been saved."
+        )
+        alert.addButton(withTitle: String(
+            localized: "smartCollection.leave.update",
+            defaultValue: "Update and Continue"
+        ))
+        alert.addButton(withTitle: String(
+            localized: "smartCollection.leave.discard",
+            defaultValue: "Discard Changes"
+        ))
+        alert.addButton(withTitle: String(localized: .actionCancel))
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
+            isPresentingSmartCollectionAlert = false
+            switch response {
+            case .alertFirstButtonReturn:
+                updateCurrentSmartCollection { [weak self] succeeded in
+                    guard let self else { return }
+                    if succeeded, let target = pendingNavigationTarget {
+                        performNavigation(to: target)
+                    } else {
+                        pendingNavigationTarget = nil
+                        restoreCurrentSidebarSelection()
+                    }
+                }
+            case .alertSecondButtonReturn:
+                if let target = pendingNavigationTarget {
+                    performNavigation(to: target)
+                }
+            default:
+                pendingNavigationTarget = nil
+                restoreCurrentSidebarSelection()
+            }
+        }
+    }
+
+    private func ruleForSavingCurrentContext() -> LibraryQueryRule {
+        var rule = currentRule
+        if selectedSmartCollection == nil {
+            switch currentBaseFilter {
+            case let .tag(tagID):
+                rule.requiredTagIDs.append(tagID)
+            case let .tags(tagIDs):
+                rule.requiredTagIDs.append(contentsOf: tagIDs)
+            case .untagged:
+                rule.requiredConditions.append(.untagged)
+            case .recent:
+                rule.requiredConditions.append(.addedWithinDays(30))
+            case .all, .offline:
+                break
+            }
+        }
+        let search = temporaryFilenameSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        if search.isEmpty == false {
+            rule.filenameContains.append(search)
+        }
+        return rule.normalized()
+    }
+
+    private func presentSaveSmartCollection(
+        suggestedName: String? = nil,
+        validationMessage: String? = nil
+    ) {
+        guard canSaveCurrentContext else { return }
+        guard let window = view.window else { return }
+        let alert = NSAlert()
+        alert.messageText = String(
+            localized: "smartCollection.save.title",
+            defaultValue: "Save as Smart Collection"
+        )
+        alert.informativeText = validationMessage ?? String(
+            localized: "smartCollection.save.detail",
+            defaultValue: "The current scope, filename search, filters, and sort order will be saved."
+        )
+        let field = NSTextField(string: suggestedName
+            ?? selectedSmartCollection.map {
+                String(
+                    localized: "smartCollection.copyName",
+                    defaultValue: "\($0.name) Copy"
+                )
+            }
+            ?? String(localized: "smartCollection.defaultName", defaultValue: "New Smart Collection"))
+        field.frame = NSRect(x: 0, y: 0, width: 300, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: String(localized: .actionSave))
+        alert.addButton(withTitle: String(localized: .actionCancel))
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedName = normalizedSmartCollectionName(name)
+            let duplicate = smartCollections.contains {
+                normalizedSmartCollectionName($0.name) == normalizedName
+            }
+            guard name.isEmpty == false, duplicate == false else {
+                let message = name.isEmpty
+                    ? String(localized: "smartCollection.name.empty", defaultValue: "Enter a name.")
+                    : String(
+                        localized: "smartCollection.name.duplicate",
+                        defaultValue: "A smart collection with this name already exists."
+                    )
+                DispatchQueue.main.async { [weak self] in
+                    self?.presentSaveSmartCollection(
+                        suggestedName: name,
+                        validationMessage: message
+                    )
+                }
+                return
+            }
+            let savedRule = ruleForSavingCurrentContext()
+            onCreateSmartCollection(name, savedRule) { [weak self] collection in
+                guard let self, let collection else { return }
+                selectedSmartCollection = collection
+                currentBaseFilter = .all
+                currentRule = collection.rule
+                setTemporaryFilenameSearch("", applyQuery: false)
+                sidebarViewController.selectSmartCollection(id: collection.id)
+                setContextTitle(collection.name, tagID: nil)
+                refreshRuleBar()
+                applyCurrentQuery()
+            }
+        }
+    }
+
+    private func updateCurrentSmartCollection(
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        guard let selectedSmartCollection else {
+            completion?(false)
+            return
+        }
+        onUpdateSmartCollection(
+            selectedSmartCollection.id,
+            nil,
+            currentRule
+        ) { [weak self] collection in
+            guard let self else {
+                completion?(false)
+                return
+            }
+            guard let collection else {
+                completion?(false)
+                return
+            }
+            self.selectedSmartCollection = collection
+            currentRule = collection.rule
+            refreshRuleBar()
+            applyCurrentQuery()
+            completion?(true)
+        }
+    }
+
+    private func renameSmartCollection(_ collection: SmartCollectionRecord, to name: String) {
+        onUpdateSmartCollection(collection.id, name, nil) { [weak self] updated in
+            guard let self, let updated else { return }
+            if selectedSmartCollection?.id == updated.id {
+                selectedSmartCollection = updated
+                setContextTitle(updated.name, tagID: nil)
+            }
+            refreshRuleBar()
+        }
+    }
+
+    private func presentDeleteSmartCollection(_ collection: SmartCollectionRecord) {
+        guard let window = view.window else { return }
+        let alert = NSAlert()
+        alert.messageText = String(
+            localized: "smartCollection.delete.title",
+            defaultValue: "Delete “\(collection.name)”?"
+        )
+        alert.informativeText = String(
+            localized: "smartCollection.delete.detail",
+            defaultValue: "Videos, files, and tags will not be changed."
+        )
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: String(
+            localized: "smartCollection.delete.action",
+            defaultValue: "Delete"
+        ))
+        alert.addButton(withTitle: String(localized: .actionCancel))
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            onDeleteSmartCollection(collection.id) { [weak self] succeeded in
+                guard let self, succeeded else { return }
+                if selectedSmartCollection?.id == collection.id {
+                    selectedSmartCollection = nil
+                    currentBaseFilter = .all
+                    currentRule = .standard
+                    sidebarViewController.selectFilter(.all)
+                    updateContext(for: .all)
+                    refreshRuleBar()
+                    applyCurrentQuery()
+                }
+            }
+        }
     }
 
     func refreshTagAssignments() {
@@ -456,9 +919,13 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             let item = NSSearchToolbarItem(itemIdentifier: itemIdentifier)
             item.label = String(localized: .toolbarSearch)
             item.paletteLabel = String(localized: .toolbarSearchVideos)
-            item.toolTip = String(localized: .toolbarSearchFilename)
+            item.toolTip = String(
+                localized: "filter.searchShortcutTooltip",
+                defaultValue: "Search filenames (⌘F)"
+            )
             item.searchField.placeholderString = String(localized: .toolbarSearchFilename)
             item.searchField.sendsSearchStringImmediately = true
+            item.searchField.stringValue = temporaryFilenameSearch
             item.searchField.target = self
             item.searchField.action = #selector(searchChanged(_:))
             item.searchField.widthAnchor.constraint(equalToConstant: 180).isActive = true
@@ -670,8 +1137,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     }
 
     private func clearSearchForImport() {
-        searchToolbarItem?.searchField.stringValue = ""
-        onSearchChanged("")
+        setTemporaryFilenameSearch("")
     }
 
     private func updateWindowTitle() {
@@ -691,7 +1157,9 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     }
 
     @objc private func searchChanged(_ sender: NSSearchField) {
-        onSearchChanged(sender.stringValue)
+        temporaryFilenameSearch = sender.stringValue
+        refreshRuleBar()
+        applyCurrentQuery(debounce: true)
     }
 
     @objc private func toggleSidebarFromToolbar(_ sender: NSButton) {

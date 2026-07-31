@@ -303,11 +303,51 @@ final class DatabaseStoreTests: XCTestCase {
         try await store.setTagAssignment(tagID: childID, videoIDs: [alpha.id, gamma.id], enabled: true)
         try await store.setTagAssignment(tagID: secondID, videoIDs: [gamma.id], enabled: true)
 
-        let searched = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, filter: .all, searchText: "ALPHA", now: now)
-        let recent = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, filter: .recent, now: now)
-        let untagged = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, filter: .untagged, now: now)
-        let inherited = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, filter: .tag(parentID), now: now)
-        let intersection = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, filter: .tags([parentID, secondID]), now: now)
+        let searched = try await store.fetchVideos(
+            libraryID: LibraryRecord.primaryID,
+            query: LibraryQueryRequest(
+                baseFilter: .all,
+                temporaryFilenameSearch: "ALPHA",
+                rule: .standard
+            ),
+            now: now
+        )
+        let recent = try await store.fetchVideos(
+            libraryID: LibraryRecord.primaryID,
+            query: LibraryQueryRequest(
+                baseFilter: .recent,
+                temporaryFilenameSearch: "",
+                rule: .standard
+            ),
+            now: now
+        )
+        let untagged = try await store.fetchVideos(
+            libraryID: LibraryRecord.primaryID,
+            query: LibraryQueryRequest(
+                baseFilter: .untagged,
+                temporaryFilenameSearch: "",
+                rule: .standard
+            ),
+            now: now
+        )
+        let inherited = try await store.fetchVideos(
+            libraryID: LibraryRecord.primaryID,
+            query: LibraryQueryRequest(
+                baseFilter: .tag(parentID),
+                temporaryFilenameSearch: "",
+                rule: .standard
+            ),
+            now: now
+        )
+        let intersection = try await store.fetchVideos(
+            libraryID: LibraryRecord.primaryID,
+            query: LibraryQueryRequest(
+                baseFilter: .tags([parentID, secondID]),
+                temporaryFilenameSearch: "",
+                rule: .standard
+            ),
+            now: now
+        )
 
         XCTAssertEqual(searched.map(\.filename), ["Alpha.mp4"])
         XCTAssertEqual(recent.map(\.filename), ["Gamma.mkv"])
@@ -770,7 +810,14 @@ final class DatabaseStoreTests: XCTestCase {
         try await store.setTagAssignment(tagID: tagID, videoIDs: videos.enumerated().compactMap { $0.offset.isMultiple(of: 2) ? $0.element.id : nil }, enabled: true)
 
         let filterStarted = Date()
-        let filtered = try await store.fetchVideos(libraryID: LibraryRecord.primaryID, filter: .tag(tagID))
+        let filtered = try await store.fetchVideos(
+            libraryID: LibraryRecord.primaryID,
+            query: LibraryQueryRequest(
+                baseFilter: .tag(tagID),
+                temporaryFilenameSearch: "",
+                rule: .standard
+            )
+        )
         let filterDuration = Date().timeIntervalSince(filterStarted)
 
         XCTAssertEqual(videos.count, 10_000)

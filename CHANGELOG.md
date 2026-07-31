@@ -4,13 +4,24 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-07-31
+
 ### Added
 
+- Added a visible rule bar for combining filename, tag, untagged, date, duration, file-size, and resolution filters with “match all” or “match any” relationships.
+- Added sorting by filename, added, created, or modified date, duration, file size, and resolution.
+- Added saved Smart Collections with live result counts, rule preview, revert, update, save-as, inline rename, and deletion.
+- Added `Command-F` for filename search and `Shift-Command-F` for adding a filter condition.
 - The Inspector now groups container, video-codec, audio-codec, profile, rate, depth, color, and rotation source information while keeping cached details available for offline videos.
 
 ### Changed
 
+- Search, filters, and sorting now remain within the selected system category or tag scope, and filter editors apply their draft once after confirmation.
 - Thumbnail generation now falls back to Quick Look when AVFoundation cannot extract a frame; files unsupported by both macOS media paths continue to use the generic video icon.
+
+### Fixed
+
+- Pressing Escape now cancels inline renaming for tags and Smart Collections, while Return or focus loss saves a valid name consistently.
 
 ## [1.0.4] - 2026-07-31
 

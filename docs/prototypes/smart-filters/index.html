@@ -1,0 +1,2040 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FileFacet · 排序、筛选与智能分类原型</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --desktop: #d9dde3;
+      --window: rgba(246, 246, 246, .97);
+      --toolbar: rgba(246, 246, 246, .92);
+      --sidebar: rgba(232, 232, 232, .96);
+      --content: #fff;
+      --inspector: #f7f7f7;
+      --panel: rgba(250, 250, 251, .98);
+      --line: rgba(60, 60, 67, .18);
+      --line-strong: rgba(60, 60, 67, .28);
+      --text: #202124;
+      --secondary: #6e6e73;
+      --tertiary: #8e8e93;
+      --accent: #0a84ff;
+      --accent-soft: rgba(10, 132, 255, .13);
+      --selection: rgba(10, 132, 255, .18);
+      --danger: #d70015;
+      --shadow: 0 24px 70px rgba(20, 24, 31, .28), 0 2px 10px rgba(20, 24, 31, .14);
+      --panel-shadow: 0 18px 50px rgba(0,0,0,.28), 0 2px 10px rgba(0,0,0,.14);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --desktop: #17191d;
+        --window: rgba(42, 42, 44, .98);
+        --toolbar: rgba(42, 42, 44, .94);
+        --sidebar: rgba(37, 37, 39, .98);
+        --content: #1f1f21;
+        --inspector: #252527;
+        --panel: rgba(49, 49, 52, .98);
+        --line: rgba(235, 235, 245, .13);
+        --line-strong: rgba(235, 235, 245, .24);
+        --text: #f2f2f7;
+        --secondary: #aeaeb2;
+        --tertiary: #8e8e93;
+        --accent-soft: rgba(10, 132, 255, .2);
+        --selection: rgba(10, 132, 255, .27);
+        --danger: #ff453a;
+        --shadow: 0 26px 80px rgba(0, 0, 0, .56), 0 2px 12px rgba(0, 0, 0, .4);
+        --panel-shadow: 0 20px 58px rgba(0,0,0,.58), 0 2px 10px rgba(0,0,0,.4);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      color: var(--text);
+      background: var(--desktop);
+      font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    }
+    button, input, select { color: inherit; font: inherit; }
+    button { border: 0; cursor: default; }
+    svg { display: block; }
+
+    .desktop {
+      height: 100%;
+      padding: 44px 24px 70px;
+      background:
+        radial-gradient(circle at 18% 15%, rgba(255,255,255,.55), transparent 32%),
+        linear-gradient(135deg, rgba(200, 213, 227, .56), rgba(224, 226, 230, .2));
+    }
+
+    .app-menubar {
+      position: fixed;
+      z-index: 60;
+      inset: 0 0 auto;
+      display: flex;
+      height: 25px;
+      align-items: center;
+      gap: 1px;
+      padding: 0 14px;
+      border-bottom: 1px solid rgba(60,60,67,.14);
+      background: color-mix(in srgb, var(--window) 91%, transparent);
+      box-shadow: 0 1px 5px rgba(0,0,0,.06);
+      backdrop-filter: blur(24px) saturate(1.35);
+      font-size: 12px;
+    }
+    .app-menubar span { padding: 0 8px; }
+    .app-menubar .app-name { font-weight: 650; }
+
+    .window {
+      position: relative;
+      display: grid;
+      width: 100%;
+      height: 100%;
+      min-width: 1050px;
+      grid-template-columns: 224px minmax(530px, 1fr) 292px;
+      grid-template-rows: 52px minmax(0, 1fr);
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.5);
+      border-radius: 15px;
+      background: var(--window);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(26px) saturate(1.35);
+    }
+
+    .titlebar {
+      grid-column: 1 / 4;
+      display: grid;
+      grid-template-columns: 224px minmax(530px, 1fr) 292px;
+      border-bottom: 1px solid var(--line);
+      background: var(--toolbar);
+    }
+    .title-part {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 7px;
+      padding: 0 12px;
+    }
+    .title-part + .title-part { border-left: 1px solid var(--line); }
+    .traffic { display: flex; gap: 8px; margin-right: 14px; }
+    .traffic span {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      box-shadow: inset 0 0 0 .5px rgba(0,0,0,.16);
+    }
+    .traffic span:nth-child(1) { background: #ff5f57; }
+    .traffic span:nth-child(2) { background: #febc2e; }
+    .traffic span:nth-child(3) { background: #28c840; }
+    .title-name {
+      min-width: 0;
+      overflow: hidden;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .title-count { color: var(--secondary); font-size: 11px; white-space: nowrap; }
+    .spacer { flex: 1; }
+    .search {
+      display: flex;
+      width: min(190px, 20vw);
+      height: 28px;
+      align-items: center;
+      gap: 5px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(127,127,127,.1);
+    }
+    .search svg {
+      width: 13px;
+      height: 13px;
+      flex: 0 0 13px;
+      fill: none;
+      stroke: var(--secondary);
+      stroke-width: 1.8;
+      stroke-linecap: round;
+    }
+    .search input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      color: var(--text);
+      background: transparent;
+    }
+
+    .sidebar {
+      grid-column: 1;
+      grid-row: 2;
+      min-height: 0;
+      overflow: auto;
+      padding: 9px 8px;
+      border-right: 1px solid var(--line);
+      background: var(--sidebar);
+    }
+    .section-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 9px 5px;
+      color: var(--secondary);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .nav-row {
+      display: flex;
+      width: 100%;
+      min-height: 29px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border-radius: 6px;
+      background: transparent;
+      text-align: left;
+    }
+    .nav-row:hover { background: rgba(127,127,127,.08); }
+    .nav-row.selected { background: var(--selection); }
+    .nav-icon {
+      width: 14px;
+      height: 14px;
+      flex: 0 0 14px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.6;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .nav-label {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .inline-rename-input {
+      min-width: 0;
+      height: 22px;
+      flex: 1;
+      padding: 1px 5px;
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      outline: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
+      color: var(--text);
+      background: var(--window);
+      font: inherit;
+    }
+    .inline-rename-input.invalid {
+      border-color: var(--danger);
+      outline-color: color-mix(in srgb, var(--danger) 20%, transparent);
+    }
+    .nav-count {
+      color: var(--secondary);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+    .row-action {
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border-radius: 4px;
+      color: var(--secondary);
+      background: transparent;
+      font-size: 13px;
+      line-height: 16px;
+    }
+    .row-action:hover, .row-action.active { color: var(--text); background: rgba(127,127,127,.14); }
+    .tag-dot {
+      width: 8px;
+      height: 8px;
+      margin: 0 5px;
+      flex: 0 0 8px;
+      border-radius: 50%;
+      background: var(--tag-color, #ff9f0a);
+    }
+    .indent-1 { padding-left: 25px; }
+
+    .content {
+      grid-column: 2;
+      grid-row: 2;
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--content);
+    }
+    .rule-bar {
+      display: flex;
+      min-height: 44px;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      overflow-x: auto;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--content) 93%, var(--sidebar));
+    }
+    .rule-heading {
+      flex: 0 0 auto;
+      color: var(--secondary);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .summary-condition {
+      display: inline-flex;
+      height: 28px;
+      flex: 0 0 auto;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--content) 96%, var(--text) 3%);
+      overflow: hidden;
+    }
+    .summary-chip,
+    .add-chip {
+      height: 27px;
+      flex: 0 0 auto;
+      padding: 0 8px;
+      border-radius: 5px;
+      color: inherit;
+      background: transparent;
+      white-space: nowrap;
+      font-size: 11px;
+    }
+    .summary-chip:hover,
+    .summary-chip.active { background: rgba(127,127,127,.12); }
+    .summary-condition .summary-chip { border-radius: 5px 0 0 5px; }
+    .summary-remove {
+      width: 18px;
+      height: 18px;
+      margin-right: 3px;
+      padding: 0;
+      border-radius: 4px;
+      color: var(--secondary);
+      background: transparent;
+      font-size: 14px;
+      line-height: 16px;
+    }
+    .summary-remove:hover { color: var(--text); background: rgba(127,127,127,.12); }
+    .add-chip { color: var(--accent); }
+    .add-chip:hover,
+    .add-chip.active { background: var(--accent-soft); }
+    .temporary-search {
+      display: inline-flex;
+      height: 28px;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 5px;
+      padding: 0 5px 0 7px;
+      border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
+      border-radius: 6px;
+      color: color-mix(in srgb, var(--accent) 78%, var(--text));
+      background: var(--accent-soft);
+      white-space: nowrap;
+      font-size: 11px;
+    }
+    .scope-summary {
+      display: inline-flex;
+      height: 28px;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 6px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--secondary);
+      background: color-mix(in srgb, var(--content) 96%, var(--text) 3%);
+      white-space: nowrap;
+      font-size: 11px;
+    }
+    .scope-summary .tag-dot { margin: 0; }
+    .relation-connector { flex: 0 0 auto; color: var(--secondary); font-size: 11px; }
+    .rule-divider { width: 1px; height: 22px; flex: 0 0 1px; margin: 0 2px; background: var(--line); }
+    .rule-status {
+      flex: 0 0 auto;
+      padding: 3px 7px;
+      border-radius: 5px;
+      color: #9a5b00;
+      background: rgba(255,159,10,.14);
+      font-size: 11px;
+    }
+    @media (prefers-color-scheme: dark) {
+      .rule-status { color: #ffd08a; background: rgba(255,159,10,.18); }
+    }
+    .bar-spacer { flex: 1; min-width: 8px; }
+    .link-button {
+      min-height: 25px;
+      flex: 0 0 auto;
+      padding: 3px 8px;
+      border-radius: 5px;
+      color: var(--accent);
+      background: transparent;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .link-button:hover { background: var(--accent-soft); }
+    .link-button:disabled { color: var(--tertiary); background: transparent; opacity: .58; }
+    .rule-icon-button {
+      display: inline-grid;
+      width: 28px;
+      height: 28px;
+      flex: 0 0 28px;
+      place-items: center;
+      padding: 0;
+      border-radius: 5px;
+      color: var(--accent);
+      background: transparent;
+    }
+    .rule-icon-button:hover,
+    .rule-icon-button.active { background: var(--accent-soft); }
+    .rule-icon-button:disabled { color: var(--tertiary); background: transparent; opacity: .48; }
+    .rule-icon-button svg {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.65;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .grid-scroll { flex: 1; min-height: 0; overflow: auto; padding: 20px; }
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 180px));
+      gap: 20px 16px;
+      align-content: start;
+    }
+    .video-card {
+      min-width: 0;
+      min-height: 163px;
+      padding: 8px;
+      border-radius: 8px;
+      background: transparent;
+      text-align: center;
+    }
+    .video-card:hover { background: rgba(127,127,127,.12); }
+    .video-card.selected { background: var(--selection); }
+    .thumb {
+      position: relative;
+      aspect-ratio: 1.66 / 1;
+      overflow: hidden;
+      border-radius: 6px;
+      background: #d1d1d6;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
+    }
+    .thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .filename {
+      margin-top: 14px;
+      overflow: hidden;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 500;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .duration {
+      margin-top: 4px;
+      color: var(--secondary);
+      font-size: 11px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    .empty-state {
+      width: min(410px, 82%);
+      margin: 18vh auto 0;
+      color: var(--secondary);
+      text-align: center;
+    }
+    .empty-state svg {
+      width: 34px;
+      height: 34px;
+      margin: 0 auto 12px;
+      fill: none;
+      stroke: var(--tertiary);
+      stroke-width: 1.4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .empty-state strong { display: block; margin-bottom: 6px; color: var(--text); font-size: 15px; }
+    .empty-state button {
+      margin-top: 13px;
+      padding: 5px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--window) 82%, var(--text) 4%);
+    }
+
+    .inspector {
+      grid-column: 3;
+      grid-row: 2;
+      display: flex;
+      min-height: 0;
+      overflow: hidden;
+      border-left: 1px solid var(--line);
+      background: var(--inspector);
+    }
+    .inspector-shell {
+      display: flex;
+      width: 100%;
+      min-height: 0;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+    }
+    .segment-control {
+      display: grid;
+      width: 100%;
+      grid-template-columns: 1fr 1fr;
+      padding: 2px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: rgba(127,127,127,.08);
+    }
+    .segment-button { min-height: 24px; border-radius: 5px; background: transparent; font-size: 11px; }
+    .segment-button.selected {
+      background: color-mix(in srgb, var(--content) 90%, var(--text) 4%);
+      box-shadow: 0 1px 3px rgba(0,0,0,.16);
+    }
+    .tag-search {
+      width: 100%;
+      height: 28px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      outline: 0;
+      background: rgba(127,127,127,.08);
+    }
+    .inspector-scroll { min-height: 0; flex: 1; overflow: auto; }
+    .tag-checkboxes { display: grid; gap: 7px; }
+    .tag-checkbox-row { display: flex; min-height: 22px; align-items: center; gap: 7px; font-size: 12px; }
+    .tag-checkbox-row input { margin: 0; }
+    .tag-empty { color: var(--secondary); font-size: 12px; }
+    .detail-pane { display: grid; gap: 13px; }
+    .detail-filename { display: flex; align-items: flex-start; gap: 6px; font-size: 14px; font-weight: 500; }
+    .detail-filename span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+    .copy-button {
+      min-width: 40px;
+      padding: 2px 5px;
+      border-radius: 5px;
+      color: var(--secondary);
+      background: transparent;
+      font-size: 10px;
+    }
+    .copy-button:hover { background: rgba(127,127,127,.1); }
+    .detail-field { display: grid; gap: 2px; }
+    .detail-title { color: var(--secondary); font-size: 11px; font-weight: 500; }
+    .detail-value { font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; user-select: text; }
+    .inspector-footer { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+    .draft-hint { color: var(--secondary); font-size: 11px; }
+    .footer-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+    .small-button {
+      min-height: 25px;
+      padding: 3px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--window) 80%, var(--text) 4%);
+    }
+    .small-button:disabled { color: var(--tertiary); opacity: .52; }
+
+    .editor-popover {
+      position: absolute;
+      z-index: 44;
+      width: 312px;
+      padding: 13px;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: var(--panel);
+      box-shadow: var(--panel-shadow);
+      backdrop-filter: blur(28px) saturate(1.3);
+    }
+    .editor-popover::before {
+      content: "";
+      position: absolute;
+      top: -6px;
+      left: var(--arrow-left, 24px);
+      width: 10px;
+      height: 10px;
+      transform: rotate(45deg);
+      border-top: 1px solid var(--line-strong);
+      border-left: 1px solid var(--line-strong);
+      background: var(--panel);
+    }
+    .editor-title { margin: 0 0 10px; font-size: 13px; font-weight: 650; }
+    .editor-fields { display: grid; gap: 8px; }
+    .editor-field {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      color: var(--secondary);
+      font-size: 11px;
+    }
+    .editor-field select,
+    .editor-field input {
+      width: 100%;
+      height: 28px;
+      min-width: 0;
+      padding: 0 7px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      outline: 0;
+      color: var(--text);
+      background: color-mix(in srgb, var(--content) 94%, var(--text) 4%);
+    }
+    .editor-field input:focus,
+    .editor-field select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+    .editor-actions {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+    .editor-validation {
+      min-height: 14px;
+      margin-top: 8px;
+      color: var(--danger);
+      font-size: 10px;
+    }
+    .editor-validation:empty { display: none; }
+    .editor-delete { color: var(--danger); }
+    .condition-type-list { display: grid; gap: 2px; }
+    .condition-type-button {
+      display: flex;
+      width: 100%;
+      min-height: 28px;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 5px;
+      background: transparent;
+      text-align: left;
+    }
+    .condition-type-button:hover { color: #fff; background: var(--accent); }
+
+    .standard-button {
+      min-height: 27px;
+      padding: 3px 11px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--window) 82%, var(--text) 4%);
+      white-space: nowrap;
+    }
+    .primary-button { color: #fff; border-color: var(--accent); background: var(--accent); }
+    .danger-button { color: #fff; border-color: var(--danger); background: var(--danger); }
+    .menu {
+      position: absolute;
+      z-index: 46;
+      min-width: 184px;
+      padding: 5px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--panel-shadow);
+    }
+    .smart-menu { top: 156px; left: 175px; width: 160px; }
+    .menu-separator { height: 1px; margin: 4px; background: var(--line); }
+    .menu-item {
+      display: flex;
+      width: 100%;
+      min-height: 25px;
+      align-items: center;
+      gap: 7px;
+      padding: 3px 8px;
+      border-radius: 5px;
+      background: transparent;
+      text-align: left;
+    }
+    .menu-item:hover { color: #fff; background: var(--accent); }
+    .menu-item.danger { color: var(--danger); }
+    .menu-item.danger:hover { color: #fff; background: var(--danger); }
+    .modal-backdrop {
+      position: absolute;
+      z-index: 50;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(0,0,0,.22);
+      backdrop-filter: blur(2px);
+    }
+    .dialog {
+      width: 410px;
+      padding: 18px;
+      border: 1px solid rgba(255,255,255,.32);
+      border-radius: 12px;
+      background: var(--panel);
+      box-shadow: 0 26px 72px rgba(0,0,0,.38);
+    }
+    .dialog h2 { margin: 0 0 6px; font-size: 16px; }
+    .dialog-copy { margin: 0 0 15px; color: var(--secondary); font-size: 12px; }
+    .form-label { display: grid; gap: 5px; margin-bottom: 13px; font-size: 11px; font-weight: 600; }
+    .form-label input {
+      width: 100%;
+      height: 29px;
+      padding: 0 8px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      outline: 0;
+      background: color-mix(in srgb, var(--content) 94%, var(--text) 4%);
+    }
+    .form-label input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+    .error-text { margin: -7px 0 10px; color: var(--danger); font-size: 11px; }
+    .rule-summary {
+      display: grid;
+      gap: 6px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: color-mix(in srgb, var(--content) 94%, var(--sidebar));
+      font-size: 11px;
+    }
+    .summary-row { display: grid; grid-template-columns: 56px 1fr; gap: 7px; }
+    .summary-row span:first-child { color: var(--secondary); }
+    .dialog-note { display: flex; gap: 7px; margin: 12px 0 0; color: var(--secondary); font-size: 11px; }
+    .dialog-note svg {
+      width: 14px;
+      height: 14px;
+      flex: 0 0 14px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.6;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+    .demo-bar {
+      position: fixed;
+      z-index: 70;
+      right: 12px;
+      bottom: 12px;
+      left: 12px;
+      display: flex;
+      min-height: 38px;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 8px;
+      overflow-x: auto;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 9px;
+      color: #fff;
+      background: rgba(24,25,28,.88);
+      box-shadow: 0 10px 24px rgba(0,0,0,.25);
+      backdrop-filter: blur(18px);
+    }
+    .demo-label { padding: 0 6px; color: rgba(255,255,255,.66); font-size: 10px; white-space: nowrap; }
+    .demo-button, .demo-link {
+      display: inline-flex;
+      height: 27px;
+      align-items: center;
+      padding: 0 10px;
+      border-radius: 6px;
+      color: #fff;
+      background: transparent;
+      font-size: 11px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .demo-button:hover, .demo-link:hover { background: rgba(255,255,255,.13); }
+    .demo-button.active { background: rgba(255,255,255,.2); }
+    .demo-separator { width: 1px; height: 18px; flex: 0 0 1px; background: rgba(255,255,255,.2); }
+
+    @media (max-width: 1150px) {
+      .desktop { padding-right: 10px; padding-left: 10px; }
+      .window { grid-template-columns: 208px minmax(500px, 1fr) 270px; }
+      .titlebar { grid-template-columns: 208px minmax(500px, 1fr) 270px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-menubar" aria-label="macOS 菜单栏">
+    <span class="app-name">FileFacet</span>
+    <span>文件</span>
+    <span>编辑</span>
+    <span>显示</span>
+    <span>窗口</span>
+    <span>帮助</span>
+  </header>
+
+  <main class="desktop">
+    <section class="window" id="appWindow" aria-label="FileFacet 排序、筛选与智能分类原型">
+      <header class="titlebar">
+        <div class="title-part">
+          <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="title-name">资料库</div>
+        </div>
+        <div class="title-part">
+          <div class="title-name" id="viewTitle">所有视频</div>
+          <div class="title-count" id="viewCount">12 个视频</div>
+          <div class="spacer"></div>
+          <label class="search" title="搜索文件名（⌘F）">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"></circle><path d="m10.5 10.5 3 3"></path></svg>
+            <input id="searchInput" type="search" placeholder="搜索文件名">
+          </label>
+        </div>
+        <div class="title-part"><div class="spacer"></div></div>
+      </header>
+
+      <aside class="sidebar" aria-label="资料库侧栏">
+        <div class="section-label">资料库</div>
+        <button class="nav-row selected" data-view="all">
+          <svg class="nav-icon" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M7 9h10M7 13h7"></path></svg>
+          <span class="nav-label">所有视频</span><span class="nav-count" id="allCount">12</span>
+        </button>
+        <button class="nav-row" data-view="recent">
+          <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+          <span class="nav-label">最近导入</span><span class="nav-count">4</span>
+        </button>
+
+        <section id="smartSection" hidden>
+          <div class="section-label"><span>智能分类</span></div>
+          <div class="nav-row" id="smartRow">
+            <div class="nav-row" id="smartSelect" data-view="smart" role="button" tabindex="0" style="min-width:0; flex:1; padding:0; border-radius:0">
+              <svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 5h16l-6.2 7.1v5.2l-3.6 1.8v-7z"></path><path d="m17 15 .7 1.5 1.6.2-1.2 1.1.3 1.6-1.4-.8-1.4.8.3-1.6-1.2-1.1 1.6-.2z"></path></svg>
+              <span class="nav-label" id="smartName">4K 旅行长片</span>
+              <input class="inline-rename-input" id="smartRenameInput" aria-label="重命名智能分类" hidden>
+              <span class="nav-count" id="smartCount">4</span>
+            </div>
+            <button class="row-action" id="smartAction" aria-label="智能分类操作" aria-expanded="false">•••</button>
+          </div>
+        </section>
+
+        <div class="section-label">标签</div>
+        <button class="nav-row" data-scope-tag="旅行"><span class="tag-dot" style="--tag-color:#ff9f0a"></span><span class="nav-label">旅行</span><span class="nav-count">6</span></button>
+        <button class="nav-row indent-1" data-scope-tag="城市"><span class="tag-dot" style="--tag-color:#ffd60a"></span><span class="nav-label">城市</span><span class="nav-count">3</span></button>
+        <button class="nav-row" data-scope-tag="工作"><span class="tag-dot" style="--tag-color:#64d2ff"></span><span class="nav-label">工作</span><span class="nav-count">4</span></button>
+        <button class="nav-row" data-scope-tag="待整理"><span class="tag-dot" style="--tag-color:#30d158"></span><span class="nav-label">待整理</span><span class="nav-count">3</span></button>
+      </aside>
+
+      <section class="content">
+        <div class="rule-bar" id="ruleBar" aria-label="筛选和排序规则"></div>
+        <div class="grid-scroll">
+          <div class="video-grid" id="videoGrid"></div>
+          <div class="empty-state" id="emptyState" hidden>
+            <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M7 8h26L23 20v8l-6 3V20z"></path><path d="m28 28 6 6M34 28l-6 6"></path></svg>
+            <strong>没有符合当前条件的视频</strong>
+            <span>可以直接调整上方的搜索、条件关系或筛选值。</span>
+            <button id="emptyClearButton">清除当前条件</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="inspector" aria-label="视频检查器">
+        <div class="inspector-shell">
+          <div class="segment-control" aria-label="检查器内容">
+            <button class="segment-button selected" data-inspector-mode="tags">标签</button>
+            <button class="segment-button" data-inspector-mode="details">详细信息</button>
+          </div>
+          <input class="tag-search" id="tagSearch" type="search" placeholder="搜索标签">
+          <div class="inspector-scroll">
+            <section id="tagsPane"><div class="tag-checkboxes" id="tagCheckboxes"></div></section>
+            <section class="detail-pane" id="detailsPane" hidden>
+              <div class="detail-filename"><span id="detailFilename"></span><button class="copy-button">复制</button></div>
+              <div class="detail-field"><span class="detail-title">格式</span><span class="detail-value" id="formatValue"></span></div>
+              <div class="detail-field"><span class="detail-title">大小</span><span class="detail-value" id="sizeValue"></span></div>
+              <div class="detail-field"><span class="detail-title">时长</span><span class="detail-value" id="durationValue"></span></div>
+              <div class="detail-field"><span class="detail-title">分辨率</span><span class="detail-value" id="resolutionValue"></span></div>
+              <div class="detail-field"><span class="detail-title">创建时间</span><span class="detail-value" id="createdValue"></span></div>
+              <div class="detail-field"><span class="detail-title">修改时间</span><span class="detail-value" id="modifiedValue"></span></div>
+              <div class="detail-field"><span class="detail-title">路径</span><span class="detail-value" id="pathValue"></span></div>
+            </section>
+          </div>
+          <div class="inspector-footer" id="inspectorFooter">
+            <div class="draft-hint">勾选变化后统一应用。</div>
+            <div class="footer-buttons"><button class="small-button" disabled>取消</button><button class="small-button" disabled>应用</button></div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="editor-popover" id="editorPopover" aria-label="编辑规则" hidden></section>
+
+      <section class="menu smart-menu" id="smartMenu" aria-label="智能分类操作" hidden>
+        <button class="menu-item" id="renameSmartButton">重命名…</button>
+        <div class="menu-separator"></div>
+        <button class="menu-item danger" id="deleteSmartButton">删除智能分类…</button>
+      </section>
+
+      <div class="modal-backdrop" id="saveBackdrop" hidden>
+        <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="saveTitle">
+          <h2 id="saveTitle">存为智能分类</h2>
+          <p class="dialog-copy" id="saveCopy">保存当前搜索、筛选条件和排序方式。</p>
+          <label class="form-label">名称<input id="smartNameInput" value="4K 旅行长片" autocomplete="off"></label>
+          <div class="error-text" id="nameError" hidden>请输入名称。</div>
+          <div class="rule-summary" id="saveRuleSummary"></div>
+          <div class="dialog-note">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 10v6M12 7h.01"></path></svg>
+            <span>智能分类保存规则，匹配结果会随资料库自动更新。</span>
+          </div>
+          <div class="dialog-actions">
+            <button class="standard-button" id="cancelSaveButton">取消</button>
+            <button class="standard-button primary-button" id="confirmSaveButton">保存</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="modal-backdrop" id="deleteBackdrop" hidden>
+        <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="deleteTitle">
+          <h2 id="deleteTitle">删除“4K 旅行长片”？</h2>
+          <p class="dialog-copy">这个智能分类的规则会被删除。资料库中的视频、文件和标签不会受到影响。</p>
+          <div class="dialog-actions">
+            <button class="standard-button" id="cancelDeleteButton">取消</button>
+            <button class="standard-button danger-button" id="confirmDeleteButton">删除</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="modal-backdrop" id="leaveBackdrop" hidden>
+        <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="leaveTitle">
+          <h2 id="leaveTitle">保存对“4K 海岸旅行片”的更改？</h2>
+          <p class="dialog-copy">当前结果使用了尚未保存的规则。请选择如何处理这些更改，再前往其他分类。</p>
+          <div class="dialog-actions">
+            <button class="standard-button" id="cancelLeaveButton">取消</button>
+            <button class="standard-button" id="discardLeaveButton">放弃更改</button>
+            <button class="standard-button primary-button" id="updateLeaveButton">更新并继续</button>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <nav class="demo-bar" aria-label="原型状态控制">
+    <span class="demo-label">原型状态</span>
+    <button class="demo-button active" data-demo-state="default">默认资料库</button>
+    <button class="demo-button" data-demo-state="tag-search">标签内搜索</button>
+    <button class="demo-button" data-demo-state="filter">编辑条件弹层</button>
+    <button class="demo-button" data-demo-state="temporary">临时结果</button>
+    <button class="demo-button" data-demo-state="save">保存智能分类</button>
+    <button class="demo-button" data-demo-state="saved">已保存</button>
+    <button class="demo-button" data-demo-state="dirty">规则已修改</button>
+    <button class="demo-button" data-demo-state="leave">离开草稿</button>
+    <button class="demo-button" data-demo-state="empty">无结果</button>
+    <span class="demo-separator"></span>
+    <span class="demo-label">关联原型</span>
+    <a class="demo-link" href="../offline-library/index.html">离线资料库</a>
+    <a class="demo-link" href="../manual-video-import/index.html">基础导入</a>
+    <a class="demo-link" href="../folder-structure-tags/index.html">目录标签导入</a>
+    <a class="demo-link" href="../tag-sorting/index.html">标签排序</a>
+  </nav>
+
+  <script>
+    const videos = [
+      { id: 1, name: "城市晨光.mp4", image: "../../assets/readme/fictional-posters/02-sci-fi-allegory.png", path: "项目素材 / 城市 / 城市晨光.mp4", duration: 78, width: 3840, height: 2160, size: 1840, added: 2, created: 28, modified: 1, tags: ["工作", "城市"], recent: true },
+      { id: 2, name: "雨夜电车.mov", image: "../../assets/readme/fictional-posters/04-romantic-drama.png", path: "旅行素材 / 日本 / 东京 / 雨夜电车.mov", duration: 42, width: 1920, height: 1080, size: 842, added: 19, created: 42, modified: 16, tags: ["旅行", "城市"], recent: false },
+      { id: 3, name: "山间列车.mp4", image: "../../assets/readme/fictional-posters/12-action-adventure.png", path: "旅行素材 / 瑞士 / 山间列车.mp4", duration: 126, width: 3840, height: 2160, size: 2458, added: 14, created: 67, modified: 5, tags: ["旅行"], recent: false },
+      { id: 4, name: "产品概念片.mov", image: "../../assets/readme/fictional-posters/09-retro-sci-fi.png", path: "工作 / 产品 / 产品概念片.mov", duration: 58, width: 1920, height: 1080, size: 615, added: 1, created: 12, modified: 1, tags: ["工作", "待整理"], recent: true },
+      { id: 5, name: "古堡外景.m4v", image: "../../assets/readme/fictional-posters/06-castle-thriller.png", path: "旅行素材 / 英国 / 古堡外景.m4v", duration: 192, width: 3840, height: 2160, size: 3174, added: 33, created: 110, modified: 22, tags: ["旅行"], recent: false },
+      { id: 6, name: "深夜访谈.mp4", image: "../../assets/readme/fictional-posters/07-mystery-crime.png", path: "访谈 / 深夜访谈.mp4", duration: 271, width: 1920, height: 1080, size: 1228, added: 10, created: 21, modified: 8, tags: ["工作"], recent: false },
+      { id: 7, name: "荒野公路.mov", image: "../../assets/readme/fictional-posters/01-zombie-horror.png", path: "旅行素材 / 美国 / 荒野公路.mov", duration: 106, width: 3840, height: 2160, size: 2048, added: 24, created: 80, modified: 10, tags: ["旅行", "待整理"], recent: false },
+      { id: 8, name: "创意工作坊.mp4", image: "../../assets/readme/fictional-posters/05-social-drama.png", path: "工作 / 研究 / 创意工作坊.mp4", duration: 144, width: 1920, height: 1080, size: 936, added: 3, created: 9, modified: 3, tags: ["工作"], recent: true },
+      { id: 9, name: "海岸日落.mov", image: "../../assets/readme/fictional-posters/08-absurdist-cult.png", path: "旅行素材 / 葡萄牙 / 海岸日落.mov", duration: 88, width: 3840, height: 2160, size: 1690, added: 5, created: 48, modified: 2, tags: ["旅行"], recent: false },
+      { id: 10, name: "街角咖啡店.mp4", image: "../../assets/readme/fictional-posters/03-physical-comedy.png", path: "生活 / 城市 / 街角咖啡店.mp4", duration: 35, width: 1920, height: 1080, size: 530, added: 4, created: 4, modified: 4, tags: ["城市"], recent: true },
+      { id: 11, name: "旧片扫描.mov", image: "../../assets/readme/fictional-posters/10-psychological-thriller.png", path: "归档 / 旧片扫描.mov", duration: 324, width: 1280, height: 720, size: 2600, added: 91, created: 900, modified: 74, tags: [], recent: false },
+      { id: 12, name: "森林雾气.mp4", image: "../../assets/readme/fictional-posters/11-fantasy-horror.png", path: "自然 / 森林雾气.mp4", duration: 64, width: 3840, height: 2160, size: 1410, added: 45, created: 53, modified: 18, tags: ["待整理"], recent: false }
+    ];
+
+    const allTags = ["旅行", "城市", "工作", "待整理"];
+    const tagColors = { "旅行": "#ff9f0a", "城市": "#ffd60a", "工作": "#64d2ff", "待整理": "#30d158" };
+    const typeNames = {
+      tags: "标签",
+      untagged: "未打标签",
+      added: "加入时间",
+      created: "创建时间",
+      duration: "时长",
+      size: "文件大小",
+      resolution: "分辨率"
+    };
+    const sortNames = {
+      name: "文件名",
+      added: "加入时间",
+      created: "创建时间",
+      modified: "修改时间",
+      duration: "时长",
+      size: "文件大小",
+      resolution: "分辨率"
+    };
+    const presetFilters = [
+      { type: "tags", operator: "all", tags: ["旅行"] },
+      { type: "duration", operator: "gte", value: 60 },
+      { type: "resolution", operator: "gte", value: 3840 }
+    ];
+
+    let currentView = "all";
+    let currentScopeTag = null;
+    let requiredTagRule = "";
+    let selectedID = 1;
+    let inspectorMode = "tags";
+    let appliedFilters = [];
+    let matchMode = "all";
+    let filenameRule = "";
+    let sortKey = "name";
+    let sortDirection = "asc";
+    let savedRule = null;
+    let smartDirty = false;
+    let smartRenameActive = false;
+    let activeEditor = null;
+    let editorDraft = null;
+    let pendingNavigation = null;
+
+    const appWindow = document.getElementById("appWindow");
+    const searchInput = document.getElementById("searchInput");
+    const videoGrid = document.getElementById("videoGrid");
+    const emptyState = document.getElementById("emptyState");
+    const ruleBar = document.getElementById("ruleBar");
+    const editorPopover = document.getElementById("editorPopover");
+    const saveBackdrop = document.getElementById("saveBackdrop");
+    const deleteBackdrop = document.getElementById("deleteBackdrop");
+    const leaveBackdrop = document.getElementById("leaveBackdrop");
+    const smartMenu = document.getElementById("smartMenu");
+    const smartSection = document.getElementById("smartSection");
+    const tagSearch = document.getElementById("tagSearch");
+    const tagsPane = document.getElementById("tagsPane");
+    const detailsPane = document.getElementById("detailsPane");
+    const inspectorFooter = document.getElementById("inspectorFooter");
+
+    function clone(value) {
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function escapeAttribute(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    function optionMarkup(value, label, current) {
+      return `<option value="${value}"${String(value) === String(current) ? " selected" : ""}>${label}</option>`;
+    }
+
+    function formatDuration(seconds) {
+      const minutes = Math.floor(seconds / 60);
+      const rest = seconds % 60;
+      return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+    }
+
+    function formatSize(megabytes) {
+      return megabytes >= 1024 ? `${(megabytes / 1024).toFixed(1)} GB` : `${megabytes} MB`;
+    }
+
+    function sortDirectionCopy(key = sortKey) {
+      if (key === "name") return { asc: "A 到 Z", desc: "Z 到 A" };
+      if (["added", "created", "modified"].includes(key)) return { asc: "由新到旧", desc: "由旧到新" };
+      return { asc: "由小到大", desc: "由大到小" };
+    }
+
+    function conditionLabel(condition) {
+      if (condition.type === "tags") {
+        const operator = { all: "包含全部", any: "包含任一", exclude: "排除" }[condition.operator];
+        return `标签${operator}：${condition.tags.join("、")}`;
+      }
+      if (condition.type === "untagged") return "未打标签";
+      if (condition.type === "added") return `最近 ${condition.value} 天加入`;
+      if (condition.type === "created") return `最近 ${condition.value} 天创建`;
+      if (condition.type === "duration") return `时长 ≥ ${condition.value / 60} 分钟`;
+      if (condition.type === "size") return `大小 ≥ ${formatSize(condition.value)}`;
+      if (condition.type === "resolution") return condition.value === 3840 ? "分辨率 ≥ 4K" : "分辨率 ≥ 1080p";
+      return typeNames[condition.type];
+    }
+
+    function matchesCondition(video, condition) {
+      if (condition.type === "tags") {
+        if (condition.operator === "all") return condition.tags.every(tag => video.tags.includes(tag));
+        if (condition.operator === "any") return condition.tags.some(tag => video.tags.includes(tag));
+        return condition.tags.every(tag => !video.tags.includes(tag));
+      }
+      if (condition.type === "untagged") return video.tags.length === 0;
+      if (condition.type === "added") return video.added <= condition.value;
+      if (condition.type === "created") return video.created <= condition.value;
+      if (condition.type === "duration") return video.duration >= condition.value;
+      if (condition.type === "size") return video.size >= condition.value;
+      if (condition.type === "resolution") return video.width >= condition.value;
+      return true;
+    }
+
+    function applyRule(items, query, storedFilename, requiredTag, filters, mode) {
+      const normalizedQuery = query.trim().toLocaleLowerCase();
+      const normalizedStoredFilename = storedFilename.trim().toLocaleLowerCase();
+      return items.filter(video => {
+        const normalizedFilename = video.name.toLocaleLowerCase();
+        if (normalizedQuery && !normalizedFilename.includes(normalizedQuery)) return false;
+        if (normalizedStoredFilename && !normalizedFilename.includes(normalizedStoredFilename)) return false;
+        if (requiredTag && !video.tags.includes(requiredTag)) return false;
+        if (filters.length === 0) return true;
+        const results = filters.map(condition => matchesCondition(video, condition));
+        return mode === "any" ? results.some(Boolean) : results.every(Boolean);
+      });
+    }
+
+    function sortVideos(items, key, direction) {
+      const multiplier = direction === "asc" ? 1 : -1;
+      return [...items].sort((left, right) => {
+        const leftValue = key === "resolution" ? left.width : left[key];
+        const rightValue = key === "resolution" ? right.width : right[key];
+        return typeof leftValue === "string"
+          ? leftValue.localeCompare(rightValue, "zh-CN") * multiplier
+          : (leftValue - rightValue) * multiplier;
+      });
+    }
+
+    function visibleVideos() {
+      let source = currentView === "recent" ? videos.filter(video => video.recent) : videos;
+      if (currentView === "tag" && currentScopeTag) {
+        source = source.filter(video => video.tags.includes(currentScopeTag));
+      }
+      source = applyRule(source, searchInput.value, filenameRule, requiredTagRule, appliedFilters, matchMode);
+      return sortVideos(source, sortKey, sortDirection);
+    }
+
+    function renderSidebar() {
+      document.querySelectorAll("[data-view]").forEach(row => {
+        row.classList.toggle("selected", row.dataset.view === currentView);
+      });
+      document.querySelectorAll("[data-scope-tag]").forEach(row => {
+        row.classList.toggle("selected", currentView === "tag" && row.dataset.scopeTag === currentScopeTag);
+      });
+      smartSection.hidden = !savedRule;
+      if (savedRule) {
+        const smartName = document.getElementById("smartName");
+        const smartRenameInput = document.getElementById("smartRenameInput");
+        smartName.textContent = savedRule.name;
+        smartName.hidden = smartRenameActive;
+        smartRenameInput.hidden = !smartRenameActive;
+        document.getElementById("smartAction").hidden = smartRenameActive;
+        document.getElementById("smartCount").textContent = applyRule(
+          videos,
+          "",
+          savedRule.filenameRule,
+          savedRule.requiredTagRule,
+          savedRule.filters,
+          savedRule.matchMode
+        ).length;
+      }
+    }
+
+    function summaryConditionMarkup(condition, index) {
+      const active = activeEditor?.kind === "condition" && activeEditor.index === index ? " active" : "";
+      return `<span class="summary-condition"><button class="summary-chip${active}" data-edit-condition="${index}">${escapeAttribute(conditionLabel(condition))}</button><button class="summary-remove" data-remove-condition="${index}" aria-label="移除条件">×</button></span>`;
+    }
+
+    function renderRuleBar() {
+      const pieces = [];
+      const temporarySearch = searchInput.value.trim();
+
+      if (currentView === "tag" && currentScopeTag) {
+        pieces.push(`<span class="scope-summary"><span class="tag-dot" style="--tag-color:${tagColors[currentScopeTag]}"></span><span>范围：${escapeAttribute(currentScopeTag)}</span></span>`);
+      }
+
+      if (temporarySearch) {
+        if (pieces.length) pieces.push('<span class="relation-connector">并且</span>');
+        pieces.push(`<span class="temporary-search"><span>临时搜索：${escapeAttribute(temporarySearch)}</span><button class="summary-remove" data-remove-temporary-search aria-label="清除临时搜索">×</button></span>`);
+      }
+
+      if (requiredTagRule) {
+        if (pieces.length) pieces.push('<span class="relation-connector">并且</span>');
+        const active = activeEditor?.kind === "required-tag" ? " active" : "";
+        pieces.push(`<span class="summary-condition"><button class="summary-chip${active}" data-edit-required-tag>标签包含“${escapeAttribute(requiredTagRule)}”</button><button class="summary-remove" data-remove-required-tag aria-label="移除标签条件">×</button></span>`);
+      }
+
+      if (filenameRule) {
+        if (pieces.length) pieces.push('<span class="relation-connector">并且</span>');
+        const active = activeEditor?.kind === "filename" ? " active" : "";
+        pieces.push(`<span class="summary-condition"><button class="summary-chip${active}" data-edit-filename>文件名包含“${escapeAttribute(filenameRule)}”</button><button class="summary-remove" data-remove-filename-rule aria-label="移除文件名条件">×</button></span>`);
+      }
+
+      if (appliedFilters.length) {
+        if (pieces.length) pieces.push('<span class="relation-connector">并且</span>');
+        const active = activeEditor?.kind === "match" ? " active" : "";
+        pieces.push(`<button class="summary-chip${active}" data-edit-match>符合${matchMode === "all" ? "全部" : "任一"}条件</button>`);
+        pieces.push(...appliedFilters.map(summaryConditionMarkup));
+      }
+
+      const addActive = activeEditor?.kind === "add" || (activeEditor?.kind === "filename" && !filenameRule) ? " active" : "";
+      const sortActive = activeEditor?.kind === "sort" ? " active" : "";
+      const hasCustomSort = sortKey !== "name" || sortDirection !== "asc";
+      const hasEditableRule = requiredTagRule || temporarySearch || filenameRule || appliedFilters.length || sortKey !== "name" || sortDirection !== "asc";
+      const hasSavableRule = currentScopeTag || hasEditableRule;
+
+      let actions = "";
+      if (currentView === "smart" && smartDirty) {
+        actions = `<span class="rule-status">规则已修改</span><button class="link-button" data-rule-action="revert">还原</button><button class="link-button" data-rule-action="save-as">另存为…</button><button class="link-button" data-rule-action="update">更新</button>`;
+      } else if (currentView !== "smart") {
+        actions = `
+          <button class="rule-icon-button" data-rule-action="clear" title="清除搜索、筛选和排序" aria-label="清除搜索、筛选和排序"${hasEditableRule ? "" : " disabled"}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="m9 9 6 6M15 9l-6 6"></path></svg>
+          </button>
+          <button class="link-button" data-rule-action="save-as" title="存为智能分类…" aria-label="存为智能分类…"${hasSavableRule ? "" : " disabled"}>保存</button>`;
+      }
+
+      const hasVisibleFilterCondition = currentScopeTag || requiredTagRule || temporarySearch || filenameRule || appliedFilters.length;
+      const addFilterControl = hasVisibleFilterCondition
+        ? `<button class="rule-icon-button${addActive}" data-open-add title="添加筛选条件（⇧⌘F）" aria-label="添加筛选条件（⇧⌘F）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M7.5 9h9M9 12h6M10.5 15h3"></path></svg></button>`
+        : `<button class="add-chip${addActive}" data-open-add title="添加筛选条件（⇧⌘F）">添加筛选条件</button>`;
+
+      ruleBar.innerHTML = `
+        <span class="rule-heading">${currentView === "smart" && savedRule ? escapeAttribute(savedRule.name) : "筛选"}</span>
+        ${pieces.join("")}
+        ${addFilterControl}
+        <span class="rule-divider"></span>
+        ${hasCustomSort
+          ? `<span class="summary-condition"><button class="summary-chip${sortActive}" data-edit-sort>排序：${sortNames[sortKey]} · ${sortDirectionCopy()[sortDirection]}</button><button class="summary-remove" data-remove-sort aria-label="恢复默认排序">×</button></span>`
+          : `<button class="add-chip${sortActive}" data-edit-sort title="添加排序">添加排序</button>`}
+        <span class="bar-spacer"></span>
+        ${actions}
+      `;
+    }
+
+    function conditionEditorFields(condition) {
+      const typeOptions = Object.entries(typeNames)
+        .map(([value, label]) => optionMarkup(value, label, condition.type))
+        .join("");
+      const fields = [`<label class="editor-field"><span>条件</span><select data-editor-field="type">${typeOptions}</select></label>`];
+
+      if (condition.type === "tags") {
+        const operators = [["all", "包含全部"], ["any", "包含任一"], ["exclude", "排除"]]
+          .map(([value, label]) => optionMarkup(value, label, condition.operator))
+          .join("");
+        fields.push(`<label class="editor-field"><span>关系</span><select data-editor-field="operator">${operators}</select></label>`);
+        fields.push(`<label class="editor-field"><span>标签</span><input data-editor-field="tags" value="${escapeAttribute(condition.tags.join("、"))}" placeholder="以顿号分隔"></label>`);
+      } else if (condition.type !== "untagged") {
+        const definitions = {
+          added: [["7", "最近 7 天"], ["30", "最近 30 天"], ["90", "最近 90 天"]],
+          created: [["7", "最近 7 天"], ["30", "最近 30 天"], ["90", "最近 90 天"]],
+          duration: [["60", "至少 1 分钟"], ["120", "至少 2 分钟"], ["300", "至少 5 分钟"]],
+          size: [["500", "至少 500 MB"], ["1024", "至少 1 GB"], ["2048", "至少 2 GB"]],
+          resolution: [["1920", "至少 1080p"], ["3840", "至少 4K"]]
+        };
+        const values = definitions[condition.type]
+          .map(([value, label]) => optionMarkup(value, label, condition.value))
+          .join("");
+        fields.push(`<label class="editor-field"><span>范围</span><select data-editor-field="value">${values}</select></label>`);
+      }
+      return fields.join("");
+    }
+
+    function normalizedCondition(condition) {
+      if (condition.type !== "tags") return condition;
+      return {
+        ...condition,
+        tags: [...new Set(condition.tags)].sort((left, right) => left.localeCompare(right, "zh-CN"))
+      };
+    }
+
+    function conditionsEqual(left, right) {
+      return JSON.stringify(normalizedCondition(left)) === JSON.stringify(normalizedCondition(right));
+    }
+
+    function editorValidationMessage() {
+      if (!activeEditor || activeEditor.kind === "add") return "";
+      if (activeEditor.kind === "filename") {
+        const value = editorDraft.filename.trim();
+        if (!value) return "请输入文件名文字。";
+        if (filenameRule && filenameRule.toLocaleLowerCase() === value.toLocaleLowerCase() && activeEditor.isNew) {
+          return "相同的筛选条件已经存在。";
+        }
+      }
+      if (activeEditor.kind === "condition") {
+        const condition = editorDraft.condition;
+        if (condition.type === "tags" && condition.tags.length === 0) return "请至少选择一个标签。";
+        const hasDuplicate = appliedFilters.some((existing, index) => {
+          if (!activeEditor.isNew && index === activeEditor.index) return false;
+          return conditionsEqual(existing, condition);
+        });
+        if (hasDuplicate) return "相同的筛选条件已经存在。";
+      }
+      if (activeEditor.kind === "sort" && activeEditor.isNew
+          && editorDraft.sortKey === "name" && editorDraft.sortDirection === "asc") {
+        return "请选择一种非默认排序。";
+      }
+      return "";
+    }
+
+    function editorActions(deleteTitle = "") {
+      const validation = editorValidationMessage();
+      const deleteButton = deleteTitle && !activeEditor.isNew
+        ? `<button class="standard-button editor-delete" data-editor-delete>${deleteTitle}</button>`
+        : "";
+      return `<div class="editor-validation" data-editor-validation>${validation}</div><div class="editor-actions">${deleteButton}<span class="bar-spacer"></span><button class="standard-button" data-cancel-editor>取消</button><button class="standard-button" data-commit-editor${validation ? " disabled" : ""}>完成</button></div>`;
+    }
+
+    function refreshEditorValidation() {
+      const validation = editorValidationMessage();
+      const label = editorPopover.querySelector("[data-editor-validation]");
+      const commit = editorPopover.querySelector("[data-commit-editor]");
+      if (label) label.textContent = validation;
+      if (commit) commit.disabled = Boolean(validation);
+    }
+
+    function renderEditor() {
+      if (!activeEditor) {
+        editorPopover.hidden = true;
+        return;
+      }
+
+      if (activeEditor.kind === "add") {
+        const filenameButton = filenameRule
+          ? ""
+          : '<button class="condition-type-button" data-add-type="filename">文件名</button>';
+        editorPopover.innerHTML = `<h2 class="editor-title">添加筛选条件</h2><div class="condition-type-list">${filenameButton}${Object.entries(typeNames).map(([value, label]) => `<button class="condition-type-button" data-add-type="${value}">${label}</button>`).join("")}</div>`;
+      }
+
+      if (activeEditor.kind === "match") {
+        editorPopover.innerHTML = `<h2 class="editor-title">筛选条件关系</h2><div class="condition-type-list"><button class="condition-type-button" data-set-match="all">${editorDraft.matchMode === "all" ? "✓" : "　"}&nbsp; 符合全部条件</button><button class="condition-type-button" data-set-match="any">${editorDraft.matchMode === "any" ? "✓" : "　"}&nbsp; 符合任一条件</button></div>${editorActions()}`;
+      }
+
+      if (activeEditor.kind === "filename") {
+        editorPopover.innerHTML = `<h2 class="editor-title">编辑文件名条件</h2><div class="editor-fields"><label class="editor-field"><span>关系</span><select disabled><option>包含</option></select></label><label class="editor-field"><span>文字</span><input data-editor-filename value="${escapeAttribute(editorDraft.filename)}" autofocus></label></div>${editorActions("移除条件")}`;
+      }
+
+      if (activeEditor.kind === "required-tag") {
+        const tags = allTags.map(tag => optionMarkup(tag, tag, editorDraft.requiredTag)).join("");
+        editorPopover.innerHTML = `<h2 class="editor-title">编辑标签条件</h2><div class="editor-fields"><label class="editor-field"><span>关系</span><select disabled><option>包含</option></select></label><label class="editor-field"><span>标签</span><select data-editor-required-tag>${tags}</select></label></div>${editorActions("移除条件")}`;
+      }
+
+      if (activeEditor.kind === "condition") {
+        editorPopover.innerHTML = `<h2 class="editor-title">编辑筛选条件</h2><div class="editor-fields">${conditionEditorFields(editorDraft.condition)}</div>${editorActions("移除条件")}`;
+      }
+
+      if (activeEditor.kind === "sort") {
+        const keys = Object.entries(sortNames).map(([value, label]) => optionMarkup(value, label, editorDraft.sortKey)).join("");
+        const directions = Object.entries(sortDirectionCopy(editorDraft.sortKey)).map(([value, label]) => optionMarkup(value, label, editorDraft.sortDirection)).join("");
+        editorPopover.innerHTML = `<h2 class="editor-title">排序视频</h2><div class="editor-fields"><label class="editor-field"><span>排序依据</span><select data-editor-sort-key>${keys}</select></label><label class="editor-field"><span>顺序</span><select data-editor-sort-direction>${directions}</select></label></div>${editorActions("恢复默认")}`;
+      }
+      editorPopover.hidden = false;
+    }
+
+    function openEditor(kind, trigger, index = null) {
+      const triggerRect = trigger.getBoundingClientRect();
+      const windowRect = appWindow.getBoundingClientRect();
+      const isNew = (kind === "sort" && sortKey === "name" && sortDirection === "asc");
+      activeEditor = { kind, index, isNew };
+      if (kind === "match") editorDraft = { matchMode };
+      if (kind === "filename") editorDraft = { filename: filenameRule };
+      if (kind === "required-tag") editorDraft = { requiredTag: requiredTagRule };
+      if (kind === "condition") editorDraft = { condition: clone(appliedFilters[index]) };
+      if (kind === "sort") editorDraft = { sortKey, sortDirection };
+      renderRuleBar();
+      renderEditor();
+      const width = 312;
+      const desiredLeft = triggerRect.left - windowRect.left;
+      const left = Math.max(8, Math.min(desiredLeft, windowRect.width - width - 8));
+      const triggerCenter = triggerRect.left - windowRect.left + triggerRect.width / 2;
+      editorPopover.style.left = `${left}px`;
+      editorPopover.style.top = `${triggerRect.bottom - windowRect.top + 6}px`;
+      editorPopover.style.setProperty("--arrow-left", `${Math.max(16, Math.min(triggerCenter - left - 5, width - 28))}px`);
+    }
+
+    function closeEditor() {
+      activeEditor = null;
+      editorDraft = null;
+      editorPopover.hidden = true;
+      renderRuleBar();
+    }
+
+    function commitEditor() {
+      if (!activeEditor || editorValidationMessage()) return;
+      let changed = false;
+      if (activeEditor.kind === "filename") {
+        const value = editorDraft.filename.trim();
+        changed = value !== filenameRule;
+        filenameRule = value;
+      }
+      if (activeEditor.kind === "required-tag") {
+        changed = editorDraft.requiredTag !== requiredTagRule;
+        requiredTagRule = editorDraft.requiredTag;
+      }
+      if (activeEditor.kind === "condition") {
+        if (activeEditor.isNew) {
+          appliedFilters.push(clone(editorDraft.condition));
+          changed = true;
+        } else {
+          changed = !conditionsEqual(appliedFilters[activeEditor.index], editorDraft.condition);
+          appliedFilters[activeEditor.index] = clone(editorDraft.condition);
+        }
+      }
+      if (activeEditor.kind === "match") {
+        changed = editorDraft.matchMode !== matchMode;
+        matchMode = editorDraft.matchMode;
+      }
+      if (activeEditor.kind === "sort") {
+        changed = editorDraft.sortKey !== sortKey || editorDraft.sortDirection !== sortDirection;
+        sortKey = editorDraft.sortKey;
+        sortDirection = editorDraft.sortDirection;
+      }
+      if (changed) markSmartDirty();
+      closeEditor();
+      if (changed) renderGrid();
+    }
+
+    function renderGrid() {
+      const items = visibleVideos();
+      if (!items.some(video => video.id === selectedID)) selectedID = items[0]?.id ?? null;
+      const titles = {
+        all: "所有视频",
+        recent: "最近导入",
+        tag: currentScopeTag ?? "标签",
+        smart: savedRule?.name ?? "智能分类"
+      };
+      document.getElementById("viewTitle").textContent = titles[currentView];
+      document.getElementById("viewCount").textContent = `${items.length} 个视频`;
+      document.getElementById("allCount").textContent = videos.length;
+      renderSidebar();
+      renderRuleBar();
+
+      videoGrid.innerHTML = items.map(video => `
+        <button class="video-card${video.id === selectedID ? " selected" : ""}" data-video-id="${video.id}">
+          <div class="thumb"><img src="${video.image}" alt=""></div>
+          <div class="filename">${video.name}</div>
+          <div class="duration">${formatDuration(video.duration)}</div>
+        </button>
+      `).join("");
+      emptyState.hidden = items.length !== 0;
+      videoGrid.querySelectorAll("[data-video-id]").forEach(card => {
+        card.addEventListener("click", () => {
+          selectedID = Number(card.dataset.videoId);
+          renderGrid();
+        });
+      });
+      renderInspector();
+    }
+
+    function renderInspector() {
+      const selected = videos.find(video => video.id === selectedID);
+      document.querySelectorAll("[data-inspector-mode]").forEach(button => {
+        button.classList.toggle("selected", button.dataset.inspectorMode === inspectorMode);
+      });
+      tagsPane.hidden = inspectorMode !== "tags";
+      detailsPane.hidden = inspectorMode !== "details";
+      tagSearch.hidden = inspectorMode !== "tags" || !selected;
+      inspectorFooter.hidden = inspectorMode !== "tags" || !selected;
+      if (!selected) {
+        document.getElementById("tagCheckboxes").innerHTML = '<div class="tag-empty">未选择视频</div>';
+        document.getElementById("detailFilename").textContent = "未选择视频";
+        ["formatValue", "sizeValue", "durationValue", "resolutionValue", "createdValue", "modifiedValue", "pathValue"]
+          .forEach(id => { document.getElementById(id).textContent = "—"; });
+        return;
+      }
+      const tagQuery = tagSearch.value.trim().toLocaleLowerCase();
+      const visibleTags = allTags.filter(tag => tag.toLocaleLowerCase().includes(tagQuery));
+      document.getElementById("tagCheckboxes").innerHTML = visibleTags.length
+        ? visibleTags.map(tag => `<label class="tag-checkbox-row"><input type="checkbox"${selected.tags.includes(tag) ? " checked" : ""}><span>${tag}</span></label>`).join("")
+        : '<div class="tag-empty">没有匹配的标签</div>';
+      document.getElementById("detailFilename").textContent = selected.name;
+      document.getElementById("formatValue").textContent = selected.name.split(".").pop().toUpperCase();
+      document.getElementById("sizeValue").textContent = formatSize(selected.size);
+      document.getElementById("durationValue").textContent = formatDuration(selected.duration);
+      document.getElementById("resolutionValue").textContent = `${selected.width} × ${selected.height}`;
+      document.getElementById("createdValue").textContent = `${selected.created} 天前`;
+      document.getElementById("modifiedValue").textContent = `${selected.modified} 天前`;
+      document.getElementById("pathValue").textContent = selected.path;
+    }
+
+    function defaultCondition(type) {
+      const defaults = {
+        tags: { type: "tags", operator: "all", tags: [] },
+        untagged: { type: "untagged" },
+        added: { type: "added", value: 30 },
+        created: { type: "created", value: 30 },
+        duration: { type: "duration", operator: "gte", value: 60 },
+        size: { type: "size", operator: "gte", value: 1024 },
+        resolution: { type: "resolution", operator: "gte", value: 3840 }
+      };
+      return clone(defaults[type]);
+    }
+
+    function closeFloating() {
+      smartMenu.hidden = true;
+      document.getElementById("smartAction").classList.remove("active");
+      document.getElementById("smartAction").setAttribute("aria-expanded", "false");
+    }
+
+    function beginSmartRename() {
+      if (!savedRule) return;
+      closeFloating();
+      smartRenameActive = true;
+      renderSidebar();
+      const input = document.getElementById("smartRenameInput");
+      input.value = savedRule.name;
+      input.classList.remove("invalid");
+      input.title = "Enter 保存，Esc 取消；点击其他位置也会保存";
+      requestAnimationFrame(() => {
+        input.focus();
+        input.select();
+      });
+    }
+
+    function commitSmartRename() {
+      if (!smartRenameActive || !savedRule) return;
+      const input = document.getElementById("smartRenameInput");
+      const name = input.value.trim();
+      if (!name) {
+        input.classList.add("invalid");
+        input.title = "请输入名称";
+        requestAnimationFrame(() => input.focus());
+        return;
+      }
+      savedRule.name = name;
+      smartRenameActive = false;
+      renderGrid();
+    }
+
+    function cancelSmartRename() {
+      if (!smartRenameActive) return;
+      smartRenameActive = false;
+      renderSidebar();
+    }
+
+    function openSmartMenu(event) {
+      if (!savedRule || smartRenameActive) return;
+      if (activeEditor) closeEditor();
+      const willOpen = smartMenu.hidden;
+      closeFloating();
+      if (!willOpen) return;
+      if (event.type === "contextmenu") {
+        const bounds = appWindow.getBoundingClientRect();
+        smartMenu.style.left = `${event.clientX - bounds.left}px`;
+        smartMenu.style.top = `${event.clientY - bounds.top}px`;
+      } else {
+        smartMenu.style.removeProperty("left");
+        smartMenu.style.removeProperty("top");
+      }
+      smartMenu.hidden = false;
+      document.getElementById("smartAction").classList.add("active");
+      document.getElementById("smartAction").setAttribute("aria-expanded", "true");
+    }
+
+    function filenameRuleForSave() {
+      if (filenameRule) return filenameRule;
+      return currentView === "smart" ? "" : searchInput.value.trim();
+    }
+
+    function requiredTagForSave() {
+      if (requiredTagRule) return requiredTagRule;
+      return currentView === "tag" ? currentScopeTag ?? "" : "";
+    }
+
+    function showSaveDialog() {
+      if (activeEditor) closeEditor();
+      document.getElementById("saveTitle").textContent = "存为智能分类";
+      document.getElementById("saveCopy").textContent = currentView === "tag" && currentScopeTag
+          ? `当前“${currentScopeTag}”范围会转换为必选标签条件，并与其他规则一起保存。`
+        : searchInput.value.trim() && currentView !== "smart"
+          ? "临时搜索会转换成文件名条件，并与筛选和排序一起保存。"
+          : "保存当前文件名条件、筛选条件和排序方式。";
+      document.getElementById("confirmSaveButton").textContent = "保存";
+      document.getElementById("smartNameInput").value = savedRule && currentView === "smart"
+          ? `${savedRule.name} 副本`
+          : "4K 海岸旅行片";
+      document.getElementById("nameError").hidden = true;
+      document.getElementById("saveRuleSummary").hidden = false;
+      renderSaveSummary();
+      saveBackdrop.hidden = false;
+      closeFloating();
+      document.getElementById("smartNameInput").focus();
+      document.getElementById("smartNameInput").select();
+    }
+
+    function renderSaveSummary() {
+      const filterText = appliedFilters.length ? appliedFilters.map(conditionLabel).join("；") : "无";
+      document.getElementById("saveRuleSummary").innerHTML = `
+        <div class="summary-row"><span>范围</span><strong>${requiredTagForSave() ? `标签包含“${escapeAttribute(requiredTagForSave())}”` : "所有视频"}</strong></div>
+        <div class="summary-row"><span>文件名</span><strong>${filenameRuleForSave() ? `包含“${escapeAttribute(filenameRuleForSave())}”` : "无"}</strong></div>
+        <div class="summary-row"><span>关系</span><strong>${appliedFilters.length ? `符合${matchMode === "all" ? "全部" : "任一"}条件` : "无"}</strong></div>
+        <div class="summary-row"><span>筛选</span><strong>${filterText}</strong></div>
+        <div class="summary-row"><span>排序</span><strong>${sortNames[sortKey]} · ${sortDirectionCopy()[sortDirection]}</strong></div>
+      `;
+    }
+
+    function confirmSave() {
+      const name = document.getElementById("smartNameInput").value.trim();
+      if (!name) {
+        document.getElementById("nameError").hidden = false;
+        return;
+      }
+      const storedFilename = filenameRuleForSave();
+      const storedRequiredTag = requiredTagForSave();
+      savedRule = {
+        name,
+        filenameRule: storedFilename,
+        requiredTagRule: storedRequiredTag,
+        filters: clone(appliedFilters),
+        matchMode,
+        sortKey,
+        sortDirection
+      };
+      currentView = "smart";
+      currentScopeTag = null;
+      requiredTagRule = storedRequiredTag;
+      filenameRule = storedFilename;
+      searchInput.value = "";
+      smartDirty = false;
+      saveBackdrop.hidden = true;
+      renderGrid();
+    }
+
+    function loadSavedRule() {
+      if (!savedRule) return;
+      activeEditor = null;
+      editorPopover.hidden = true;
+      currentView = "smart";
+      currentScopeTag = null;
+      searchInput.value = "";
+      requiredTagRule = savedRule.requiredTagRule;
+      filenameRule = savedRule.filenameRule;
+      appliedFilters = clone(savedRule.filters);
+      matchMode = savedRule.matchMode;
+      sortKey = savedRule.sortKey;
+      sortDirection = savedRule.sortDirection;
+      smartDirty = false;
+      closeFloating();
+      renderGrid();
+    }
+
+    function markSmartDirty() {
+      if (currentView === "smart" && savedRule) smartDirty = true;
+    }
+
+    function clearTemporaryRule() {
+      activeEditor = null;
+      editorPopover.hidden = true;
+      searchInput.value = "";
+      filenameRule = "";
+      requiredTagRule = "";
+      appliedFilters = [];
+      matchMode = "all";
+      sortKey = "name";
+      sortDirection = "asc";
+      smartDirty = false;
+      renderGrid();
+    }
+
+    function clearLoadedSmartRule() {
+      activeEditor = null;
+      editorPopover.hidden = true;
+      requiredTagRule = "";
+      filenameRule = "";
+      appliedFilters = [];
+      matchMode = "all";
+      sortKey = "name";
+      sortDirection = "asc";
+      smartDirty = false;
+      closeFloating();
+    }
+
+    function updateSavedRule() {
+      if (!savedRule) return;
+      savedRule.requiredTagRule = requiredTagRule;
+      savedRule.filenameRule = filenameRule;
+      savedRule.filters = clone(appliedFilters);
+      savedRule.matchMode = matchMode;
+      savedRule.sortKey = sortKey;
+      savedRule.sortDirection = sortDirection;
+      smartDirty = false;
+    }
+
+    function performNavigation(target) {
+      leaveBackdrop.hidden = true;
+      pendingNavigation = null;
+
+      if (target.view === "smart") {
+        loadSavedRule();
+        return;
+      }
+
+      if (currentView === "smart") clearLoadedSmartRule();
+      activeEditor = null;
+      editorPopover.hidden = true;
+      currentView = target.view;
+      currentScopeTag = target.view === "tag" ? target.scopeTag : null;
+      closeFloating();
+      renderGrid();
+    }
+
+    function requestNavigation(target) {
+      const sameView = target.view === currentView
+        && (target.view !== "tag" || target.scopeTag === currentScopeTag);
+      if (sameView) return;
+
+      if (currentView === "smart" && smartDirty) {
+        pendingNavigation = target;
+        document.getElementById("leaveTitle").textContent = `保存对“${savedRule.name}”的更改？`;
+        leaveBackdrop.hidden = false;
+        closeFloating();
+        return;
+      }
+
+      performNavigation(target);
+    }
+
+    function ensureSavedRule() {
+      savedRule = {
+        name: "4K 海岸旅行片",
+        filenameRule: "海",
+        requiredTagRule: "旅行",
+        filters: clone(presetFilters.slice(1)),
+        matchMode: "all",
+        sortKey: "modified",
+        sortDirection: "desc"
+      };
+    }
+
+    function setTemporaryState() {
+      activeEditor = null;
+      editorPopover.hidden = true;
+      currentView = "all";
+      currentScopeTag = null;
+      searchInput.value = "海";
+      filenameRule = "";
+      requiredTagRule = "";
+      appliedFilters = clone(presetFilters);
+      matchMode = "all";
+      sortKey = "modified";
+      sortDirection = "desc";
+      smartDirty = false;
+      closeFloating();
+      renderGrid();
+    }
+
+    function resetPrototype() {
+      activeEditor = null;
+      editorPopover.hidden = true;
+      currentView = "all";
+      currentScopeTag = null;
+      selectedID = 1;
+      inspectorMode = "tags";
+      appliedFilters = [];
+      filenameRule = "";
+      requiredTagRule = "";
+      matchMode = "all";
+      sortKey = "name";
+      sortDirection = "asc";
+      savedRule = null;
+      smartDirty = false;
+      smartRenameActive = false;
+      pendingNavigation = null;
+      searchInput.value = "";
+      tagSearch.value = "";
+      saveBackdrop.hidden = true;
+      deleteBackdrop.hidden = true;
+      leaveBackdrop.hidden = true;
+      closeFloating();
+      renderGrid();
+    }
+
+    function setDemoState(state) {
+      resetPrototype();
+      if (state === "filter") {
+        appliedFilters = clone(presetFilters);
+        renderGrid();
+        const firstCondition = ruleBar.querySelector('[data-edit-condition="0"]');
+        if (firstCondition) openEditor("condition", firstCondition, 0);
+      }
+      if (state === "tag-search") {
+        currentView = "tag";
+        currentScopeTag = "旅行";
+        searchInput.value = "海";
+        renderGrid();
+      }
+      if (["temporary", "save"].includes(state)) setTemporaryState();
+      if (state === "save") showSaveDialog();
+      if (["saved", "dirty", "leave"].includes(state)) {
+        ensureSavedRule();
+        loadSavedRule();
+      }
+      if (["dirty", "leave"].includes(state)) {
+        appliedFilters.push({ type: "size", operator: "gte", value: 1024 });
+        smartDirty = true;
+        renderGrid();
+      }
+      if (state === "leave") requestNavigation({ view: "all" });
+      if (state === "empty") {
+        searchInput.value = "不存在的文件";
+        appliedFilters = clone(presetFilters);
+        sortKey = "modified";
+        sortDirection = "desc";
+        renderGrid();
+      }
+      document.querySelectorAll("[data-demo-state]").forEach(button => {
+        button.classList.toggle("active", button.dataset.demoState === state);
+      });
+    }
+
+    searchInput.addEventListener("input", renderGrid);
+    tagSearch.addEventListener("input", renderInspector);
+    document.querySelectorAll("[data-inspector-mode]").forEach(button => {
+      button.addEventListener("click", () => {
+        inspectorMode = button.dataset.inspectorMode;
+        renderInspector();
+      });
+    });
+    document.querySelectorAll("[data-view]").forEach(row => {
+      row.addEventListener("click", event => {
+        if (event.target.closest("#smartRenameInput")) return;
+        const view = row.dataset.view;
+        requestNavigation({ view });
+      });
+    });
+    document.querySelectorAll("[data-scope-tag]").forEach(row => {
+      row.addEventListener("click", () => {
+        requestNavigation({ view: "tag", scopeTag: row.dataset.scopeTag });
+      });
+    });
+
+    ruleBar.addEventListener("click", event => {
+      if (event.target.closest("[data-remove-temporary-search]")) {
+        searchInput.value = "";
+        renderGrid();
+        return;
+      }
+      if (event.target.closest("[data-remove-filename-rule]")) {
+        filenameRule = "";
+        activeEditor = null;
+        editorPopover.hidden = true;
+        markSmartDirty();
+        renderGrid();
+        return;
+      }
+      if (event.target.closest("[data-remove-required-tag]")) {
+        requiredTagRule = "";
+        activeEditor = null;
+        editorPopover.hidden = true;
+        markSmartDirty();
+        renderGrid();
+        return;
+      }
+      const removeCondition = event.target.closest("[data-remove-condition]");
+      if (removeCondition) {
+        appliedFilters.splice(Number(removeCondition.dataset.removeCondition), 1);
+        activeEditor = null;
+        editorPopover.hidden = true;
+        markSmartDirty();
+        renderGrid();
+        return;
+      }
+      if (event.target.closest("[data-remove-sort]")) {
+        sortKey = "name";
+        sortDirection = "asc";
+        activeEditor = null;
+        editorPopover.hidden = true;
+        markSmartDirty();
+        renderGrid();
+        return;
+      }
+
+      const addButton = event.target.closest("[data-open-add]");
+      if (addButton) return openEditor("add", addButton);
+      const filenameButton = event.target.closest("[data-edit-filename]");
+      if (filenameButton) return openEditor("filename", filenameButton);
+      const requiredTagButton = event.target.closest("[data-edit-required-tag]");
+      if (requiredTagButton) return openEditor("required-tag", requiredTagButton);
+      const matchButton = event.target.closest("[data-edit-match]");
+      if (matchButton) return openEditor("match", matchButton);
+      const conditionButton = event.target.closest("[data-edit-condition]");
+      if (conditionButton) return openEditor("condition", conditionButton, Number(conditionButton.dataset.editCondition));
+      const sortButton = event.target.closest("[data-edit-sort]");
+      if (sortButton) return openEditor("sort", sortButton);
+
+      const action = event.target.closest("[data-rule-action]")?.dataset.ruleAction;
+      if (action === "clear") clearTemporaryRule();
+      if (action === "save-as") showSaveDialog();
+      if (action === "revert") loadSavedRule();
+      if (action === "update") {
+        updateSavedRule();
+        renderGrid();
+      }
+    });
+
+    editorPopover.addEventListener("click", event => {
+      if (event.target.closest("[data-cancel-editor]")) return closeEditor();
+      if (event.target.closest("[data-commit-editor]")) return commitEditor();
+      const addType = event.target.closest("[data-add-type]")?.dataset.addType;
+      if (addType) {
+        if (addType === "filename") {
+          activeEditor = { kind: "filename", index: null, isNew: true };
+          editorDraft = { filename: "" };
+        } else {
+          activeEditor = { kind: "condition", index: appliedFilters.length, isNew: true };
+          editorDraft = { condition: defaultCondition(addType) };
+        }
+        renderEditor();
+        return;
+      }
+      const nextMatch = event.target.closest("[data-set-match]")?.dataset.setMatch;
+      if (nextMatch) {
+        editorDraft.matchMode = nextMatch;
+        renderEditor();
+        return;
+      }
+      if (event.target.closest("[data-editor-delete]")) {
+        if (activeEditor.kind === "filename") filenameRule = "";
+        if (activeEditor.kind === "required-tag") requiredTagRule = "";
+        if (activeEditor.kind === "condition") appliedFilters.splice(activeEditor.index, 1);
+        if (activeEditor.kind === "sort") {
+          sortKey = "name";
+          sortDirection = "asc";
+        }
+        markSmartDirty();
+        renderGrid();
+        closeEditor();
+      }
+    });
+    editorPopover.addEventListener("change", event => {
+      if (event.target.matches("[data-editor-filename]")) {
+        editorDraft.filename = event.target.value;
+      }
+      if (event.target.matches("[data-editor-required-tag]")) {
+        editorDraft.requiredTag = event.target.value;
+      }
+      if (activeEditor?.kind === "condition" && event.target.matches("[data-editor-field]")) {
+        const field = event.target.dataset.editorField;
+        if (field === "type") editorDraft.condition = defaultCondition(event.target.value);
+        if (field === "operator") editorDraft.condition.operator = event.target.value;
+        if (field === "value") editorDraft.condition.value = Number(event.target.value);
+        if (field === "tags") {
+          const tags = event.target.value.split(/[、,，]/).map(tag => tag.trim()).filter(Boolean);
+          editorDraft.condition.tags = tags;
+        }
+      }
+      if (event.target.matches("[data-editor-sort-key]")) {
+        editorDraft.sortKey = event.target.value;
+        editorDraft.sortDirection = "asc";
+      }
+      if (event.target.matches("[data-editor-sort-direction]")) {
+        editorDraft.sortDirection = event.target.value;
+      }
+      renderEditor();
+    });
+    editorPopover.addEventListener("input", event => {
+      if (event.target.matches("[data-editor-filename]")) {
+        editorDraft.filename = event.target.value;
+      } else if (activeEditor?.kind === "condition" && event.target.matches('[data-editor-field="tags"]')) {
+        const tags = event.target.value.split(/[、,，]/).map(tag => tag.trim()).filter(Boolean);
+        editorDraft.condition.tags = tags;
+      } else {
+        return;
+      }
+      refreshEditorValidation();
+    });
+
+    document.getElementById("cancelSaveButton").addEventListener("click", () => { saveBackdrop.hidden = true; });
+    document.getElementById("confirmSaveButton").addEventListener("click", confirmSave);
+    saveBackdrop.addEventListener("click", event => {
+      if (event.target === saveBackdrop) saveBackdrop.hidden = true;
+    });
+    document.getElementById("smartNameInput").addEventListener("input", () => {
+      document.getElementById("nameError").hidden = true;
+    });
+
+    document.getElementById("smartAction").addEventListener("click", event => {
+      event.stopPropagation();
+      openSmartMenu(event);
+    });
+    document.getElementById("smartSelect").addEventListener("dblclick", event => {
+      if (event.target.closest("#smartRenameInput")) return;
+      beginSmartRename();
+    });
+    document.getElementById("smartSelect").addEventListener("contextmenu", event => {
+      event.preventDefault();
+      openSmartMenu(event);
+    });
+    document.getElementById("smartSelect").addEventListener("keydown", event => {
+      if (smartRenameActive || !["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      requestNavigation({ view: "smart" });
+    });
+    document.getElementById("renameSmartButton").addEventListener("click", beginSmartRename);
+    document.getElementById("smartRenameInput").addEventListener("keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        commitSmartRename();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelSmartRename();
+      }
+    });
+    document.getElementById("smartRenameInput").addEventListener("input", event => {
+      event.currentTarget.classList.remove("invalid");
+    });
+    document.getElementById("smartRenameInput").addEventListener("blur", commitSmartRename);
+    document.getElementById("deleteSmartButton").addEventListener("click", () => {
+      document.getElementById("deleteTitle").textContent = `删除“${savedRule.name}”？`;
+      deleteBackdrop.hidden = false;
+      closeFloating();
+    });
+    document.getElementById("cancelDeleteButton").addEventListener("click", () => { deleteBackdrop.hidden = true; });
+    document.getElementById("confirmDeleteButton").addEventListener("click", () => {
+      savedRule = null;
+      smartRenameActive = false;
+      currentView = "all";
+      deleteBackdrop.hidden = true;
+      clearTemporaryRule();
+    });
+    deleteBackdrop.addEventListener("click", event => {
+      if (event.target === deleteBackdrop) deleteBackdrop.hidden = true;
+    });
+    document.getElementById("cancelLeaveButton").addEventListener("click", () => {
+      pendingNavigation = null;
+      leaveBackdrop.hidden = true;
+    });
+    document.getElementById("discardLeaveButton").addEventListener("click", () => {
+      if (!pendingNavigation) return;
+      const target = pendingNavigation;
+      performNavigation(target);
+    });
+    document.getElementById("updateLeaveButton").addEventListener("click", () => {
+      if (!pendingNavigation) return;
+      const target = pendingNavigation;
+      updateSavedRule();
+      performNavigation(target);
+    });
+    leaveBackdrop.addEventListener("click", event => {
+      if (event.target !== leaveBackdrop) return;
+      pendingNavigation = null;
+      leaveBackdrop.hidden = true;
+    });
+    document.getElementById("emptyClearButton").addEventListener("click", clearTemporaryRule);
+
+    document.querySelectorAll("[data-demo-state]").forEach(button => {
+      button.addEventListener("click", () => setDemoState(button.dataset.demoState));
+    });
+    document.addEventListener("click", event => {
+      const insideFloating = event.target.closest(".menu, #smartAction");
+      if (!insideFloating) closeFloating();
+      const insideEditor = event.target.closest("#editorPopover, [data-open-add], [data-edit-filename], [data-edit-required-tag], [data-edit-match], [data-edit-condition], [data-edit-sort], [data-demo-state]");
+      if (!insideEditor && activeEditor) closeEditor();
+    });
+    document.addEventListener("keydown", event => {
+      if (event.metaKey && !event.altKey && event.key.toLocaleLowerCase() === "f") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          const addButton = ruleBar.querySelector("[data-open-add]");
+          if (addButton) openEditor("add", addButton);
+        } else {
+          if (activeEditor) closeEditor();
+          searchInput.focus();
+          searchInput.select();
+        }
+        return;
+      }
+      if (event.key !== "Escape") return;
+      if (smartRenameActive) cancelSmartRename();
+      else if (!leaveBackdrop.hidden) {
+        pendingNavigation = null;
+        leaveBackdrop.hidden = true;
+      }
+      else if (!saveBackdrop.hidden) saveBackdrop.hidden = true;
+      else if (!deleteBackdrop.hidden) deleteBackdrop.hidden = true;
+      else if (activeEditor) closeEditor();
+      else closeFloating();
+    });
+
+    renderGrid();
+  </script>
+</body>
+</html>
