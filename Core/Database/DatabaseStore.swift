@@ -61,7 +61,7 @@ struct LibraryMaintenanceResult: Equatable, Sendable {
 }
 
 actor DatabaseStore {
-    static let currentSchemaVersion = 7
+    static let currentSchemaVersion = 8
 
     private let connection: SQLiteConnection
     private var isPrepared = false
@@ -775,6 +775,10 @@ actor DatabaseStore {
                 thumbnail_id = CASE WHEN file_size != ? OR modification_date IS NOT ? THEN NULL ELSE thumbnail_id END,
                 metadata_status = CASE WHEN file_size != ? OR modification_date IS NOT ? THEN 'pending' ELSE metadata_status END,
                 thumbnail_status = CASE WHEN file_size != ? OR modification_date IS NOT ? THEN 'pending' ELSE thumbnail_status END,
+                media_source_info = CASE
+                    WHEN file_size != ? OR modification_date IS NOT ? THEN NULL
+                    ELSE media_source_info
+                END,
                 file_size = ?, creation_date = ?, modification_date = ?,
                 availability_status = 'available', updated_at = ?
             WHERE id = ?
@@ -787,7 +791,7 @@ actor DatabaseStore {
         bindText(video.filename, to: 4, in: statement)
         bindText(video.fileExtension, to: 5, in: statement)
         var index: Int32 = 6
-        for _ in 0..<6 {
+        for _ in 0..<7 {
             sqlite3_bind_int64(statement, index, video.fileSize)
             bindDate(video.modificationDate, to: index + 1, in: statement)
             index += 2
@@ -990,7 +994,8 @@ actor DatabaseStore {
             """
             SELECT id, library_id, relative_path, filename, file_extension, file_size,
                    creation_date, modification_date, duration, width, height, thumbnail_id,
-                   metadata_status, thumbnail_status, first_indexed_at, availability_status
+                   metadata_status, thumbnail_status, first_indexed_at, availability_status,
+                   media_source_info
             FROM videos
             WHERE library_id = ? \(availabilityClause)
             ORDER BY filename COLLATE NOCASE, relative_path COLLATE NOCASE
@@ -1059,7 +1064,8 @@ actor DatabaseStore {
                    videos.file_extension, videos.file_size, videos.creation_date,
                    videos.modification_date, videos.duration, videos.width, videos.height,
                    videos.thumbnail_id, videos.metadata_status, videos.thumbnail_status,
-                   videos.first_indexed_at, videos.availability_status
+                   videos.first_indexed_at, videos.availability_status,
+                   videos.media_source_info
             FROM videos
             WHERE \(conditions.joined(separator: " AND "))
             ORDER BY videos.filename COLLATE NOCASE, videos.relative_path COLLATE NOCASE
@@ -1140,7 +1146,8 @@ actor DatabaseStore {
             """
             SELECT id, library_id, relative_path, filename, file_extension, file_size,
                    creation_date, modification_date, duration, width, height, thumbnail_id,
-                   metadata_status, thumbnail_status, first_indexed_at, availability_status
+                   metadata_status, thumbnail_status, first_indexed_at, availability_status,
+                   media_source_info
             FROM videos WHERE id = ? LIMIT 1
             """
         )
@@ -1181,7 +1188,7 @@ actor DatabaseStore {
                        filename, file_extension, file_size, creation_date, modification_date,
                        duration, width, height, thumbnail_id, metadata_status, thumbnail_status,
                        availability_status, first_indexed_at, updated_at, last_seen_scan_id,
-                       finder_tags_imported_at
+                       finder_tags_imported_at, media_source_info
                 FROM videos
                 WHERE id IN (SELECT id FROM pending_video_removal_ids)
                 ORDER BY first_indexed_at, id
@@ -1224,7 +1231,8 @@ actor DatabaseStore {
                     firstIndexedAt: Date(timeIntervalSince1970: sqlite3_column_double(videoStatement, 17)),
                     updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(videoStatement, 18)),
                     lastSeenScanID: text(at: 19, in: videoStatement),
-                    finderTagsImportedAt: date(at: 20, in: videoStatement)
+                    finderTagsImportedAt: date(at: 20, in: videoStatement),
+                    mediaSourceInfo: decodedMediaSourceInfo(text(at: 21, in: videoStatement))
                 ))
             }
             sqlite3_finalize(videoStatement)
@@ -1309,8 +1317,8 @@ actor DatabaseStore {
                     filename, file_extension, file_size, creation_date, modification_date,
                     duration, width, height, thumbnail_id, metadata_status, thumbnail_status,
                     availability_status, first_indexed_at, updated_at, last_seen_scan_id,
-                    finder_tags_imported_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    finder_tags_imported_at, media_source_info
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
             )
             var restoredVideoIDs: [String: String] = [:]
@@ -1343,6 +1351,7 @@ actor DatabaseStore {
                 sqlite3_bind_double(videoStatement, 19, video.updatedAt.timeIntervalSince1970)
                 bindOptionalText(video.lastSeenScanID, to: 20, in: videoStatement)
                 bindDate(video.finderTagsImportedAt, to: 21, in: videoStatement)
+                bindOptionalText(try encodedMediaSourceInfo(video.mediaSourceInfo), to: 22, in: videoStatement)
                 guard sqlite3_step(videoStatement) == SQLITE_DONE else {
                     sqlite3_finalize(videoStatement)
                     throw DatabaseError.statementFailed
@@ -1449,7 +1458,7 @@ actor DatabaseStore {
         let statement = try prepare(
             """
             UPDATE videos SET duration = ?, width = ?, height = ?, thumbnail_id = ?,
-                metadata_status = ?, thumbnail_status = ?, updated_at = ?
+                metadata_status = ?, thumbnail_status = ?, media_source_info = ?, updated_at = ?
             WHERE id = ?
             """
         )
@@ -1460,8 +1469,9 @@ actor DatabaseStore {
         bindOptionalText(result.thumbnailID, to: 4, in: statement)
         bindText(result.metadataStatus.rawValue, to: 5, in: statement)
         bindText(result.thumbnailStatus.rawValue, to: 6, in: statement)
-        sqlite3_bind_double(statement, 7, Date().timeIntervalSince1970)
-        bindText(videoID, to: 8, in: statement)
+        bindOptionalText(try encodedMediaSourceInfo(result.mediaSourceInfo), to: 7, in: statement)
+        sqlite3_bind_double(statement, 8, Date().timeIntervalSince1970)
+        bindText(videoID, to: 9, in: statement)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw DatabaseError.statementFailed
         }
@@ -2074,6 +2084,15 @@ actor DatabaseStore {
     }
 
     private func applyMigration(_ version: Int) throws {
+        if version == 8 {
+            try execute("""
+            ALTER TABLE videos ADD COLUMN media_source_info TEXT;
+            UPDATE videos
+            SET metadata_status = 'pending'
+            WHERE availability_status = 'available';
+            """)
+            return
+        }
         if version == 7 {
             try execute("""
             ALTER TABLE video_locations ADD COLUMN fallback_path_key BLOB;
@@ -2614,6 +2633,20 @@ actor DatabaseStore {
         return Int(sqlite3_column_int64(statement, index))
     }
 
+    private func encodedMediaSourceInfo(_ info: MediaSourceInfo?) throws -> String? {
+        guard let info else { return nil }
+        let data = try JSONEncoder().encode(info)
+        guard let value = String(data: data, encoding: .utf8) else {
+            throw DatabaseError.statementFailed
+        }
+        return value
+    }
+
+    private func decodedMediaSourceInfo(_ value: String?) -> MediaSourceInfo? {
+        guard let value, let data = value.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(MediaSourceInfo.self, from: data)
+    }
+
     private func videoRecord(from statement: OpaquePointer) throws -> VideoRecord {
         guard
             let id = text(at: 0, in: statement),
@@ -2646,7 +2679,8 @@ actor DatabaseStore {
             metadataStatus: metadataStatus,
             thumbnailStatus: thumbnailStatus,
             firstIndexedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 14)),
-            availability: availability
+            availability: availability,
+            mediaSourceInfo: decodedMediaSourceInfo(text(at: 16, in: statement))
         )
     }
 

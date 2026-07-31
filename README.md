@@ -65,7 +65,7 @@ Repeated imports are safe: the same file keeps a single library record, includin
 - Multi-tag AND filtering
 - Untagged and recently added collections
 - A conditional Offline collection for videos whose external drive is disconnected
-- Video thumbnails, duration, dimensions, and file information
+- Video thumbnails plus grouped file, video-codec, and audio-codec source information
 - Quick Look, default-player playback, Finder reveal, and path copying
 
 ### Protect your library
@@ -109,7 +109,7 @@ Public release builds are Universal Apps signed with Developer ID and notarized 
 - AVI
 - WebM
 
-Media playback and preview availability can depend on the codecs supported by the installed macOS version and the user's selected apps.
+Media playback and preview availability can depend on the codecs supported by the installed macOS version and the user's selected apps. FileFacet falls back to a generic video icon when both AVFoundation and Quick Look cannot decode a frame.
 
 ## Privacy and file safety
 

@@ -2,6 +2,16 @@
 
 This file records the user-visible changes in FileFacet releases.
 
+## [Unreleased]
+
+### Added
+
+- The Inspector now groups container, video-codec, audio-codec, profile, rate, depth, color, and rotation source information while keeping cached details available for offline videos.
+
+### Changed
+
+- Thumbnail generation now falls back to Quick Look when AVFoundation cannot extract a frame; files unsupported by both macOS media paths continue to use the generic video icon.
+
 ## [1.0.4] - 2026-07-31
 
 ### Added

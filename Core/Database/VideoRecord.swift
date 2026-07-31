@@ -1,5 +1,63 @@
 import Foundation
 
+struct MediaSourceInfo: Codable, Equatable, Sendable {
+    let containerFormat: String?
+    let containerBrand: String?
+    let videoCodec: String?
+    let videoCodecTag: String?
+    let videoProfile: String?
+    let frameRate: Double?
+    let videoBitRate: Double?
+    let bitDepth: Int?
+    let colorTransfer: String?
+    let colorPrimaries: String?
+    let rotationDegrees: Double?
+    let audioCodec: String?
+    let audioCodecTag: String?
+    let audioProfile: String?
+    let audioChannels: Int?
+    let audioSampleRate: Double?
+    let audioBitRate: Double?
+
+    init(
+        containerFormat: String? = nil,
+        containerBrand: String? = nil,
+        videoCodec: String? = nil,
+        videoCodecTag: String? = nil,
+        videoProfile: String? = nil,
+        frameRate: Double? = nil,
+        videoBitRate: Double? = nil,
+        bitDepth: Int? = nil,
+        colorTransfer: String? = nil,
+        colorPrimaries: String? = nil,
+        rotationDegrees: Double? = nil,
+        audioCodec: String? = nil,
+        audioCodecTag: String? = nil,
+        audioProfile: String? = nil,
+        audioChannels: Int? = nil,
+        audioSampleRate: Double? = nil,
+        audioBitRate: Double? = nil
+    ) {
+        self.containerFormat = containerFormat
+        self.containerBrand = containerBrand
+        self.videoCodec = videoCodec
+        self.videoCodecTag = videoCodecTag
+        self.videoProfile = videoProfile
+        self.frameRate = frameRate
+        self.videoBitRate = videoBitRate
+        self.bitDepth = bitDepth
+        self.colorTransfer = colorTransfer
+        self.colorPrimaries = colorPrimaries
+        self.rotationDegrees = rotationDegrees
+        self.audioCodec = audioCodec
+        self.audioCodecTag = audioCodecTag
+        self.audioProfile = audioProfile
+        self.audioChannels = audioChannels
+        self.audioSampleRate = audioSampleRate
+        self.audioBitRate = audioBitRate
+    }
+}
+
 struct VideoRecord: Equatable, Identifiable, Sendable {
     enum Availability: String, Sendable {
         case available
@@ -29,6 +87,45 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
     let thumbnailStatus: ProcessingStatus
     let firstIndexedAt: Date
     let availability: Availability
+    let mediaSourceInfo: MediaSourceInfo?
+
+    init(
+        id: String,
+        libraryID: String,
+        relativePath: String,
+        filename: String,
+        fileExtension: String,
+        fileSize: Int64,
+        creationDate: Date?,
+        modificationDate: Date?,
+        duration: Double?,
+        width: Int?,
+        height: Int?,
+        thumbnailID: String?,
+        metadataStatus: ProcessingStatus,
+        thumbnailStatus: ProcessingStatus,
+        firstIndexedAt: Date,
+        availability: Availability,
+        mediaSourceInfo: MediaSourceInfo? = nil
+    ) {
+        self.id = id
+        self.libraryID = libraryID
+        self.relativePath = relativePath
+        self.filename = filename
+        self.fileExtension = fileExtension
+        self.fileSize = fileSize
+        self.creationDate = creationDate
+        self.modificationDate = modificationDate
+        self.duration = duration
+        self.width = width
+        self.height = height
+        self.thumbnailID = thumbnailID
+        self.metadataStatus = metadataStatus
+        self.thumbnailStatus = thumbnailStatus
+        self.firstIndexedAt = firstIndexedAt
+        self.availability = availability
+        self.mediaSourceInfo = mediaSourceInfo
+    }
 
     func withAvailability(_ availability: Availability) -> VideoRecord {
         VideoRecord(
@@ -47,7 +144,8 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
             metadataStatus: metadataStatus,
             thumbnailStatus: thumbnailStatus,
             firstIndexedAt: firstIndexedAt,
-            availability: availability
+            availability: availability,
+            mediaSourceInfo: mediaSourceInfo
         )
     }
 }
@@ -74,6 +172,55 @@ struct RemovedVideoRecord: Equatable, Sendable {
     let updatedAt: Date
     let lastSeenScanID: String?
     let finderTagsImportedAt: Date?
+    let mediaSourceInfo: MediaSourceInfo?
+
+    init(
+        id: String,
+        libraryID: String,
+        relativePath: String,
+        volumeIdentifier: Data?,
+        fileResourceIdentifier: Data?,
+        filename: String,
+        fileExtension: String,
+        fileSize: Int64,
+        creationDate: Date?,
+        modificationDate: Date?,
+        duration: Double?,
+        width: Int?,
+        height: Int?,
+        thumbnailID: String?,
+        metadataStatus: String,
+        thumbnailStatus: String,
+        availabilityStatus: String,
+        firstIndexedAt: Date,
+        updatedAt: Date,
+        lastSeenScanID: String?,
+        finderTagsImportedAt: Date?,
+        mediaSourceInfo: MediaSourceInfo? = nil
+    ) {
+        self.id = id
+        self.libraryID = libraryID
+        self.relativePath = relativePath
+        self.volumeIdentifier = volumeIdentifier
+        self.fileResourceIdentifier = fileResourceIdentifier
+        self.filename = filename
+        self.fileExtension = fileExtension
+        self.fileSize = fileSize
+        self.creationDate = creationDate
+        self.modificationDate = modificationDate
+        self.duration = duration
+        self.width = width
+        self.height = height
+        self.thumbnailID = thumbnailID
+        self.metadataStatus = metadataStatus
+        self.thumbnailStatus = thumbnailStatus
+        self.availabilityStatus = availabilityStatus
+        self.firstIndexedAt = firstIndexedAt
+        self.updatedAt = updatedAt
+        self.lastSeenScanID = lastSeenScanID
+        self.finderTagsImportedAt = finderTagsImportedAt
+        self.mediaSourceInfo = mediaSourceInfo
+    }
 }
 
 struct RemovedVideoLocation: Equatable, Sendable {

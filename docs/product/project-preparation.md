@@ -48,7 +48,8 @@
 ### 数据与系统能力
 
 - SQLite3：持久化索引、标签树、视频与标签关系、迁移记录
-- AVFoundation：异步读取时长、分辨率并生成缩略图
+- AVFoundation：异步读取时长、分辨率与媒体轨道源信息，并生成缩略图
+- Quick Look Thumbnailing：AVFoundation 无法取帧时尝试生成系统缩略图
 - Security-Scoped Bookmark：保存多个已导入来源文件夹的长期访问权
 - FSEvents：监听目录变化，触发已有视频的静默全来源协调
 - LocalAuthentication：Touch ID 与系统密码验证
@@ -216,10 +217,11 @@ FSEvents 提供“目录发生了变化”的信号，低优先级维护任务�
 建议把“支持 MP4、MOV、M4V、MKV、AVI、WebM”明确为：
 
 - 应用能发现、索引、显示基础文件信息并交给系统默认应用打开这些扩展名。
-- AVFoundation 能解析时显示时长、分辨率和缩略图。
-- AVFoundation 无法解析容器或编码时仍保留记录，显示通用视频图标和“媒体信息不可用”。
+- AVFoundation 能解析时显示时长、分辨率、视频与音频轨道源信息，并生成缩略图。
+- AVFoundation 无法取帧时尝试 Quick Look；两条系统链路都失败时显示通用视频图标。
+- AVFoundation 无法完整解析容器或编码时仍保留记录，能够独立读取的媒体源信息继续显示，其余字段显示“媒体信息不可用”。
 
-MP4、MOV、M4V 的系统解析覆盖通常较好；MKV、AVI、WebM 的结果取决于具体容器、编码和系统能力。MVP 不打包 FFmpeg，因此不能承诺每个文件都能生成缩略图或被系统默认播放器成功播放。
+MP4、MOV、M4V 的系统解析覆盖通常较好；MKV、AVI、WebM 的结果取决于具体容器、编码和系统能力。MVP 不打包 FFmpeg，因此不能承诺每个文件都能生成缩略图或被系统默认播放器成功播放。按需安装的媒体兼容性解码组件已记录为 [OQ-004](open-questions.md#oq-004可选媒体兼容性解码组件)，本期不实现。
 
 ## 9. Finder 标签迁移
 

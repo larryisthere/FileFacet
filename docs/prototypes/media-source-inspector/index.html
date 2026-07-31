@@ -1,0 +1,733 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FileFacet · 媒体源信息检查器原型</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --desktop: #d8dce2;
+      --window: rgba(245, 245, 247, .97);
+      --toolbar: rgba(247, 247, 248, .94);
+      --sidebar: rgba(234, 234, 236, .96);
+      --content: #ffffff;
+      --inspector: #f7f7f8;
+      --line: rgba(60, 60, 67, .18);
+      --line-strong: rgba(60, 60, 67, .28);
+      --text: #1d1d1f;
+      --secondary: #6e6e73;
+      --tertiary: #8e8e93;
+      --accent: #0a84ff;
+      --selection: rgba(10, 132, 255, .18);
+      --code-background: rgba(118, 118, 128, .12);
+      --shadow: 0 24px 70px rgba(20, 24, 31, .27), 0 2px 10px rgba(20, 24, 31, .13);
+      font-family: "SF Pro Text", "SF Pro Display", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --desktop: #17191d;
+        --window: rgba(42, 42, 44, .98);
+        --toolbar: rgba(42, 42, 44, .95);
+        --sidebar: rgba(37, 37, 39, .98);
+        --content: #1f1f21;
+        --inspector: #252527;
+        --line: rgba(235, 235, 245, .13);
+        --line-strong: rgba(235, 235, 245, .24);
+        --text: #f2f2f7;
+        --secondary: #aeaeb2;
+        --tertiary: #8e8e93;
+        --selection: rgba(10, 132, 255, .28);
+        --code-background: rgba(118, 118, 128, .24);
+        --shadow: 0 26px 80px rgba(0, 0, 0, .56), 0 2px 12px rgba(0, 0, 0, .4);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      color: var(--text);
+      background: var(--desktop);
+      font: 13px/1.35 "SF Pro Text", "SF Pro Display", sans-serif;
+    }
+    button, input { color: inherit; font: inherit; }
+    button { border: 0; cursor: default; }
+
+    .desktop {
+      height: 100%;
+      padding: 45px 24px 68px;
+      background:
+        radial-gradient(circle at 16% 14%, rgba(255, 255, 255, .54), transparent 32%),
+        linear-gradient(135deg, rgba(198, 212, 226, .58), rgba(225, 227, 231, .2));
+    }
+
+    .app-menubar {
+      position: fixed;
+      z-index: 20;
+      inset: 0 0 auto;
+      display: flex;
+      height: 25px;
+      align-items: center;
+      gap: 1px;
+      padding: 0 14px;
+      border-bottom: 1px solid rgba(60, 60, 67, .14);
+      background: color-mix(in srgb, var(--window) 91%, transparent);
+      box-shadow: 0 1px 5px rgba(0, 0, 0, .06);
+      backdrop-filter: blur(24px) saturate(1.35);
+      font-size: 12px;
+    }
+    .app-menubar span { padding: 0 8px; }
+    .app-menubar .app-name { font-weight: 650; }
+
+    .window {
+      display: grid;
+      width: 100%;
+      height: 100%;
+      min-width: 960px;
+      grid-template-columns: 212px minmax(430px, 1fr) 292px;
+      grid-template-rows: 52px minmax(0, 1fr);
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, .5);
+      border-radius: 15px;
+      background: var(--window);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(26px) saturate(1.35);
+    }
+
+    .titlebar {
+      grid-column: 1 / 4;
+      display: grid;
+      grid-template-columns: 212px minmax(430px, 1fr) 292px;
+      border-bottom: 1px solid var(--line);
+      background: var(--toolbar);
+    }
+    .title-part {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+    }
+    .title-part + .title-part { border-left: 1px solid var(--line); }
+    .traffic { display: flex; gap: 8px; margin-right: 12px; }
+    .traffic span {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .16);
+    }
+    .traffic span:nth-child(1) { background: #ff5f57; }
+    .traffic span:nth-child(2) { background: #febc2e; }
+    .traffic span:nth-child(3) { background: #28c840; }
+    .title-name {
+      min-width: 0;
+      overflow: hidden;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .title-count { color: var(--secondary); font-size: 11px; }
+    .spacer { flex: 1; }
+    .search {
+      display: flex;
+      width: min(190px, 24vw);
+      height: 28px;
+      align-items: center;
+      gap: 6px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(127, 127, 127, .1);
+      color: var(--secondary);
+    }
+    .search svg { width: 13px; height: 13px; fill: currentColor; }
+    .search input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      color: var(--text);
+      background: transparent;
+    }
+
+    .sidebar {
+      grid-column: 1;
+      grid-row: 2;
+      min-height: 0;
+      overflow: auto;
+      padding: 9px 8px;
+      border-right: 1px solid var(--line);
+      background: var(--sidebar);
+    }
+    .section-label {
+      padding: 12px 9px 5px;
+      color: var(--secondary);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .nav-row {
+      display: flex;
+      width: 100%;
+      min-height: 29px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border-radius: 6px;
+      background: transparent;
+      text-align: left;
+    }
+    .nav-row.selected { background: var(--selection); }
+    .nav-row svg {
+      width: 15px;
+      height: 15px;
+      flex: 0 0 15px;
+      fill: currentColor;
+      color: var(--secondary);
+    }
+    .nav-label {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .nav-count {
+      color: var(--secondary);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+    .tag-dot {
+      width: 8px;
+      height: 8px;
+      margin: 0 4px;
+      flex: 0 0 8px;
+      border-radius: 50%;
+      background: var(--tag-color);
+    }
+
+    .content {
+      grid-column: 2;
+      grid-row: 2;
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      background: var(--content);
+    }
+    .content-heading {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      padding: 20px 20px 0;
+    }
+    .content-heading h1 { margin: 0; font-size: 17px; font-weight: 650; }
+    .content-heading span { color: var(--secondary); font-size: 12px; }
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+      gap: 18px 14px;
+      align-content: start;
+      padding: 15px 20px 24px;
+    }
+    .video-card {
+      min-width: 0;
+      padding: 8px;
+      border-radius: 8px;
+      background: transparent;
+      text-align: left;
+    }
+    .video-card:hover { background: rgba(127, 127, 127, .09); }
+    .video-card.selected { background: var(--selection); }
+    .thumb {
+      position: relative;
+      aspect-ratio: 16 / 10;
+      overflow: hidden;
+      border-radius: 6px;
+      background:
+        linear-gradient(138deg, rgba(21, 44, 60, .95), rgba(74, 103, 116, .68)),
+        #34495e;
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
+    }
+    .thumb::before,
+    .thumb::after {
+      content: "";
+      position: absolute;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .16);
+    }
+    .thumb::before { width: 76%; height: 130%; top: -78%; left: -8%; }
+    .thumb::after { width: 64%; height: 110%; right: -24%; bottom: -70%; }
+    .thumb .frame-label {
+      position: absolute;
+      z-index: 1;
+      right: 8px;
+      bottom: 7px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: white;
+      background: rgba(0, 0, 0, .54);
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    .thumb.no-image {
+      display: grid;
+      place-items: center;
+      background: rgba(118, 118, 128, .14);
+      color: var(--secondary);
+    }
+    .thumb.no-image::before,
+    .thumb.no-image::after { display: none; }
+    .thumb.no-image svg { width: 35px; height: 35px; fill: currentColor; opacity: .7; }
+    .card-title {
+      display: -webkit-box;
+      margin-top: 7px;
+      overflow: hidden;
+      font-size: 12px;
+      font-weight: 500;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+    .card-meta {
+      margin-top: 3px;
+      color: var(--secondary);
+      font-size: 11px;
+    }
+
+    .inspector {
+      grid-column: 3;
+      grid-row: 2;
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      overflow: hidden;
+      border-left: 1px solid var(--line);
+      background: var(--inspector);
+    }
+    .segmented {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      margin: 14px 16px 12px;
+      padding: 2px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: rgba(118, 118, 128, .1);
+    }
+    .segment {
+      min-height: 24px;
+      border-radius: 5px;
+      background: transparent;
+      font-size: 12px;
+    }
+    .segment.selected {
+      background: color-mix(in srgb, var(--content) 92%, transparent);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+      font-weight: 550;
+    }
+    .inspector-scroll {
+      min-height: 0;
+      flex: 1;
+      overflow: auto;
+      padding: 0 16px 18px;
+    }
+    .filename {
+      display: flex;
+      align-items: flex-start;
+      gap: 7px;
+      padding: 2px 0 13px;
+      border-bottom: 1px solid var(--line);
+    }
+    .filename strong {
+      min-width: 0;
+      flex: 1;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+      line-height: 1.42;
+    }
+    .copy {
+      width: 24px;
+      height: 24px;
+      flex: 0 0 24px;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--secondary);
+    }
+    .copy:hover { background: rgba(118, 118, 128, .12); }
+    .copy svg { width: 14px; height: 14px; fill: currentColor; }
+
+    .detail-group { border-bottom: 1px solid var(--line); }
+    .group-toggle {
+      display: flex;
+      width: 100%;
+      min-height: 38px;
+      align-items: center;
+      gap: 7px;
+      padding: 0;
+      background: transparent;
+      text-align: left;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .group-toggle svg {
+      width: 10px;
+      height: 10px;
+      flex: 0 0 10px;
+      fill: currentColor;
+      color: var(--secondary);
+      transition: transform 140ms ease;
+    }
+    .detail-group.collapsed .group-toggle svg { transform: rotate(-90deg); }
+    .group-count {
+      margin-left: auto;
+      color: var(--tertiary);
+      font-size: 10px;
+      font-weight: 450;
+    }
+    .fields {
+      display: grid;
+      grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+      gap: 7px 12px;
+      padding: 0 0 13px 17px;
+    }
+    .detail-group.collapsed .fields { display: none; }
+    .field-label {
+      color: var(--secondary);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .field-value {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      font-size: 11px;
+      text-align: right;
+      user-select: text;
+    }
+    .field-value.numeric { font-variant-numeric: tabular-nums; }
+    code {
+      padding: 1px 4px;
+      border-radius: 4px;
+      background: var(--code-background);
+      font: 10.5px/1.35 "SF Mono", "Menlo", monospace;
+    }
+    .path-value {
+      color: var(--secondary);
+      font-size: 10.5px;
+      line-height: 1.42;
+    }
+
+    .tags-panel { padding-top: 2px; }
+    .tags-panel .tag-heading {
+      margin: 0 0 10px;
+      color: var(--secondary);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .tag-list { display: flex; flex-direction: column; gap: 8px; }
+    .tag-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 24px;
+    }
+    .checkbox {
+      display: grid;
+      width: 15px;
+      height: 15px;
+      place-items: center;
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      background: var(--accent);
+      color: white;
+    }
+    .checkbox svg { width: 10px; height: 10px; fill: currentColor; }
+    .prototype-note {
+      position: fixed;
+      right: 26px;
+      bottom: 16px;
+      padding: 5px 9px;
+      border: 1px solid rgba(255, 255, 255, .35);
+      border-radius: 6px;
+      color: var(--secondary);
+      background: color-mix(in srgb, var(--window) 88%, transparent);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, .09);
+      backdrop-filter: blur(18px);
+      font-size: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-menubar" aria-hidden="true">
+    <span class="app-name">FileFacet</span>
+    <span>文件</span>
+    <span>编辑</span>
+    <span>显示</span>
+    <span>窗口</span>
+    <span>帮助</span>
+  </div>
+
+  <main class="desktop">
+    <section class="window" aria-label="FileFacet 媒体源信息检查器原型">
+      <header class="titlebar">
+        <div class="title-part">
+          <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+          <span class="title-name">资料库</span>
+        </div>
+        <div class="title-part">
+          <span class="title-name">所有视频</span>
+          <span class="title-count">88 个项目</span>
+          <span class="spacer"></span>
+          <label class="search">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.6 2a4.6 4.6 0 1 0 2.86 8.2l3.17 3.17.74-.74-3.17-3.17A4.6 4.6 0 0 0 6.6 2Zm0 1.05a3.55 3.55 0 1 1 0 7.1 3.55 3.55 0 0 1 0-7.1Z"/></svg>
+            <input type="search" placeholder="搜索">
+          </label>
+        </div>
+        <div class="title-part">
+          <span class="title-name">检查器</span>
+        </div>
+      </header>
+
+      <aside class="sidebar">
+        <div class="section-label">资料库</div>
+        <button class="nav-row selected">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2.5h12v11H2v-11Zm1 1v2h10v-2H3Zm0 3v6h10v-6H3Z"/></svg>
+          <span class="nav-label">所有视频</span>
+          <span class="nav-count">88</span>
+        </button>
+        <button class="nav-row">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5A6.5 6.5 0 1 0 14.5 8 6.5 6.5 0 0 0 8 1.5Zm0 1A5.5 5.5 0 1 1 2.5 8 5.5 5.5 0 0 1 8 2.5Zm-.5 1.7h1v3.58l2.32 1.34-.5.87L7.5 8.36V4.2Z"/></svg>
+          <span class="nav-label">最近添加</span>
+          <span class="nav-count">12</span>
+        </button>
+        <div class="section-label">标签</div>
+        <button class="nav-row">
+          <span class="tag-dot" style="--tag-color:#ff9f0a"></span>
+          <span class="nav-label">待整理</span>
+          <span class="nav-count">19</span>
+        </button>
+        <button class="nav-row">
+          <span class="tag-dot" style="--tag-color:#30d158"></span>
+          <span class="nav-label">已归档</span>
+          <span class="nav-count">48</span>
+        </button>
+      </aside>
+
+      <section class="content">
+        <div class="content-heading">
+          <h1>媒体源信息示例</h1>
+          <span>选择视频查看检查器变化</span>
+        </div>
+        <div class="video-grid">
+          <button class="video-card selected" data-video="h264" aria-pressed="true">
+            <div class="thumb">
+              <span class="frame-label">22:14</span>
+            </div>
+            <span class="card-title">顶级超美整活御姐_汐梦瑶_《调皮的妹妹》…</span>
+            <span class="card-meta">H.264 · avc1</span>
+          </button>
+          <button class="video-card" data-video="hevc" aria-pressed="false">
+            <div class="thumb no-image">
+              <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 6.5h17a2.5 2.5 0 0 1 2.5 2.5v4.2l3.1-2.2a1.5 1.5 0 0 1 2.4 1.22v7.56A1.5 1.5 0 0 1 27.6 21l-3.1-2.2V23a2.5 2.5 0 0 1-2.5 2.5H5A2.5 2.5 0 0 1 2.5 23V9A2.5 2.5 0 0 1 5 6.5Zm0 2A.5.5 0 0 0 4.5 9v14a.5.5 0 0 0 .5.5h17a.5.5 0 0 0 .5-.5V9a.5.5 0 0 0-.5-.5H5Zm19.5 7.14v.72L28 18.83v-5.66l-3.5 2.47Z"/></svg>
+            </div>
+            <span class="card-title">辽宁传媒学院_郭奕函_高颜值校园女神性爱视频流出…</span>
+            <span class="card-meta">HEVC · hev1</span>
+          </button>
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <div class="segmented" role="tablist" aria-label="检查器内容">
+          <button class="segment" role="tab" aria-selected="false" data-panel="tags">标签</button>
+          <button class="segment selected" role="tab" aria-selected="true" data-panel="details">详细信息</button>
+        </div>
+
+        <div class="inspector-scroll">
+          <section class="tags-panel" data-panel-content="tags" hidden>
+            <p class="tag-heading">应用到所选视频</p>
+            <div class="tag-list">
+              <div class="tag-option">
+                <span class="checkbox"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 6.2 2.3 2.3L10 2.8l.8.8-6.5 6.5L1.2 7l.8-.8Z"/></svg></span>
+                <span>待整理</span>
+              </div>
+              <div class="tag-option">
+                <span class="checkbox"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2 6.2 2.3 2.3L10 2.8l.8.8-6.5 6.5L1.2 7l.8-.8Z"/></svg></span>
+                <span>人物</span>
+              </div>
+            </div>
+          </section>
+
+          <section data-panel-content="details">
+            <div class="filename">
+              <strong data-value="filename"></strong>
+              <button class="copy" type="button" title="复制文件名" aria-label="复制文件名">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 2A1.5 1.5 0 0 0 4 3.5V4h-.5A1.5 1.5 0 0 0 2 5.5v7A1.5 1.5 0 0 0 3.5 14h7a1.5 1.5 0 0 0 1.5-1.5V12h.5a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 12.5 2h-7ZM5 3.5a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 .5.5v7a.5.5 0 0 1-.5.5H12V5.5A1.5 1.5 0 0 0 10.5 4H5v-.5ZM3 5.5a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 .5.5v7a.5.5 0 0 1-.5.5h-7a.5.5 0 0 1-.5-.5v-7Z"/></svg>
+              </button>
+            </div>
+
+            <section class="detail-group">
+              <button class="group-toggle" type="button" aria-expanded="true">
+                <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.7 3.1 5 6.4l3.3-3.3.7.7-4 4-4-4 .7-.7Z"/></svg>
+                文件
+                <span class="group-count">8 项</span>
+              </button>
+              <div class="fields">
+                <span class="field-label">容器格式</span><span class="field-value" data-value="container"></span>
+                <span class="field-label">扩展名</span><span class="field-value" data-value="extension"></span>
+                <span class="field-label">大小</span><span class="field-value numeric" data-value="size"></span>
+                <span class="field-label">时长</span><span class="field-value numeric" data-value="duration"></span>
+                <span class="field-label">创建时间</span><span class="field-value numeric" data-value="created"></span>
+                <span class="field-label">修改时间</span><span class="field-value numeric" data-value="modified"></span>
+                <span class="field-label">访问状态</span><span class="field-value" data-value="access"></span>
+                <span class="field-label">路径</span><span class="field-value path-value" data-value="path"></span>
+              </div>
+            </section>
+
+            <section class="detail-group">
+              <button class="group-toggle" type="button" aria-expanded="true">
+                <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.7 3.1 5 6.4l3.3-3.3.7.7-4 4-4-4 .7-.7Z"/></svg>
+                视频
+                <span class="group-count">9 项</span>
+              </button>
+              <div class="fields">
+                <span class="field-label">编码</span><span class="field-value" data-value="videoCodec"></span>
+                <span class="field-label">编码标记</span><span class="field-value"><code data-value="videoTag"></code></span>
+                <span class="field-label">配置</span><span class="field-value" data-value="videoProfile"></span>
+                <span class="field-label">分辨率</span><span class="field-value numeric" data-value="resolution"></span>
+                <span class="field-label">帧率</span><span class="field-value numeric" data-value="frameRate"></span>
+                <span class="field-label">码率</span><span class="field-value numeric" data-value="videoBitRate"></span>
+                <span class="field-label">位深</span><span class="field-value numeric" data-value="bitDepth"></span>
+                <span class="field-label">色彩类型</span><span class="field-value" data-value="color"></span>
+                <span class="field-label">旋转方向</span><span class="field-value numeric" data-value="rotation"></span>
+              </div>
+            </section>
+
+            <section class="detail-group">
+              <button class="group-toggle" type="button" aria-expanded="true">
+                <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.7 3.1 5 6.4l3.3-3.3.7.7-4 4-4-4 .7-.7Z"/></svg>
+                音频
+                <span class="group-count">6 项</span>
+              </button>
+              <div class="fields">
+                <span class="field-label">编码</span><span class="field-value" data-value="audioCodec"></span>
+                <span class="field-label">编码标记</span><span class="field-value"><code data-value="audioTag"></code></span>
+                <span class="field-label">配置</span><span class="field-value" data-value="audioProfile"></span>
+                <span class="field-label">声道</span><span class="field-value" data-value="channels"></span>
+                <span class="field-label">采样率</span><span class="field-value numeric" data-value="sampleRate"></span>
+                <span class="field-label">码率</span><span class="field-value numeric" data-value="audioBitRate"></span>
+              </div>
+            </section>
+          </section>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <div class="prototype-note">原型：点击两个视频切换媒体源信息；点击分组标题折叠内容</div>
+
+  <script>
+    const videos = {
+      h264: {
+        filename: "顶级超美整活御姐_汐梦瑶_《调皮的妹妹》禁断的兄妹爱情，爱慕哥哥已久的妹妹在哥哥打飞机时突然闯入…各种姿势草的妹妹淫叫不断，最后射的她一嘴都是.mp4",
+        container: "MPEG-4 · isom",
+        extension: "MP4",
+        size: "512.2 MB",
+        duration: "22:14",
+        created: "2025年12月9日 22:31",
+        modified: "2025年12月9日 22:34",
+        access: "可以访问",
+        path: "…/Porns/单女/汐梦瑶/顶级超美整活御姐_汐梦瑶_《调皮的妹妹》…mp4",
+        videoCodec: "H.264 / AVC",
+        videoTag: "avc1",
+        videoProfile: "Main",
+        resolution: "602 × 1080",
+        frameRate: "30 fps",
+        videoBitRate: "2.94 Mb/s",
+        bitDepth: "8-bit",
+        color: "SDR · BT.709",
+        rotation: "0°",
+        audioCodec: "AAC",
+        audioTag: "mp4a",
+        audioProfile: "AAC-LC",
+        channels: "立体声 · 2 声道",
+        sampleRate: "44.1 kHz",
+        audioBitRate: "129 kb/s"
+      },
+      hevc: {
+        filename: "辽宁传媒学院_郭奕函_高颜值校园女神性爱视频流出_露脸口交激情3P.mp4",
+        container: "MPEG-4 · isom",
+        extension: "MP4",
+        size: "479.7 MB",
+        duration: "12:56",
+        created: "2025年11月17日 10:05",
+        modified: "2025年11月17日 10:08",
+        access: "可以访问",
+        path: "…/Porns/单女/辽宁传媒学院_郭奕函_高颜值校园女神性爱视频流出_露脸口交激情3P.mp4",
+        videoCodec: "HEVC / H.265",
+        videoTag: "hev1",
+        videoProfile: "Main",
+        resolution: "752 × 1080",
+        frameRate: "30 fps",
+        videoBitRate: "4.81 Mb/s",
+        bitDepth: "8-bit",
+        color: "SDR · BT.709",
+        rotation: "0°",
+        audioCodec: "AAC",
+        audioTag: "mp4a",
+        audioProfile: "AAC-LC",
+        channels: "立体声 · 2 声道",
+        sampleRate: "44.1 kHz",
+        audioBitRate: "128 kb/s"
+      }
+    };
+
+    const valueNodes = document.querySelectorAll("[data-value]");
+    const videoCards = document.querySelectorAll("[data-video]");
+    const segmentButtons = document.querySelectorAll("[data-panel]");
+    const panelContents = document.querySelectorAll("[data-panel-content]");
+
+    function selectVideo(id) {
+      const video = videos[id];
+      valueNodes.forEach((node) => {
+        node.textContent = video[node.dataset.value] ?? "—";
+      });
+      videoCards.forEach((card) => {
+        const selected = card.dataset.video === id;
+        card.classList.toggle("selected", selected);
+        card.setAttribute("aria-pressed", String(selected));
+      });
+    }
+
+    videoCards.forEach((card) => {
+      card.addEventListener("click", () => selectVideo(card.dataset.video));
+    });
+
+    segmentButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = button.dataset.panel;
+        segmentButtons.forEach((segment) => {
+          const selected = segment === button;
+          segment.classList.toggle("selected", selected);
+          segment.setAttribute("aria-selected", String(selected));
+        });
+        panelContents.forEach((panel) => {
+          panel.hidden = panel.dataset.panelContent !== target;
+        });
+      });
+    });
+
+    document.querySelectorAll(".group-toggle").forEach((button) => {
+      button.addEventListener("click", () => {
+        const group = button.closest(".detail-group");
+        const collapsed = group.classList.toggle("collapsed");
+        button.setAttribute("aria-expanded", String(!collapsed));
+      });
+    });
+
+    document.querySelector(".copy").addEventListener("click", async () => {
+      const filename = document.querySelector("[data-value='filename']").textContent;
+      if (navigator.clipboard) await navigator.clipboard.writeText(filename);
+    });
+
+    selectVideo("h264");
+  </script>
+</body>
+</html>

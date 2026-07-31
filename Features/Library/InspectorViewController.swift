@@ -7,6 +7,20 @@ struct InspectorTagDraftSnapshot {
 
 @MainActor
 final class InspectorViewController: NSViewController {
+    private enum DetailSection: Int, CaseIterable {
+        case file
+        case video
+        case audio
+
+        var title: String {
+            switch self {
+            case .file: String(localized: .detailSectionFile)
+            case .video: String(localized: .detailSectionVideo)
+            case .audio: String(localized: .detailSectionAudio)
+            }
+        }
+    }
+
     private let stack = NSStackView()
     private let contentScrollView = NSScrollView()
     private let contentStack = InspectorContentStackView()
@@ -62,6 +76,7 @@ final class InspectorViewController: NSViewController {
     private(set) var isApplyingTagChanges = false
     private var tagSearchText = ""
     private var newTagPopover: NSPopover?
+    private var collapsedDetailSections: Set<DetailSection> = []
     var onTagApplicationFinished: ((Bool) -> Void)?
     var selectedVideoIDs: [String] { selectedVideos.map(\.id) }
     var hasPendingTagChanges: Bool { pendingTagAssignments.isEmpty == false }
@@ -211,20 +226,6 @@ final class InspectorViewController: NSViewController {
         }
 
         addFilename(video.filename)
-        addField(title: String(localized: .detailFormat), value: video.fileExtension.uppercased())
-        addField(
-            title: String(localized: .detailSize),
-            value: ByteCountFormatter.string(fromByteCount: video.fileSize, countStyle: .file)
-        )
-        addField(title: String(localized: .detailDuration), value: formattedDuration(video.duration))
-        let resolution = if let width = video.width, let height = video.height {
-            "\(width) × \(height)"
-        } else {
-            String(localized: .detailMediaUnavailable)
-        }
-        addField(title: String(localized: .detailResolution), value: resolution)
-        addField(title: String(localized: .detailCreated), value: formattedDate(video.creationDate))
-        addField(title: String(localized: .detailModified), value: formattedDate(video.modificationDate))
         let accessStatus: String
         if video.availability == .offline {
             if let sourceName = offlineSourceName(video), sourceName.isEmpty == false {
@@ -235,10 +236,53 @@ final class InspectorViewController: NSViewController {
         } else {
             accessStatus = String(localized: .detailAccessAvailable)
         }
-        addField(title: String(localized: .detailAccessStatus), value: accessStatus)
-        addField(
-            title: String(localized: .detailPath),
-            value: filePath(video) ?? String(localized: .detailPathUnavailable)
+        let media = video.mediaSourceInfo
+        addDetailSection(
+            .file,
+            fields: [
+                (
+                    String(localized: .detailContainerFormat),
+                    formattedContainer(media)
+                ),
+                (String(localized: .detailExtension), video.fileExtension.uppercased()),
+                (
+                    String(localized: .detailSize),
+                    ByteCountFormatter.string(fromByteCount: video.fileSize, countStyle: .file)
+                ),
+                (String(localized: .detailDuration), formattedDuration(video.duration)),
+                (String(localized: .detailCreated), formattedDate(video.creationDate)),
+                (String(localized: .detailModified), formattedDate(video.modificationDate)),
+                (String(localized: .detailAccessStatus), accessStatus),
+                (
+                    String(localized: .detailPath),
+                    filePath(video) ?? String(localized: .detailPathUnavailable)
+                ),
+            ]
+        )
+        addDetailSection(
+            .video,
+            fields: [
+                (String(localized: .detailVideoCodec), valueOrUnavailable(media?.videoCodec)),
+                (String(localized: .detailCodecTag), valueOrUnavailable(media?.videoCodecTag)),
+                (String(localized: .detailCodecProfile), valueOrUnavailable(media?.videoProfile)),
+                (String(localized: .detailResolution), formattedResolution(video)),
+                (String(localized: .detailFrameRate), formattedFrameRate(media?.frameRate)),
+                (String(localized: .detailBitRate), formattedBitRate(media?.videoBitRate)),
+                (String(localized: .detailBitDepth), formattedBitDepth(media?.bitDepth)),
+                (String(localized: .detailColorType), formattedColorInfo(media)),
+                (String(localized: .detailRotation), formattedRotation(media?.rotationDegrees)),
+            ]
+        )
+        addDetailSection(
+            .audio,
+            fields: [
+                (String(localized: .detailAudioCodec), valueOrUnavailable(media?.audioCodec)),
+                (String(localized: .detailCodecTag), valueOrUnavailable(media?.audioCodecTag)),
+                (String(localized: .detailCodecProfile), valueOrUnavailable(media?.audioProfile)),
+                (String(localized: .detailChannels), formattedChannels(media?.audioChannels)),
+                (String(localized: .detailSampleRate), formattedSampleRate(media?.audioSampleRate)),
+                (String(localized: .detailBitRate), formattedBitRate(media?.audioBitRate)),
+            ]
         )
         updateScrollDocumentSize()
     }
@@ -296,6 +340,70 @@ final class InspectorViewController: NSViewController {
         contentStack.addArrangedSubview(fieldStack)
     }
 
+    private func addDetailSection(_ section: DetailSection, fields: [(String, String)]) {
+        let header = NSButton(
+            title: section.title,
+            target: self,
+            action: #selector(toggleDetailSection(_:))
+        )
+        header.tag = section.rawValue
+        header.isBordered = false
+        header.bezelStyle = .inline
+        header.font = .systemFont(ofSize: 12, weight: .semibold)
+        header.alignment = .left
+        header.imagePosition = .imageLeading
+        header.image = NSImage(
+            systemSymbolName: collapsedDetailSections.contains(section) ? "chevron.right" : "chevron.down",
+            accessibilityDescription: nil
+        )
+        header.contentTintColor = .secondaryLabelColor
+        header.setAccessibilityLabel(section.title)
+
+        let rows = fields.map { title, value -> [NSView] in
+            let titleLabel = NSTextField(labelWithString: title)
+            titleLabel.font = .systemFont(ofSize: 11)
+            titleLabel.textColor = .secondaryLabelColor
+            titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+            let valueLabel = NSTextField(wrappingLabelWithString: value)
+            valueLabel.font = .systemFont(ofSize: 11)
+            valueLabel.alignment = .right
+            valueLabel.isSelectable = true
+            valueLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            return [titleLabel, valueLabel]
+        }
+        let grid = NSGridView(views: rows)
+        grid.rowSpacing = 7
+        grid.columnSpacing = 12
+        grid.column(at: 0).xPlacement = .leading
+        grid.column(at: 1).xPlacement = .trailing
+        grid.isHidden = collapsedDetailSections.contains(section)
+
+        let group = NSStackView(views: [header, grid])
+        group.orientation = .vertical
+        group.alignment = .leading
+        group.spacing = 7
+        contentStack.addArrangedSubview(group)
+        group.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+        header.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+        grid.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+
+        let separator = NSBox()
+        separator.boxType = .separator
+        contentStack.addArrangedSubview(separator)
+        separator.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+    }
+
+    @objc private func toggleDetailSection(_ sender: NSButton) {
+        guard let section = DetailSection(rawValue: sender.tag) else { return }
+        if collapsedDetailSections.contains(section) {
+            collapsedDetailSections.remove(section)
+        } else {
+            collapsedDetailSections.insert(section)
+        }
+        renderSelection()
+    }
+
     private func formattedDuration(_ duration: Double?) -> String {
         guard let duration, duration.isFinite else {
             return String(localized: .detailMediaUnavailable)
@@ -312,6 +420,114 @@ final class InspectorViewController: NSViewController {
     private func formattedDate(_ date: Date?) -> String {
         guard let date else { return String(localized: .detailUnknown) }
         return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func valueOrUnavailable(_ value: String?) -> String {
+        guard let value, value.isEmpty == false else {
+            return String(localized: .detailMediaUnavailable)
+        }
+        return value
+    }
+
+    private func formattedContainer(_ media: MediaSourceInfo?) -> String {
+        guard let format = media?.containerFormat, format.isEmpty == false else {
+            return String(localized: .detailMediaUnavailable)
+        }
+        guard let brand = media?.containerBrand, brand.isEmpty == false else { return format }
+        return "\(format) · \(brand)"
+    }
+
+    private func formattedResolution(_ video: VideoRecord) -> String {
+        guard let width = video.width, let height = video.height else {
+            return String(localized: .detailMediaUnavailable)
+        }
+        return "\(width) × \(height)"
+    }
+
+    private func formattedFrameRate(_ value: Double?) -> String {
+        guard let value, value.isFinite, value > 0 else {
+            return String(localized: .detailMediaUnavailable)
+        }
+        let number = value.formatted(.number.precision(.fractionLength(0...3)))
+        return String(localized: .detailFramesPerSecond(number))
+    }
+
+    private func formattedBitRate(_ value: Double?) -> String {
+        guard let value, value.isFinite, value > 0 else {
+            return String(localized: .detailMediaUnavailable)
+        }
+        if value >= 1_000_000 {
+            let number = (value / 1_000_000).formatted(.number.precision(.fractionLength(0...2)))
+            return String(localized: .detailMegabitsPerSecond(number))
+        }
+        let number = (value / 1_000).formatted(.number.precision(.fractionLength(0...1)))
+        return String(localized: .detailKilobitsPerSecond(number))
+    }
+
+    private func formattedBitDepth(_ value: Int?) -> String {
+        guard let value, value > 0 else {
+            return String(localized: .detailMediaUnavailable)
+        }
+        return String(localized: .detailBitDepthValue(value))
+    }
+
+    private func formattedColorInfo(_ media: MediaSourceInfo?) -> String {
+        guard let media else { return String(localized: .detailMediaUnavailable) }
+        let transfer = media.colorTransfer ?? ""
+        let colorType: String
+        if transfer.localizedCaseInsensitiveContains("2084")
+            || transfer.localizedCaseInsensitiveContains("PQ") {
+            colorType = "HDR10"
+        } else if transfer.localizedCaseInsensitiveContains("2100")
+            || transfer.localizedCaseInsensitiveContains("HLG") {
+            colorType = "HLG"
+        } else if transfer.isEmpty == false || media.colorPrimaries != nil {
+            colorType = "SDR"
+        } else {
+            return String(localized: .detailMediaUnavailable)
+        }
+
+        guard let primaries = media.colorPrimaries else { return colorType }
+        let colorSpace: String?
+        if primaries.localizedCaseInsensitiveContains("2020") {
+            colorSpace = "BT.2020"
+        } else if primaries.localizedCaseInsensitiveContains("709") {
+            colorSpace = "BT.709"
+        } else if primaries.localizedCaseInsensitiveContains("P3") {
+            colorSpace = "Display P3"
+        } else {
+            colorSpace = nil
+        }
+        return [colorType, colorSpace].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func formattedRotation(_ value: Double?) -> String {
+        guard let value, value.isFinite else {
+            return String(localized: .detailMediaUnavailable)
+        }
+        return "\(value.formatted(.number.precision(.fractionLength(0...1))))°"
+    }
+
+    private func formattedChannels(_ value: Int?) -> String {
+        guard let value, value > 0 else {
+            return String(localized: .detailMediaUnavailable)
+        }
+        let layout: String? = switch value {
+        case 1: String(localized: .detailMono)
+        case 2: String(localized: .detailStereo)
+        case 6: String(localized: .detailSurroundFiveOne)
+        default: nil
+        }
+        let count = String(localized: .detailChannelCount(value))
+        return [layout, count].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func formattedSampleRate(_ value: Double?) -> String {
+        guard let value, value.isFinite, value > 0 else {
+            return String(localized: .detailMediaUnavailable)
+        }
+        let number = (value / 1_000).formatted(.number.precision(.fractionLength(0...2)))
+        return String(localized: .detailKilohertz(number))
     }
 
     private func addTagControls() {

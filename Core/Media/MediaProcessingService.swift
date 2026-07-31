@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import CoreMedia
 import Foundation
 import ImageIO
 @preconcurrency import QuickLookThumbnailing
@@ -11,6 +12,25 @@ struct MediaProcessingResult: Sendable {
     let thumbnailID: String?
     let metadataStatus: VideoRecord.ProcessingStatus
     let thumbnailStatus: VideoRecord.ProcessingStatus
+    let mediaSourceInfo: MediaSourceInfo?
+
+    init(
+        duration: Double?,
+        width: Int?,
+        height: Int?,
+        thumbnailID: String?,
+        metadataStatus: VideoRecord.ProcessingStatus,
+        thumbnailStatus: VideoRecord.ProcessingStatus,
+        mediaSourceInfo: MediaSourceInfo? = nil
+    ) {
+        self.duration = duration
+        self.width = width
+        self.height = height
+        self.thumbnailID = thumbnailID
+        self.metadataStatus = metadataStatus
+        self.thumbnailStatus = thumbnailStatus
+        self.mediaSourceInfo = mediaSourceInfo
+    }
 }
 
 actor MediaProcessingService {
@@ -41,6 +61,7 @@ actor MediaProcessingService {
         var duration: Double?
         var width: Int?
         var height: Int?
+        let mediaSourceInfo = await loadMediaSourceInfo(asset: asset, fileURL: fileURL)
         var metadataStatus: VideoRecord.ProcessingStatus = .failed
 
         do {
@@ -103,7 +124,8 @@ actor MediaProcessingService {
                 height: height,
                 thumbnailID: thumbnailID,
                 metadataStatus: metadataStatus,
-                thumbnailStatus: .completed
+                thumbnailStatus: .completed,
+                mediaSourceInfo: mediaSourceInfo
             )
         } catch {
             return MediaProcessingResult(
@@ -112,9 +134,105 @@ actor MediaProcessingService {
                 height: height,
                 thumbnailID: nil,
                 metadataStatus: metadataStatus,
-                thumbnailStatus: .failed
+                thumbnailStatus: .failed,
+                mediaSourceInfo: mediaSourceInfo
             )
         }
+    }
+
+    private func loadMediaSourceInfo(asset: AVAsset, fileURL: URL) async -> MediaSourceInfo {
+        let container = containerInfo(fileURL: fileURL)
+        let videoTrack = try? await asset.loadTracks(withMediaType: .video).first
+        let audioTrack = try? await asset.loadTracks(withMediaType: .audio).first
+
+        var videoDescription: CMFormatDescription?
+        var videoTag: String?
+        var videoCodec: String?
+        var videoProfile: String?
+        var bitDepth: Int?
+        var colorTransfer: String?
+        var colorPrimaries: String?
+        var frameRate: Double?
+        var videoBitRate: Double?
+        var rotationDegrees: Double?
+
+        if let videoTrack {
+            videoDescription = try? await videoTrack.load(.formatDescriptions).first
+            if let videoDescription {
+                videoTag = sampleEntryTag(videoDescription)
+                    ?? fourCharacterCode(CMFormatDescriptionGetMediaSubType(videoDescription))
+                videoCodec = videoCodecName(tag: videoTag)
+                let configuration = videoConfiguration(description: videoDescription, tag: videoTag)
+                videoProfile = configuration.profile
+                bitDepth = configuration.bitDepth
+                colorTransfer = formatDescriptionString(
+                    videoDescription,
+                    key: kCMFormatDescriptionExtension_TransferFunction
+                )
+                colorPrimaries = formatDescriptionString(
+                    videoDescription,
+                    key: kCMFormatDescriptionExtension_ColorPrimaries
+                )
+            }
+            if let value = try? await videoTrack.load(.nominalFrameRate), value > 0 {
+                frameRate = Double(value)
+            }
+            if let value = try? await videoTrack.load(.estimatedDataRate), value > 0 {
+                videoBitRate = Double(value)
+            }
+            if let transform = try? await videoTrack.load(.preferredTransform) {
+                rotationDegrees = normalizedRotationDegrees(transform)
+            }
+        }
+
+        var audioTag: String?
+        var audioCodec: String?
+        var audioProfile: String?
+        var audioChannels: Int?
+        var audioSampleRate: Double?
+        var audioBitRate: Double?
+
+        if let audioTrack {
+            if let audioDescription = try? await audioTrack.load(.formatDescriptions).first {
+                audioTag = sampleEntryTag(audioDescription)
+                    ?? fourCharacterCode(CMFormatDescriptionGetMediaSubType(audioDescription))
+                if let basicDescription = CMAudioFormatDescriptionGetStreamBasicDescription(audioDescription)?.pointee {
+                    audioCodec = audioCodecName(formatID: basicDescription.mFormatID, tag: audioTag)
+                    audioProfile = audioProfileName(formatID: basicDescription.mFormatID)
+                    if basicDescription.mChannelsPerFrame > 0 {
+                        audioChannels = Int(basicDescription.mChannelsPerFrame)
+                    }
+                    if basicDescription.mSampleRate > 0 {
+                        audioSampleRate = basicDescription.mSampleRate
+                    }
+                } else {
+                    audioCodec = audioCodecName(formatID: 0, tag: audioTag)
+                }
+            }
+            if let value = try? await audioTrack.load(.estimatedDataRate), value > 0 {
+                audioBitRate = Double(value)
+            }
+        }
+
+        return MediaSourceInfo(
+            containerFormat: container.format,
+            containerBrand: container.brand,
+            videoCodec: videoCodec,
+            videoCodecTag: videoTag,
+            videoProfile: videoProfile,
+            frameRate: frameRate,
+            videoBitRate: videoBitRate,
+            bitDepth: bitDepth,
+            colorTransfer: colorTransfer,
+            colorPrimaries: colorPrimaries,
+            rotationDegrees: rotationDegrees,
+            audioCodec: audioCodec,
+            audioCodecTag: audioTag,
+            audioProfile: audioProfile,
+            audioChannels: audioChannels,
+            audioSampleRate: audioSampleRate,
+            audioBitRate: audioBitRate
+        )
     }
 
     private func generateQuickLookThumbnail(fileURL: URL) async throws -> CGImage {
@@ -133,6 +251,214 @@ actor MediaProcessingService {
         AppLogger.library.error(
             "Thumbnail generation failed at \(stage, privacy: .public), domain: \(error.domain, privacy: .public), code: \(error.code, privacy: .public)"
         )
+    }
+
+    private func containerInfo(fileURL: URL) -> (format: String?, brand: String?) {
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return (nil, nil) }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 4_096), data.isEmpty == false else {
+            return (nil, nil)
+        }
+
+        if let brand = isoBaseMediaBrand(in: data) {
+            return (brand == "qt  " ? "QuickTime" : "MPEG-4", brand)
+        }
+        if data.count >= 12,
+           String(data: data[0..<4], encoding: .ascii) == "RIFF",
+           String(data: data[8..<12], encoding: .ascii) == "AVI " {
+            return ("AVI", nil)
+        }
+        if data.starts(with: [0x1a, 0x45, 0xdf, 0xa3]) {
+            let header = String(decoding: data, as: UTF8.self).lowercased()
+            if header.contains("webm") { return ("WebM", nil) }
+            if header.contains("matroska") { return ("Matroska", nil) }
+            return ("Matroska / WebM", nil)
+        }
+        return (nil, nil)
+    }
+
+    private func isoBaseMediaBrand(in data: Data) -> String? {
+        var offset = 0
+        while offset + 8 <= data.count {
+            let size32 = Int(readUInt32(data, at: offset))
+            guard let type = asciiFourCharacterCode(data, offset: offset + 4) else { return nil }
+            let headerSize: Int
+            let boxSize: Int
+            if size32 == 1 {
+                guard offset + 16 <= data.count else { return nil }
+                let extendedSize = readUInt64(data, at: offset + 8)
+                guard extendedSize <= UInt64(Int.max) else { return nil }
+                headerSize = 16
+                boxSize = Int(extendedSize)
+            } else {
+                headerSize = 8
+                boxSize = size32
+            }
+            guard boxSize >= headerSize else { return nil }
+            if type == "ftyp" {
+                guard offset + headerSize + 4 <= data.count else { return nil }
+                return asciiFourCharacterCode(data, offset: offset + headerSize)
+            }
+            if boxSize == 0 || offset + boxSize > data.count { return nil }
+            offset += boxSize
+        }
+        return nil
+    }
+
+    private func readUInt32(_ data: Data, at offset: Int) -> UInt32 {
+        data[offset..<(offset + 4)].reduce(0) { ($0 << 8) | UInt32($1) }
+    }
+
+    private func readUInt64(_ data: Data, at offset: Int) -> UInt64 {
+        data[offset..<(offset + 8)].reduce(0) { ($0 << 8) | UInt64($1) }
+    }
+
+    private func asciiFourCharacterCode(_ data: Data, offset: Int) -> String? {
+        guard offset >= 0, offset + 4 <= data.count else { return nil }
+        let bytes = data[offset..<(offset + 4)]
+        guard bytes.allSatisfy({ $0 >= 0x20 && $0 <= 0x7e }) else { return nil }
+        return String(bytes: bytes, encoding: .ascii)
+    }
+
+    private func fourCharacterCode(_ value: FourCharCode) -> String? {
+        let bytes: [UInt8] = [
+            UInt8((value >> 24) & 0xff),
+            UInt8((value >> 16) & 0xff),
+            UInt8((value >> 8) & 0xff),
+            UInt8(value & 0xff),
+        ]
+        guard bytes.allSatisfy({ $0 >= 0x20 && $0 <= 0x7e }) else { return nil }
+        return String(bytes: bytes, encoding: .ascii)
+    }
+
+    private func sampleEntryTag(_ description: CMFormatDescription) -> String? {
+        guard let data = CMFormatDescriptionGetExtension(
+            description,
+            extensionKey: kCMFormatDescriptionExtension_VerbatimISOSampleEntry
+        ) as? Data, data.count >= 8 else {
+            return nil
+        }
+        return asciiFourCharacterCode(data, offset: 4)
+    }
+
+    private func videoCodecName(tag: String?) -> String? {
+        switch tag {
+        case "avc1", "avc3": "H.264 / AVC"
+        case "hvc1", "hev1": "HEVC / H.265"
+        case "av01": "AV1"
+        case "vp09": "VP9"
+        case "mp4v": "MPEG-4 Visual"
+        case "jpeg", "mjpg": "Motion JPEG"
+        case "ap4h": "Apple ProRes 4444"
+        case "apch": "Apple ProRes 422 HQ"
+        case "apcn": "Apple ProRes 422"
+        case "apcs": "Apple ProRes 422 LT"
+        case "apco": "Apple ProRes 422 Proxy"
+        default: tag
+        }
+    }
+
+    private func audioCodecName(formatID: AudioFormatID, tag: String?) -> String? {
+        switch formatID {
+        case kAudioFormatMPEG4AAC, kAudioFormatMPEG4AAC_HE, kAudioFormatMPEG4AAC_HE_V2,
+             kAudioFormatMPEG4AAC_LD, kAudioFormatMPEG4AAC_ELD:
+            "AAC"
+        case kAudioFormatAC3: "Dolby Digital / AC-3"
+        case kAudioFormatEnhancedAC3: "Dolby Digital Plus / E-AC-3"
+        case kAudioFormatMPEGLayer3: "MP3"
+        case kAudioFormatAppleLossless: "Apple Lossless"
+        case kAudioFormatLinearPCM: "Linear PCM"
+        default:
+            switch tag {
+            case "mp4a": "AAC"
+            case "ac-3": "Dolby Digital / AC-3"
+            case "ec-3": "Dolby Digital Plus / E-AC-3"
+            case "Opus": "Opus"
+            default: tag
+            }
+        }
+    }
+
+    private func audioProfileName(formatID: AudioFormatID) -> String? {
+        switch formatID {
+        case kAudioFormatMPEG4AAC_HE: "HE-AAC"
+        case kAudioFormatMPEG4AAC_HE_V2: "HE-AAC v2"
+        case kAudioFormatMPEG4AAC_LD: "AAC-LD"
+        case kAudioFormatMPEG4AAC_ELD: "AAC-ELD"
+        case kAudioFormatMPEG4AAC: "AAC-LC"
+        default: nil
+        }
+    }
+
+    private func videoConfiguration(
+        description: CMFormatDescription,
+        tag: String?
+    ) -> (profile: String?, bitDepth: Int?) {
+        guard let atoms = CMFormatDescriptionGetExtension(
+            description,
+            extensionKey: kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms
+        ) as? [String: Any] else {
+            return (nil, nil)
+        }
+        switch tag {
+        case "avc1", "avc3":
+            guard let data = atoms["avcC"] as? Data, data.count >= 4 else { return (nil, nil) }
+            let profileName = switch data[1] {
+            case 66: "Baseline"
+            case 77: "Main"
+            case 88: "Extended"
+            case 100: "High"
+            case 110: "High 10"
+            case 122: "High 4:2:2"
+            case 144: "High 4:4:4"
+            default: "Profile \(data[1])"
+            }
+            return ("\(profileName) · Level \(levelDescription(Int(data[3]), divisor: 10))", data[1] == 110 ? 10 : 8)
+        case "hvc1", "hev1":
+            guard let data = atoms["hvcC"] as? Data, data.count >= 19 else { return (nil, nil) }
+            let profileID = data[1] & 0x1f
+            let profileName = switch profileID {
+            case 1: "Main"
+            case 2: "Main 10"
+            case 3: "Main Still Picture"
+            default: "Profile \(profileID)"
+            }
+            let bitDepth = 8 + Int(data[17] & 0x07)
+            return ("\(profileName) · Level \(levelDescription(Int(data[12]), divisor: 30))", bitDepth)
+        case "av01":
+            guard let data = atoms["av1C"] as? Data, data.count >= 3 else { return (nil, nil) }
+            let profileID = (data[1] >> 5) & 0x07
+            let profileName = switch profileID {
+            case 0: "Main"
+            case 1: "High"
+            case 2: "Professional"
+            default: "Profile \(profileID)"
+            }
+            let bitDepth = (data[2] & 0x20) != 0 ? 12 : ((data[2] & 0x40) != 0 ? 10 : 8)
+            return (profileName, bitDepth)
+        default:
+            return (nil, nil)
+        }
+    }
+
+    private func levelDescription(_ value: Int, divisor: Int) -> String {
+        let major = value / divisor
+        let remainder = value % divisor
+        guard remainder > 0 else { return "\(major).0" }
+        let decimal = Int((Double(remainder) / Double(divisor) * 10).rounded())
+        return "\(major).\(decimal)"
+    }
+
+    private func formatDescriptionString(_ description: CMFormatDescription, key: CFString) -> String? {
+        CMFormatDescriptionGetExtension(description, extensionKey: key) as? String
+    }
+
+    private func normalizedRotationDegrees(_ transform: CGAffineTransform) -> Double {
+        var degrees = atan2(transform.b, transform.a) * 180 / .pi
+        degrees.formTruncatingRemainder(dividingBy: 360)
+        if degrees < 0 { degrees += 360 }
+        let rounded = degrees.rounded()
+        return rounded == 360 ? 0 : rounded
     }
 
     nonisolated func thumbnailURL(for identifier: String) -> URL {
