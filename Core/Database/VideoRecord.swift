@@ -4,6 +4,7 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
     enum Availability: String, Sendable {
         case available
         case missing
+        case offline
     }
 
     enum ProcessingStatus: String, Sendable {
@@ -28,6 +29,27 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
     let thumbnailStatus: ProcessingStatus
     let firstIndexedAt: Date
     let availability: Availability
+
+    func withAvailability(_ availability: Availability) -> VideoRecord {
+        VideoRecord(
+            id: id,
+            libraryID: libraryID,
+            relativePath: relativePath,
+            filename: filename,
+            fileExtension: fileExtension,
+            fileSize: fileSize,
+            creationDate: creationDate,
+            modificationDate: modificationDate,
+            duration: duration,
+            width: width,
+            height: height,
+            thumbnailID: thumbnailID,
+            metadataStatus: metadataStatus,
+            thumbnailStatus: thumbnailStatus,
+            firstIndexedAt: firstIndexedAt,
+            availability: availability
+        )
+    }
 }
 
 struct RemovedVideoRecord: Equatable, Sendable {

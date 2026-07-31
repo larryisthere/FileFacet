@@ -49,6 +49,7 @@ final class InspectorViewController: NSViewController {
     private let onApplyTagDraft: ([TagCreationDraft], [String: Bool], [String], @escaping (Bool) -> Void) -> Void
     private let loadTagStates: ([String], @escaping ([String: TagAssignmentState]) -> Void) -> Void
     private let filePath: (VideoRecord) -> String?
+    private let offlineSourceName: (VideoRecord) -> String?
     private var selectedVideo: VideoRecord?
     private var selectedVideos: [VideoRecord] = []
     private var tags: [TagRecord] = []
@@ -68,11 +69,13 @@ final class InspectorViewController: NSViewController {
     init(
         onApplyTagDraft: @escaping ([TagCreationDraft], [String: Bool], [String], @escaping (Bool) -> Void) -> Void,
         loadTagStates: @escaping ([String], @escaping ([String: TagAssignmentState]) -> Void) -> Void,
-        filePath: @escaping (VideoRecord) -> String?
+        filePath: @escaping (VideoRecord) -> String?,
+        offlineSourceName: @escaping (VideoRecord) -> String?
     ) {
         self.onApplyTagDraft = onApplyTagDraft
         self.loadTagStates = loadTagStates
         self.filePath = filePath
+        self.offlineSourceName = offlineSourceName
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -222,6 +225,17 @@ final class InspectorViewController: NSViewController {
         addField(title: String(localized: .detailResolution), value: resolution)
         addField(title: String(localized: .detailCreated), value: formattedDate(video.creationDate))
         addField(title: String(localized: .detailModified), value: formattedDate(video.modificationDate))
+        let accessStatus: String
+        if video.availability == .offline {
+            if let sourceName = offlineSourceName(video), sourceName.isEmpty == false {
+                accessStatus = String(localized: .detailAccessOfflineNamed(sourceName))
+            } else {
+                accessStatus = String(localized: .detailAccessOffline)
+            }
+        } else {
+            accessStatus = String(localized: .detailAccessAvailable)
+        }
+        addField(title: String(localized: .detailAccessStatus), value: accessStatus)
         addField(
             title: String(localized: .detailPath),
             value: filePath(video) ?? String(localized: .detailPathUnavailable)

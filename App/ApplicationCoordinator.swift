@@ -45,6 +45,9 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         onPreviewVideos: { [weak self] videos in self?.previewVideos(videos) },
         thumbnailURL: { [weak self] video in self?.libraryAccessCoordinator?.thumbnailURL(for: video) },
         filePath: { [weak self] video in self?.libraryAccessCoordinator?.fileURL(for: video)?.path },
+        offlineSourceName: { [weak self] video in
+            self?.libraryAccessCoordinator?.offlineSourceName(for: video)
+        },
         onFilterChanged: { [weak self] filter in self?.applyFilter(filter) },
         onSearchChanged: { [weak self] text in self?.libraryAccessCoordinator?.applySearch(text) },
         onCreateTag: { [weak self] name, parentID in self?.libraryAccessCoordinator?.createTag(name: name, parentID: parentID) },
@@ -129,6 +132,9 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         libraryAccessCoordinator?.onSidebarFilterCountsChanged = { [weak self] counts in
             self?.libraryViewController.setSidebarFilterCounts(counts)
         }
+        libraryAccessCoordinator?.onFilterChangedBySystem = { [weak self] filter in
+            self?.libraryViewController.setFilterFromSystem(filter)
+        }
         libraryAccessCoordinator?.onVideoChanged = { [weak self] video in
             self?.libraryViewController.updateVideo(video)
         }
@@ -210,6 +216,18 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
             name: NSWorkspace.screensDidSleepNotification,
             object: nil
         )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceVolumeAvailabilityChanged(_:)),
+            name: NSWorkspace.didMountNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceVolumeAvailabilityChanged(_:)),
+            name: NSWorkspace.didUnmountNotification,
+            object: nil
+        )
     }
 
     @objc private func applicationWillResignActive() {
@@ -230,6 +248,12 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         guard lockCoordinator.isAuthenticationEnabled else { return }
         installPrivacyShield()
         lockCoordinator.lock()
+    }
+
+    @objc private func workspaceVolumeAvailabilityChanged(_ notification: Notification) {
+        libraryAccessCoordinator?.refreshVolumeAvailability(
+            interruptMediaProcessing: notification.name == NSWorkspace.didUnmountNotification
+        )
     }
 
     @objc private func checkIdleLock() {

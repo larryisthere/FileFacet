@@ -72,6 +72,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         onPreviewVideos: @escaping ([VideoRecord]) -> Void,
         thumbnailURL: @escaping (VideoRecord) -> URL?,
         filePath: @escaping (VideoRecord) -> String?,
+        offlineSourceName: @escaping (VideoRecord) -> String?,
         onFilterChanged: @escaping (LibraryFilter) -> Void,
         onSearchChanged: @escaping (String) -> Void,
         onCreateTag: @escaping (String, String?) -> Void,
@@ -91,7 +92,8 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         let inspector = InspectorViewController(
             onApplyTagDraft: onApplyTagDraft,
             loadTagStates: loadTagStates,
-            filePath: filePath
+            filePath: filePath,
+            offlineSourceName: offlineSourceName
         )
         inspectorViewController = inspector
         sidebarViewController = SidebarViewController(
@@ -261,6 +263,13 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
 
     func setSidebarFilterCounts(_ counts: SidebarFilterCounts) {
         sidebarViewController.setFilterCounts(counts)
+    }
+
+    func setFilterFromSystem(_ filter: LibraryFilter) {
+        sidebarViewController.selectFilter(filter)
+        if filter == .all {
+            setContextTitle(String(localized: .libraryAllVideos), tagID: nil)
+        }
     }
 
     func updateVideo(_ video: VideoRecord) {

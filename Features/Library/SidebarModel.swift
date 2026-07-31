@@ -31,6 +31,7 @@ enum TagSortMode: String, CaseIterable {
 
 enum LibraryFilter: Equatable, Sendable {
     case all
+    case offline
     case untagged
     case recent
     case tag(String)
@@ -39,10 +40,18 @@ enum LibraryFilter: Equatable, Sendable {
 
 struct SidebarFilterCounts: Equatable, Sendable {
     let all: Int
+    let offline: Int
     let untagged: Int
     let recent: Int
 
-    static let zero = SidebarFilterCounts(all: 0, untagged: 0, recent: 0)
+    init(all: Int, offline: Int = 0, untagged: Int, recent: Int) {
+        self.all = all
+        self.offline = offline
+        self.untagged = untagged
+        self.recent = recent
+    }
+
+    static let zero = SidebarFilterCounts(all: 0, offline: 0, untagged: 0, recent: 0)
 }
 
 enum SidebarGroupKind {

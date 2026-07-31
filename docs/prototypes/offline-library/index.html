@@ -1,0 +1,831 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FileFacet · 离线资料库原型</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --desktop: #d9dde3;
+      --window: rgba(246, 246, 246, .97);
+      --toolbar: rgba(246, 246, 246, .92);
+      --sidebar: rgba(232, 232, 232, .96);
+      --content: #fff;
+      --inspector: #f7f7f7;
+      --line: rgba(60, 60, 67, .18);
+      --line-strong: rgba(60, 60, 67, .28);
+      --text: #202124;
+      --secondary: #6e6e73;
+      --tertiary: #8e8e93;
+      --accent: #0a84ff;
+      --accent-soft: rgba(10, 132, 255, .13);
+      --selection: rgba(10, 132, 255, .18);
+      --success: #248a3d;
+      --offline: #6e6e73;
+      --warning-soft: rgba(110, 110, 115, .09);
+      --shadow: 0 24px 70px rgba(20, 24, 31, .28), 0 2px 10px rgba(20, 24, 31, .14);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --desktop: #17191d;
+        --window: rgba(42, 42, 44, .98);
+        --toolbar: rgba(42, 42, 44, .94);
+        --sidebar: rgba(37, 37, 39, .98);
+        --content: #1f1f21;
+        --inspector: #252527;
+        --line: rgba(235, 235, 245, .13);
+        --line-strong: rgba(235, 235, 245, .24);
+        --text: #f2f2f7;
+        --secondary: #aeaeb2;
+        --tertiary: #8e8e93;
+        --accent-soft: rgba(10, 132, 255, .2);
+        --selection: rgba(10, 132, 255, .27);
+        --success: #30d158;
+        --offline: #aeaeb2;
+        --warning-soft: rgba(174, 174, 178, .11);
+        --shadow: 0 26px 80px rgba(0, 0, 0, .56), 0 2px 12px rgba(0, 0, 0, .4);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      color: var(--text);
+      background: var(--desktop);
+      font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    }
+    button, input { color: inherit; font: inherit; }
+    button { border: 0; cursor: default; }
+
+    .desktop {
+      height: 100%;
+      padding: 44px 24px 70px;
+      background:
+        radial-gradient(circle at 18% 15%, rgba(255,255,255,.55), transparent 32%),
+        linear-gradient(135deg, rgba(200, 213, 227, .56), rgba(224, 226, 230, .2));
+    }
+
+    .app-menubar {
+      position: fixed;
+      z-index: 20;
+      inset: 0 0 auto;
+      display: flex;
+      height: 25px;
+      align-items: center;
+      gap: 1px;
+      padding: 0 14px;
+      border-bottom: 1px solid rgba(60,60,67,.14);
+      background: color-mix(in srgb, var(--window) 91%, transparent);
+      box-shadow: 0 1px 5px rgba(0,0,0,.06);
+      backdrop-filter: blur(24px) saturate(1.35);
+      font-size: 12px;
+    }
+    .app-menubar span { padding: 0 8px; }
+    .app-menubar .app-name { font-weight: 650; }
+
+    .window {
+      display: grid;
+      width: 100%;
+      height: 100%;
+      min-width: 1020px;
+      grid-template-columns: 224px minmax(500px, 1fr) 292px;
+      grid-template-rows: 52px minmax(0, 1fr);
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.5);
+      border-radius: 15px;
+      background: var(--window);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(26px) saturate(1.35);
+    }
+
+    .titlebar {
+      grid-column: 1 / 4;
+      display: grid;
+      grid-template-columns: 224px minmax(500px, 1fr) 292px;
+      border-bottom: 1px solid var(--line);
+      background: var(--toolbar);
+    }
+    .title-part {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 8px;
+      padding: 0 12px;
+    }
+    .title-part + .title-part { border-left: 1px solid var(--line); }
+    .traffic { display: flex; gap: 8px; margin-right: 14px; }
+    .traffic span {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      box-shadow: inset 0 0 0 .5px rgba(0,0,0,.16);
+    }
+    .traffic span:nth-child(1) { background: #ff5f57; }
+    .traffic span:nth-child(2) { background: #febc2e; }
+    .traffic span:nth-child(3) { background: #28c840; }
+    .title-name {
+      min-width: 0;
+      overflow: hidden;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .title-count { color: var(--secondary); font-size: 11px; white-space: nowrap; }
+    .spacer { flex: 1; }
+    .search {
+      display: flex;
+      width: min(190px, 22vw);
+      height: 28px;
+      align-items: center;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: rgba(127,127,127,.1);
+    }
+    .search input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      color: var(--text);
+      background: transparent;
+    }
+
+    .sidebar {
+      grid-column: 1;
+      grid-row: 2;
+      min-height: 0;
+      overflow: auto;
+      padding: 9px 8px;
+      border-right: 1px solid var(--line);
+      background: var(--sidebar);
+    }
+    .section-label {
+      padding: 12px 9px 5px;
+      color: var(--secondary);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .nav-row {
+      display: flex;
+      width: 100%;
+      min-height: 29px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 9px;
+      border-radius: 6px;
+      background: transparent;
+      text-align: left;
+    }
+    .nav-row:hover { background: rgba(127,127,127,.08); }
+    .nav-row.selected { background: var(--selection); }
+    .nav-label {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .nav-count {
+      color: var(--secondary);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+    .tag-dot {
+      width: 8px;
+      height: 8px;
+      margin: 0 5px;
+      flex: 0 0 8px;
+      border-radius: 50%;
+      background: var(--tag-color, #ff9f0a);
+    }
+    .indent-1 { padding-left: 25px; }
+
+    .content {
+      grid-column: 2;
+      grid-row: 2;
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--content);
+    }
+    .grid-scroll { flex: 1; min-height: 0; overflow: auto; padding: 20px; }
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 180px));
+      gap: 20px 16px;
+      align-content: start;
+    }
+    .video-card {
+      min-width: 0;
+      min-height: 163px;
+      padding: 8px;
+      border-radius: 8px;
+      background: transparent;
+      text-align: center;
+    }
+    .video-card:hover { background: rgba(127,127,127,.12); }
+    .video-card.selected { background: var(--selection); }
+    .thumb {
+      position: relative;
+      aspect-ratio: 1.66 / 1;
+      overflow: hidden;
+      border-radius: 6px;
+      background: #d1d1d6;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
+    }
+    .thumb img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .video-card.is-offline .thumb::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,.50);
+      pointer-events: none;
+    }
+    .offline-badge {
+      position: absolute;
+      z-index: 1;
+      top: 6px;
+      left: 6px;
+      padding: 2px 6px;
+      border: 1px solid rgba(255,255,255,.42);
+      border-radius: 5px;
+      color: #fff;
+      background: rgba(32,33,36,.72);
+      font-size: 10px;
+      font-weight: 600;
+      backdrop-filter: blur(8px);
+    }
+    .filename {
+      margin-top: 14px;
+      overflow: hidden;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 500;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .duration {
+      margin-top: 4px;
+      color: var(--secondary);
+      font-size: 11px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    .empty-state {
+      width: min(390px, 82%);
+      margin: 20vh auto 0;
+      color: var(--secondary);
+      text-align: center;
+    }
+    .empty-state strong { display: block; margin-bottom: 6px; color: var(--text); font-size: 15px; }
+
+    .inspector {
+      grid-column: 3;
+      grid-row: 2;
+      display: flex;
+      min-height: 0;
+      overflow: hidden;
+      border-left: 1px solid var(--line);
+      background: var(--inspector);
+    }
+    .inspector-shell {
+      display: flex;
+      width: 100%;
+      min-height: 0;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+    }
+    .segment-control {
+      display: grid;
+      width: 100%;
+      grid-template-columns: 1fr 1fr;
+      padding: 2px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: rgba(127,127,127,.08);
+    }
+    .segment-button {
+      min-height: 24px;
+      border-radius: 5px;
+      background: transparent;
+      font-size: 11px;
+    }
+    .segment-button.selected {
+      background: color-mix(in srgb, var(--content) 90%, var(--text) 4%);
+      box-shadow: 0 1px 3px rgba(0,0,0,.16);
+    }
+    .tag-search {
+      width: 100%;
+      height: 28px;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      outline: 0;
+      background: rgba(127,127,127,.08);
+    }
+    .inspector-scroll {
+      min-height: 0;
+      flex: 1;
+      overflow: auto;
+    }
+    .tag-checkboxes { display: grid; gap: 7px; }
+    .tag-checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 22px;
+      font-size: 12px;
+    }
+    .tag-checkbox-row input { margin: 0; }
+    .tag-empty { color: var(--secondary); font-size: 12px; }
+    .detail-pane { display: grid; gap: 13px; }
+    .detail-filename {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .detail-filename span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+    .copy-button {
+      min-width: 40px;
+      padding: 2px 5px;
+      border-radius: 5px;
+      color: var(--secondary);
+      background: transparent;
+      font-size: 10px;
+    }
+    .copy-button:hover { background: rgba(127,127,127,.1); }
+    .detail-field { display: grid; gap: 2px; }
+    .detail-title {
+      color: var(--secondary);
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .detail-value {
+      font-size: 12px;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+      user-select: text;
+    }
+    .inspector-footer {
+      display: grid;
+      gap: 8px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+    .draft-hint { color: var(--secondary); font-size: 11px; }
+    .footer-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+    .small-button {
+      min-height: 25px;
+      padding: 3px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--window) 80%, var(--text) 4%);
+    }
+    .small-button:disabled { color: var(--tertiary); opacity: .52; }
+
+    .demo-bar {
+      position: fixed;
+      z-index: 30;
+      right: 12px;
+      bottom: 12px;
+      left: 12px;
+      display: flex;
+      min-height: 38px;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 8px;
+      overflow-x: auto;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 9px;
+      color: #fff;
+      background: rgba(24,25,28,.88);
+      box-shadow: 0 10px 24px rgba(0,0,0,.25);
+      backdrop-filter: blur(18px);
+    }
+    .demo-label { padding: 0 6px; color: rgba(255,255,255,.66); font-size: 10px; white-space: nowrap; }
+    .demo-button, .demo-link {
+      display: inline-flex;
+      height: 27px;
+      align-items: center;
+      padding: 0 10px;
+      border-radius: 6px;
+      color: #fff;
+      background: transparent;
+      font-size: 11px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .demo-button:hover, .demo-link:hover { background: rgba(255,255,255,.13); }
+    .demo-button.active { background: rgba(255,255,255,.2); }
+    .demo-separator { width: 1px; height: 18px; flex: 0 0 1px; background: rgba(255,255,255,.2); }
+
+    @media (max-width: 1120px) {
+      .desktop { padding-right: 10px; padding-left: 10px; }
+      .window { grid-template-columns: 208px minmax(470px, 1fr) 270px; }
+      .titlebar { grid-template-columns: 208px minmax(470px, 1fr) 270px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-menubar" aria-label="macOS 菜单栏">
+    <span class="app-name">FileFacet</span>
+    <span>文件</span>
+    <span>编辑</span>
+    <span>显示</span>
+    <span>窗口</span>
+    <span>帮助</span>
+  </header>
+
+  <main class="desktop">
+    <section class="window" aria-label="FileFacet 离线资料库原型">
+      <header class="titlebar">
+        <div class="title-part">
+          <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="title-name">资料库</div>
+        </div>
+        <div class="title-part">
+          <div class="title-name" id="viewTitle">所有视频</div>
+          <div class="title-count" id="viewCount">8 个视频</div>
+          <div class="spacer"></div>
+          <label class="search"><input id="searchInput" type="search" placeholder="搜索文件名或标签"></label>
+        </div>
+        <div class="title-part"><div class="spacer"></div></div>
+      </header>
+
+      <aside class="sidebar" aria-label="资料库侧栏">
+        <div class="section-label">资料库</div>
+        <button class="nav-row selected" data-filter="all">
+          <span class="nav-label">所有视频</span><span class="nav-count" id="allCount">8</span>
+        </button>
+        <button class="nav-row" data-filter="recent">
+          <span class="nav-label">最近导入</span><span class="nav-count">3</span>
+        </button>
+        <button class="nav-row" id="offlineNav" data-filter="offline" hidden>
+          <span class="nav-label">离线</span><span class="nav-count" id="offlineCount">4</span>
+        </button>
+
+        <div class="section-label">标签</div>
+        <button class="nav-row"><span class="tag-dot" style="--tag-color:#ff9f0a"></span><span class="nav-label">旅行</span><span class="nav-count">4</span></button>
+        <button class="nav-row indent-1"><span class="tag-dot" style="--tag-color:#ffd60a"></span><span class="nav-label">城市</span><span class="nav-count">2</span></button>
+        <button class="nav-row"><span class="tag-dot" style="--tag-color:#64d2ff"></span><span class="nav-label">工作</span><span class="nav-count">3</span></button>
+        <button class="nav-row"><span class="tag-dot" style="--tag-color:#30d158"></span><span class="nav-label">待整理</span><span class="nav-count">2</span></button>
+      </aside>
+
+      <section class="content">
+        <div class="grid-scroll">
+          <div class="video-grid" id="videoGrid"></div>
+          <div class="empty-state" id="emptyState" hidden>
+            <strong>没有符合条件的视频</strong>
+            <span>尝试清除搜索条件或返回所有视频。</span>
+          </div>
+        </div>
+      </section>
+
+      <aside class="inspector" aria-label="视频检查器">
+        <div class="inspector-shell">
+          <div class="segment-control" aria-label="检查器内容">
+            <button class="segment-button selected" id="tagsSegment" data-inspector-mode="tags">标签</button>
+            <button class="segment-button" id="detailsSegment" data-inspector-mode="details">详细信息</button>
+          </div>
+          <input class="tag-search" id="tagSearch" type="search" placeholder="搜索标签">
+          <div class="inspector-scroll">
+            <section id="tagsPane">
+              <div class="tag-checkboxes" id="tagCheckboxes"></div>
+            </section>
+            <section class="detail-pane" id="detailsPane" hidden>
+              <div class="detail-filename">
+                <span id="detailFilename"></span>
+                <button class="copy-button">复制</button>
+              </div>
+              <div class="detail-field"><span class="detail-title">格式</span><span class="detail-value" id="formatValue"></span></div>
+              <div class="detail-field"><span class="detail-title">大小</span><span class="detail-value" id="sizeValue"></span></div>
+              <div class="detail-field"><span class="detail-title">时长</span><span class="detail-value" id="durationValue"></span></div>
+              <div class="detail-field"><span class="detail-title">分辨率</span><span class="detail-value" id="resolutionValue"></span></div>
+              <div class="detail-field"><span class="detail-title">创建时间</span><span class="detail-value" id="createdValue"></span></div>
+              <div class="detail-field"><span class="detail-title">修改时间</span><span class="detail-value" id="modifiedValue"></span></div>
+              <div class="detail-field"><span class="detail-title">访问状态</span><span class="detail-value" id="accessValue"></span></div>
+              <div class="detail-field"><span class="detail-title">路径</span><span class="detail-value" id="relativePath"></span></div>
+            </section>
+          </div>
+          <div class="inspector-footer" id="inspectorFooter">
+            <div class="draft-hint">勾选变化后统一应用。</div>
+            <div class="footer-buttons">
+              <button class="small-button" disabled>取消</button>
+              <button class="small-button" disabled>应用</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <nav class="demo-bar" aria-label="原型状态控制">
+    <span class="demo-label">原型状态</span>
+    <button class="demo-button active" id="normalButton">正常资料库</button>
+    <button class="demo-button" id="disconnectButton">模拟“归档盘”离线</button>
+    <button class="demo-button" id="reconnectButton">重新接入磁盘</button>
+    <button class="demo-button" id="resetButton">重置</button>
+    <span class="demo-separator"></span>
+    <span class="demo-label">关联原型</span>
+    <a class="demo-link" href="../manual-video-import/index.html">基础导入</a>
+    <a class="demo-link" href="../folder-structure-tags/index.html">目录标签导入</a>
+  </nav>
+
+  <script>
+    const videos = [
+      {
+        id: 1,
+        name: "城市晨光.mp4",
+        image: "../../assets/readme/fictional-posters/02-sci-fi-allegory.png",
+        source: "Macintosh HD",
+        path: "项目素材 / 城市 / 城市晨光.mp4",
+        duration: "01:18",
+        resolution: "3840 × 2160",
+        tags: ["工作", "城市"],
+        recent: true
+      },
+      {
+        id: 2,
+        name: "雨夜电车.mov",
+        image: "../../assets/readme/fictional-posters/04-romantic-drama.png",
+        source: "归档盘",
+        path: "旅行素材 / 日本 / 东京 / 雨夜电车.mov",
+        duration: "00:42",
+        resolution: "1920 × 1080",
+        tags: ["旅行", "城市"],
+        recent: false
+      },
+      {
+        id: 3,
+        name: "山间列车.mp4",
+        image: "../../assets/readme/fictional-posters/12-action-adventure.png",
+        source: "归档盘",
+        path: "旅行素材 / 瑞士 / 山间列车.mp4",
+        duration: "02:06",
+        resolution: "3840 × 2160",
+        tags: ["旅行"],
+        recent: false
+      },
+      {
+        id: 4,
+        name: "产品概念片.mov",
+        image: "../../assets/readme/fictional-posters/09-retro-sci-fi.png",
+        source: "Macintosh HD",
+        path: "工作 / 产品 / 产品概念片.mov",
+        duration: "00:58",
+        resolution: "1920 × 1080",
+        tags: ["工作", "待整理"],
+        recent: true
+      },
+      {
+        id: 5,
+        name: "古堡外景.m4v",
+        image: "../../assets/readme/fictional-posters/06-castle-thriller.png",
+        source: "归档盘",
+        path: "旅行素材 / 英国 / 古堡外景.m4v",
+        duration: "03:12",
+        resolution: "3840 × 2160",
+        tags: ["旅行"],
+        recent: false
+      },
+      {
+        id: 6,
+        name: "深夜访谈.mp4",
+        image: "../../assets/readme/fictional-posters/07-mystery-crime.png",
+        source: "Macintosh HD",
+        path: "访谈 / 深夜访谈.mp4",
+        duration: "04:31",
+        resolution: "1920 × 1080",
+        tags: ["工作"],
+        recent: false
+      },
+      {
+        id: 7,
+        name: "荒野公路.mov",
+        image: "../../assets/readme/fictional-posters/01-zombie-horror.png",
+        source: "归档盘",
+        path: "旅行素材 / 美国 / 荒野公路.mov",
+        duration: "01:46",
+        resolution: "3840 × 2160",
+        tags: ["旅行", "待整理"],
+        recent: false
+      },
+      {
+        id: 8,
+        name: "创意工作坊.mp4",
+        image: "../../assets/readme/fictional-posters/05-social-drama.png",
+        source: "Macintosh HD",
+        path: "工作 / 研究 / 创意工作坊.mp4",
+        duration: "02:24",
+        resolution: "1920 × 1080",
+        tags: ["工作"],
+        recent: true
+      }
+    ];
+
+    const archiveSource = "归档盘";
+    const allTags = ["旅行", "城市", "工作", "待整理"];
+    const fileSizes = ["1.8 GB", "842 MB", "2.4 GB", "615 MB", "3.1 GB", "1.2 GB", "2.0 GB", "936 MB"];
+    let diskOffline = false;
+    let currentFilter = "all";
+    let selectedID = 1;
+    let inspectorMode = "tags";
+
+    const videoGrid = document.getElementById("videoGrid");
+    const emptyState = document.getElementById("emptyState");
+    const searchInput = document.getElementById("searchInput");
+    const offlineNav = document.getElementById("offlineNav");
+    const viewTitle = document.getElementById("viewTitle");
+    const viewCount = document.getElementById("viewCount");
+    const tagSearch = document.getElementById("tagSearch");
+    const tagsPane = document.getElementById("tagsPane");
+    const detailsPane = document.getElementById("detailsPane");
+    const inspectorFooter = document.getElementById("inspectorFooter");
+    const normalButton = document.getElementById("normalButton");
+    const disconnectButton = document.getElementById("disconnectButton");
+    const reconnectButton = document.getElementById("reconnectButton");
+
+    function isOffline(video) {
+      return diskOffline && video.source === archiveSource;
+    }
+
+    function visibleVideos() {
+      const query = searchInput.value.trim().toLocaleLowerCase();
+      return videos.filter(video => {
+        if (currentFilter === "offline" && !isOffline(video)) return false;
+        if (currentFilter === "recent" && !video.recent) return false;
+        if (!query) return true;
+        return [video.name, video.path, ...video.tags]
+          .some(value => value.toLocaleLowerCase().includes(query));
+      });
+    }
+
+    function selectVisibleVideo(items) {
+      if (!items.some(video => video.id === selectedID)) {
+        selectedID = items[0]?.id ?? null;
+      }
+    }
+
+    function render() {
+      const items = visibleVideos();
+      selectVisibleVideo(items);
+      const offlineTotal = videos.filter(isOffline).length;
+      offlineNav.hidden = offlineTotal === 0;
+      document.getElementById("offlineCount").textContent = offlineTotal;
+
+      document.querySelectorAll("[data-filter]").forEach(row => {
+        row.classList.toggle("selected", row.dataset.filter === currentFilter);
+      });
+
+      const titles = {
+        all: "所有视频",
+        recent: "最近导入",
+        offline: "离线"
+      };
+      const title = titles[currentFilter];
+      viewTitle.textContent = title;
+      viewCount.textContent = `${items.length} 个视频`;
+
+      videoGrid.innerHTML = items.map(video => `
+        <button class="video-card${video.id === selectedID ? " selected" : ""}${isOffline(video) ? " is-offline" : ""}" data-video-id="${video.id}">
+          <div class="thumb">
+            <img src="${video.image}" alt="">
+            ${isOffline(video) ? '<span class="offline-badge">离线</span>' : ""}
+          </div>
+          <div class="filename">${video.name}</div>
+          <div class="duration">${video.duration}</div>
+        </button>
+      `).join("");
+      emptyState.hidden = items.length !== 0;
+
+      videoGrid.querySelectorAll("[data-video-id]").forEach(card => {
+        card.addEventListener("click", () => {
+          selectedID = Number(card.dataset.videoId);
+          render();
+        });
+      });
+      renderInspector();
+    }
+
+    function renderInspector() {
+      const selected = videos.find(video => video.id === selectedID);
+      document.querySelectorAll("[data-inspector-mode]").forEach(button => {
+        button.classList.toggle("selected", button.dataset.inspectorMode === inspectorMode);
+      });
+      tagsPane.hidden = inspectorMode !== "tags";
+      detailsPane.hidden = inspectorMode !== "details";
+      tagSearch.hidden = inspectorMode !== "tags" || !selected;
+      inspectorFooter.hidden = inspectorMode !== "tags" || !selected;
+
+      if (!selected) {
+        document.getElementById("tagCheckboxes").innerHTML = '<div class="tag-empty">未选择视频</div>';
+        document.getElementById("detailFilename").textContent = "未选择视频";
+        [
+          "formatValue",
+          "sizeValue",
+          "durationValue",
+          "resolutionValue",
+          "createdValue",
+          "modifiedValue",
+          "accessValue",
+          "relativePath"
+        ].forEach(id => { document.getElementById(id).textContent = "—"; });
+        return;
+      }
+
+      const offline = isOffline(selected);
+      const tagQuery = tagSearch.value.trim().toLocaleLowerCase();
+      const visibleTags = allTags.filter(tag => tag.toLocaleLowerCase().includes(tagQuery));
+      document.getElementById("tagCheckboxes").innerHTML = visibleTags.length
+        ? visibleTags.map(tag => `
+            <label class="tag-checkbox-row">
+              <input type="checkbox"${selected.tags.includes(tag) ? " checked" : ""}>
+              <span>${tag}</span>
+            </label>
+          `).join("")
+        : '<div class="tag-empty">没有匹配的标签</div>';
+
+      document.getElementById("detailFilename").textContent = selected.name;
+      document.getElementById("formatValue").textContent = selected.name.split(".").pop().toUpperCase();
+      document.getElementById("sizeValue").textContent = fileSizes[selected.id - 1];
+      document.getElementById("durationValue").textContent = selected.duration;
+      document.getElementById("resolutionValue").textContent = selected.resolution;
+      document.getElementById("createdValue").textContent = "2026年7月18日 14:36";
+      document.getElementById("modifiedValue").textContent = "2026年7月27日 09:12";
+      document.getElementById("accessValue").textContent = offline
+        ? `当前离线 · “${selected.source}”未连接`
+        : "可以访问";
+      document.getElementById("relativePath").textContent = offline
+        ? "文件位置不可用"
+        : selected.path;
+    }
+
+    function setDemoButtons(activeButton) {
+      [normalButton, disconnectButton, reconnectButton].forEach(button => {
+        button.classList.toggle("active", button === activeButton);
+      });
+    }
+
+    function setDiskOffline() {
+      diskOffline = true;
+      setDemoButtons(disconnectButton);
+      render();
+    }
+
+    function reconnectDisk() {
+      diskOffline = false;
+      if (currentFilter === "offline") currentFilter = "all";
+      setDemoButtons(reconnectButton);
+      render();
+    }
+
+    function resetPrototype() {
+      diskOffline = false;
+      currentFilter = "all";
+      selectedID = 1;
+      inspectorMode = "tags";
+      searchInput.value = "";
+      tagSearch.value = "";
+      setDemoButtons(normalButton);
+      render();
+    }
+
+    document.querySelectorAll("[data-filter]").forEach(row => {
+      row.addEventListener("click", () => {
+        currentFilter = row.dataset.filter;
+        render();
+      });
+    });
+    searchInput.addEventListener("input", render);
+    tagSearch.addEventListener("input", renderInspector);
+    document.querySelectorAll("[data-inspector-mode]").forEach(button => {
+      button.addEventListener("click", () => {
+        inspectorMode = button.dataset.inspectorMode;
+        renderInspector();
+      });
+    });
+    normalButton.addEventListener("click", resetPrototype);
+    disconnectButton.addEventListener("click", setDiskOffline);
+    reconnectButton.addEventListener("click", reconnectDisk);
+    document.getElementById("resetButton").addEventListener("click", resetPrototype);
+
+    render();
+  </script>
+</body>
+</html>

@@ -2,12 +2,13 @@
 
 This file records the user-visible changes in FileFacet releases.
 
-## [Unreleased]
+## [1.0.4] - 2026-07-31
 
 ### Added
 
 - Folder imports can now create hierarchical FileFacet tags from the directory structure, with an optional root tag for each selected folder.
 - Added a shared folder-import preference for the File menu, `Shift-Command-I`, and Finder drops, including “Ask Every Time” and an option to remember the chosen method.
+- Videos on disconnected external drives now remain visible, searchable, and taggable with their cached thumbnails and metadata. FileFacet marks them as offline, provides a dedicated Offline collection, and restores file access automatically when an authorized drive reconnects.
 
 ### Changed
 

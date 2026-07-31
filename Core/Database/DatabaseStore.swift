@@ -14,17 +14,20 @@ struct VideoLocationRecord: Equatable, Sendable {
     let sourceID: String
     let relativePath: String
     let fallbackPathKey: Data?
+    let volumeIdentifier: Data?
 
     init(
         videoID: String,
         sourceID: String,
         relativePath: String,
-        fallbackPathKey: Data? = nil
+        fallbackPathKey: Data? = nil,
+        volumeIdentifier: Data? = nil
     ) {
         self.videoID = videoID
         self.sourceID = sourceID
         self.relativePath = relativePath
         self.fallbackPathKey = fallbackPathKey
+        self.volumeIdentifier = volumeIdentifier
     }
 }
 
@@ -298,10 +301,13 @@ actor DatabaseStore {
         try prepareIfNeeded()
         let statement = try prepare(
             """
-            SELECT video_id, source_id, relative_path, fallback_path_key
+            SELECT video_locations.video_id, video_locations.source_id,
+                   video_locations.relative_path, video_locations.fallback_path_key,
+                   videos.volume_identifier
             FROM video_locations
-            WHERE is_available = 1
-            ORDER BY last_verified_at DESC
+            JOIN videos ON videos.id = video_locations.video_id
+            WHERE video_locations.is_available = 1
+            ORDER BY video_locations.last_verified_at DESC
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -316,7 +322,8 @@ actor DatabaseStore {
                 videoID: videoID,
                 sourceID: sourceID,
                 relativePath: relativePath,
-                fallbackPathKey: data(at: 3, in: statement)
+                fallbackPathKey: data(at: 3, in: statement),
+                volumeIdentifier: data(at: 4, in: statement)
             ))
         }
         return records
@@ -1012,6 +1019,8 @@ actor DatabaseStore {
 
         switch filter {
         case .all:
+            conditions.append("videos.availability_status = 'available'")
+        case .offline:
             conditions.append("videos.availability_status = 'available'")
         case .untagged:
             conditions.append("videos.availability_status = 'available'")

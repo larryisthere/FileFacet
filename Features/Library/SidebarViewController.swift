@@ -129,6 +129,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         refocusTagRenameIfNeeded()
     }
 
+    func selectFilter(_ filter: LibraryFilter) {
+        loadViewIfNeeded()
+        guard let row = (0..<outlineView.numberOfRows).first(where: { row in
+            (outlineView.item(atRow: row) as? SidebarFilterNode)?.filter == filter
+        }) else { return }
+        isRestoringSelection = true
+        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        isRestoringSelection = false
+    }
+
     func setSelectionTitleHandler(_ handler: @escaping (String, TagRecord?) -> Void) {
         onSelectionTitleChanged = handler
     }
@@ -478,7 +488,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     private func rebuildNodes() {
-        let library = SidebarGroupNode(kind: .library, title: String(localized: .libraryGroup), children: [
+        var libraryChildren: [Any] = [
             SidebarFilterNode(
                 title: String(localized: .libraryAllVideos),
                 systemImageName: "film",
@@ -491,13 +501,28 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 filter: .recent,
                 videoCount: filterCounts.recent
             ),
+        ]
+        if filterCounts.offline > 0 {
+            libraryChildren.append(SidebarFilterNode(
+                title: String(localized: .libraryOffline),
+                systemImageName: "externaldrive.badge.xmark",
+                filter: .offline,
+                videoCount: filterCounts.offline
+            ))
+        }
+        libraryChildren.append(
             SidebarFilterNode(
                 title: String(localized: .libraryUntagged),
                 systemImageName: "tag.slash",
                 filter: .untagged,
                 videoCount: filterCounts.untagged
-            ),
-        ])
+            )
+        )
+        let library = SidebarGroupNode(
+            kind: .library,
+            title: String(localized: .libraryGroup),
+            children: libraryChildren
+        )
         let nodes = Dictionary(uniqueKeysWithValues: tags.map { ($0.id, TagNode(tag: $0)) })
         var roots: [TagNode] = []
         for tag in tags {
@@ -854,6 +879,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         guard let filter = item as? SidebarFilterNode else { return nil }
         return switch filter.filter {
         case .all: .all
+        case .offline: .offline
         case .untagged: .untagged
         case .recent: .recent
         case .tag, .tags: nil
@@ -983,6 +1009,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
 private enum SidebarSelectionKey: Hashable {
     case all
+    case offline
     case untagged
     case recent
     case tag(String)

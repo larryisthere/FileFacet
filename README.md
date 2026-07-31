@@ -29,6 +29,7 @@ FileFacet is designed for people who keep videos locally and want a flexible way
 
 - **One library across folders** — import individual videos, multiple folders, or a mixture of both into one searchable library.
 - **Folder structure to tags** — optionally turn nested folders into hierarchical tags while importing, with control over whether each selected folder becomes a root tag.
+- **Offline external libraries** — keep browsing, searching, and tagging indexed videos while an external drive is disconnected, then restore file access automatically when it reconnects.
 - **Hierarchical video tags** — build multi-level tag trees, batch-edit assignments, merge tags, add colors, and organize tags with drag and drop.
 - **Files stay where they are** — FileFacet reads original videos without moving, renaming, modifying, or deleting them.
 - **Local-first and private** — the library index, tags, access permissions, and thumbnails stay on your Mac. FileFacet makes no network requests by default.
@@ -63,6 +64,7 @@ Repeated imports are safe: the same file keeps a single library record, includin
 - Recursive parent-tag filtering
 - Multi-tag AND filtering
 - Untagged and recently added collections
+- A conditional Offline collection for videos whose external drive is disconnected
 - Video thumbnails, duration, dimensions, and file information
 - Quick Look, default-player playback, Finder reveal, and path copying
 
@@ -78,6 +80,8 @@ Repeated imports are safe: the same file keeps a single library record, includin
 
 - Stable file identity prevents duplicate records across imported sources
 - Background maintenance follows supported moves and renames
+- Cached thumbnails, metadata, and tags remain available while an external drive is offline
+- Authorized external-drive locations restore automatically after reconnection
 - Missing and deleted files are reconciled without changing the originals
 
 ## Download and install
@@ -138,6 +142,10 @@ No. FileFacet makes no network requests by default, and library data stays on th
 ### What happens when a video moves?
 
 FileFacet uses file identity and authorized source locations to maintain the library record when supported moves or renames are detected.
+
+### What happens when an external drive is disconnected?
+
+Indexed videos remain in the library with their cached thumbnails, metadata, and FileFacet tags. Offline videos are clearly marked and can still be searched or reorganized. Actions that need the original file stay unavailable until the authorized drive reconnects, when FileFacet restores access automatically.
 
 ## Build from source
 

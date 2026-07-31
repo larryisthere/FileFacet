@@ -81,6 +81,13 @@ private struct PendingImportSource {
     let requestIndex: Int
 }
 
+private struct VideoAccessResolution: Sendable {
+    let resolvedURLs: [String: URL]
+    let offlineSourceNames: [String: String]
+    let reachableSourceIDs: Set<String>
+    let fallbackUpdates: [VideoLocationFallbackUpdate]
+}
+
 private enum LastUndoMutation {
     case tag
     case videoRemoval(VideoRemovalSnapshot)
@@ -95,14 +102,19 @@ final class LibraryAccessCoordinator {
     private let mediaService: MediaProcessingService?
     private var resources: [String: SecurityScopedResource] = [:]
     private var sourceURLs: [String: URL] = [:]
+    private var knownSourceURLs: [String: URL] = [:]
     private var sourceBookmarks: [String: Data] = [:]
+    private var sourceDisplayNames: [String: String] = [:]
     private var watchersByPath: [String: FSEventsWatcher] = [:]
     private var sourceWatchPaths: [String: String] = [:]
     private var resolvedVideoURLs: [String: URL] = [:]
+    private var offlineSourceNameByVideoID: [String: String] = [:]
+    private var reachableSourceIDs = Set<String>()
     private var importTask: Task<Void, Never>?
     private var importRevision = 0
     private var maintenanceTask: Task<Void, Never>?
     private var maintenanceDebounceTask: Task<Void, Never>?
+    private var volumeAvailabilityTask: Task<Void, Never>?
     private var mediaTask: Task<Void, Never>?
     private var artifactCleanupTask: Task<Void, Never>?
     private var pendingMediaVideos: [String: VideoRecord] = [:]
@@ -116,6 +128,7 @@ final class LibraryAccessCoordinator {
 
     var onVideosChanged: (([VideoRecord]) -> Void)?
     var onSidebarFilterCountsChanged: ((SidebarFilterCounts) -> Void)?
+    var onFilterChangedBySystem: ((LibraryFilter) -> Void)?
     var onVideoChanged: ((VideoRecord) -> Void)?
     var onImportStateChanged: ((LibraryImportState) -> Void)?
     var onTagsChanged: (([TagRecord]) -> Void)?
@@ -177,19 +190,22 @@ final class LibraryAccessCoordinator {
                 await cleanupTask.value
                 let sources = try await database.fetchSourceAuthorizations()
                 for source in sources {
+                    sourceBookmarks[source.id] = source.rootBookmarkData
+                    sourceDisplayNames[source.id] = source.displayName
                     do {
                         var isStale = false
                         let url = try URL(
                             resolvingBookmarkData: source.rootBookmarkData,
-                            options: [.withSecurityScope, .withoutUI],
+                            options: [.withSecurityScope, .withoutUI, .withoutMounting],
                             relativeTo: nil,
                             bookmarkDataIsStale: &isStale
                         )
-                        sourceBookmarks[source.id] = source.rootBookmarkData
+                        knownSourceURLs[source.id] = url
                         try connect(sourceID: source.id, url: url)
                         if isStale {
                             let refreshedBookmark = try makeBookmark(for: url)
                             sourceBookmarks[source.id] = refreshedBookmark
+                            sourceDisplayNames[source.id] = url.lastPathComponent
                             try await database.saveSourceAuthorization(SourceAuthorizationRecord(
                                 id: source.id,
                                 libraryID: source.libraryID,
@@ -202,15 +218,10 @@ final class LibraryAccessCoordinator {
                         AppLogger.library.error("Source restore failed with category: \(String(describing: type(of: error)), privacy: .public)")
                     }
                 }
-                let existingVideos = try await database.fetchVideos(
-                    libraryID: LibraryRecord.primaryID,
-                    filter: currentFilter,
-                    searchText: currentSearch
-                )
                 try await refreshTags(libraryID: LibraryRecord.primaryID)
                 try await refreshResolvedVideoURLs()
-                try await refreshSidebarFilterCounts()
-                onVideosChanged?(existingVideos)
+                try await refreshVisibleVideosNow()
+                let existingVideos = try await database.fetchVideos(libraryID: LibraryRecord.primaryID)
                 startMediaProcessing(videos: existingVideos)
                 if sourceURLs.isEmpty == false { scheduleMaintenance() }
             } catch {
@@ -371,6 +382,7 @@ final class LibraryAccessCoordinator {
                             rootBookmarkData: source.bookmark,
                             createdAt: Date()
                         ))
+                        sourceDisplayNames[source.id] = source.url.lastPathComponent
                         persistedSourceIDs.insert(source.id)
                         let folderTagOptions: FolderTagImportOptions?
                         if source.kind == .directory,
@@ -492,8 +504,44 @@ final class LibraryAccessCoordinator {
         refreshVisibleVideos(debounceNanoseconds: 150_000_000)
     }
 
+    func refreshVolumeAvailability(interruptMediaProcessing: Bool) {
+        volumeAvailabilityTask?.cancel()
+        let interruptedMediaTask = interruptMediaProcessing ? mediaTask : nil
+        if interruptMediaProcessing {
+            interruptedMediaTask?.cancel()
+            mediaTask = nil
+            pendingMediaVideos.removeAll()
+        }
+        volumeAvailabilityTask = Task { [weak self] in
+            guard let self else { return }
+            _ = await interruptedMediaTask?.value
+            resetRuntimeSourceConnections()
+            await refreshSourceURLsFromBookmarks()
+            do {
+                try Task.checkCancellation()
+                try await refreshResolvedVideoURLs()
+                try await refreshVisibleVideosNow()
+                let videos = try await database.fetchVideos(libraryID: LibraryRecord.primaryID)
+                startMediaProcessing(videos: videos)
+                if reachableSourceIDs.isEmpty == false {
+                    scheduleMaintenance()
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                AppLogger.library.error(
+                    "Volume availability refresh failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                )
+            }
+        }
+    }
+
     func fileURL(for video: VideoRecord) -> URL? {
         resolvedVideoURLs[video.id]
+    }
+
+    func offlineSourceName(for video: VideoRecord) -> String? {
+        offlineSourceNameByVideoID[video.id]
     }
 
     func thumbnailURL(for video: VideoRecord) -> URL? {
@@ -752,6 +800,7 @@ final class LibraryAccessCoordinator {
         }
         resources[sourceID] = resource
         sourceURLs[sourceID] = url
+        knownSourceURLs[sourceID] = url
         updateWatcher(sourceID: sourceID, url: url)
     }
 
@@ -775,10 +824,22 @@ final class LibraryAccessCoordinator {
     private func disconnectSource(_ sourceID: String) {
         resources.removeValue(forKey: sourceID)
         sourceURLs.removeValue(forKey: sourceID)
+        knownSourceURLs.removeValue(forKey: sourceID)
         sourceBookmarks.removeValue(forKey: sourceID)
+        sourceDisplayNames.removeValue(forKey: sourceID)
         guard let watchPath = sourceWatchPaths.removeValue(forKey: sourceID),
               sourceWatchPaths.values.contains(watchPath) == false else { return }
         watchersByPath.removeValue(forKey: watchPath)?.stop()
+    }
+
+    private func resetRuntimeSourceConnections() {
+        resources.removeAll()
+        sourceURLs.removeAll()
+        for watcher in watchersByPath.values {
+            watcher.stop()
+        }
+        watchersByPath.removeAll()
+        sourceWatchPaths.removeAll()
     }
 
     private func makeBookmark(for url: URL) throws -> Data {
@@ -794,7 +855,7 @@ final class LibraryAccessCoordinator {
         requestIndex: Int
     ) throws -> PendingImportSource {
         let url = root.url
-        let existingSourceID = sourceURLs.first {
+        let existingSourceID = knownSourceURLs.first {
             $0.value.standardizedFileURL == url.standardizedFileURL
         }?.key
         let sourceID = existingSourceID ?? UUID().uuidString
@@ -856,7 +917,7 @@ final class LibraryAccessCoordinator {
     }
 
     private func startMaintenance() {
-        guard sourceURLs.isEmpty == false else { return }
+        guard reachableSourceIDs.isEmpty == false else { return }
         maintenanceTask?.cancel()
         let discovery = self.discovery
         let database = self.database
@@ -864,7 +925,8 @@ final class LibraryAccessCoordinator {
             do {
                 guard let self else { return }
                 await refreshSourceURLsFromBookmarks()
-                let sources = sourceURLs
+                let sources = sourceURLs.filter { reachableSourceIDs.contains($0.key) }
+                guard sources.isEmpty == false else { return }
                 var discoveredVideosBySource: [String: [DiscoveredVideo]] = [:]
                 var canConfirmDeletions = true
                 for sourceID in sources.keys.sorted() {
@@ -923,15 +985,18 @@ final class LibraryAccessCoordinator {
                 var isStale = false
                 let resolvedURL = try URL(
                     resolvingBookmarkData: bookmark,
-                    options: [.withSecurityScope, .withoutUI],
+                    options: [.withSecurityScope, .withoutUI, .withoutMounting],
                     relativeTo: nil,
                     bookmarkDataIsStale: &isStale
                 )
-                let locationChanged = sourceURLs[sourceID]?.standardizedFileURL != resolvedURL.standardizedFileURL
-                guard locationChanged || isStale else { continue }
+                let locationChanged = knownSourceURLs[sourceID]?.standardizedFileURL != resolvedURL.standardizedFileURL
+                let needsConnection = resources[sourceID] == nil
+                guard locationChanged || isStale || needsConnection else { continue }
+                knownSourceURLs[sourceID] = resolvedURL
                 try connect(sourceID: sourceID, url: resolvedURL)
                 let refreshedBookmark = isStale ? try makeBookmark(for: resolvedURL) : bookmark
                 sourceBookmarks[sourceID] = refreshedBookmark
+                sourceDisplayNames[sourceID] = resolvedURL.lastPathComponent
                 try await database.saveSourceAuthorization(SourceAuthorizationRecord(
                     id: sourceID,
                     libraryID: LibraryRecord.primaryID,
@@ -949,17 +1014,57 @@ final class LibraryAccessCoordinator {
 
     private func refreshResolvedVideoURLs() async throws {
         let locations = try await database.fetchVideoLocations()
-        var urls: [String: URL] = [:]
+        let knownURLs = knownSourceURLs
+        let activeSourceIDs = Set(resources.keys)
+        let displayNames = sourceDisplayNames
+        let resolution = await Task.detached(priority: .utility) {
+            Self.resolveVideoAccess(
+                locations: locations,
+                sourceURLs: knownURLs,
+                activeSourceIDs: activeSourceIDs,
+                sourceDisplayNames: displayNames
+            )
+        }.value
+        try Task.checkCancellation()
+        try await database.backfillVideoLocationFallbackKeys(resolution.fallbackUpdates)
+        try Task.checkCancellation()
+        resolvedVideoURLs = resolution.resolvedURLs
+        offlineSourceNameByVideoID = resolution.offlineSourceNames
+        reachableSourceIDs = resolution.reachableSourceIDs
+        if currentFilter == .offline, offlineSourceNameByVideoID.isEmpty {
+            currentFilter = .all
+            onFilterChangedBySystem?(.all)
+        }
+    }
+
+    nonisolated private static func resolveVideoAccess(
+        locations: [VideoLocationRecord],
+        sourceURLs: [String: URL],
+        activeSourceIDs: Set<String>,
+        sourceDisplayNames: [String: String]
+    ) -> VideoAccessResolution {
+        let mountedVolumeIdentifiers = mountedVolumeIdentifiers()
+        var resolvedURLs: [String: URL] = [:]
+        var offlineCandidates: [String: String] = [:]
         var fallbackUpdates: [VideoLocationFallbackUpdate] = []
+        var reachableSourceIDs = Set<String>()
+        for (sourceID, sourceURL) in sourceURLs
+            where activeSourceIDs.contains(sourceID)
+                && FileManager.default.fileExists(atPath: sourceURL.path) {
+            reachableSourceIDs.insert(sourceID)
+        }
+
         for location in locations {
-            guard let rootURL = sourceURLs[location.sourceID] else { continue }
+            let rootURL = sourceURLs[location.sourceID]
             let components = location.relativePath.split(separator: "/")
             guard components.contains("..") == false else { continue }
-            let fileURL = components.reduce(rootURL) { partialURL, component in
-                partialURL.appendingPathComponent(String(component))
+            let fileURL = rootURL.map { root in
+                components.reduce(root) { partialURL, component in
+                    partialURL.appendingPathComponent(String(component))
+                }
             }
-            if urls[location.videoID] == nil { urls[location.videoID] = fileURL }
-            if location.fallbackPathKey == nil {
+
+            if let fileURL, location.fallbackPathKey == nil {
                 fallbackUpdates.append(VideoLocationFallbackUpdate(
                     videoID: location.videoID,
                     sourceID: location.sourceID,
@@ -967,9 +1072,68 @@ final class LibraryAccessCoordinator {
                     fallbackPathKey: fallbackPathKey(for: fileURL)
                 ))
             }
+
+            if let fileURL,
+               activeSourceIDs.contains(location.sourceID),
+               FileManager.default.fileExists(atPath: fileURL.path) {
+                if resolvedURLs[location.videoID] == nil {
+                    resolvedURLs[location.videoID] = fileURL
+                }
+                continue
+            }
+
+            let volumeIsOffline: Bool
+            if let volumeIdentifier = location.volumeIdentifier {
+                volumeIsOffline = mountedVolumeIdentifiers.contains(volumeIdentifier) == false
+            } else {
+                volumeIsOffline = rootURL.map(isOnUnmountedExternalVolume) ?? false
+            }
+            guard volumeIsOffline else { continue }
+            offlineCandidates[location.videoID] = offlineCandidates[location.videoID]
+                ?? sourceDisplayNames[location.sourceID]
+                ?? rootURL?.lastPathComponent
+                ?? ""
         }
-        try await database.backfillVideoLocationFallbackKeys(fallbackUpdates)
-        resolvedVideoURLs = urls
+
+        let offlineSourceNames = offlineCandidates.filter { resolvedURLs[$0.key] == nil }
+        return VideoAccessResolution(
+            resolvedURLs: resolvedURLs,
+            offlineSourceNames: offlineSourceNames,
+            reachableSourceIDs: reachableSourceIDs,
+            fallbackUpdates: fallbackUpdates
+        )
+    }
+
+    nonisolated private static func mountedVolumeIdentifiers() -> Set<Data> {
+        let keys: [URLResourceKey] = [.volumeIdentifierKey]
+        let volumeURLs = FileManager.default.mountedVolumeURLs(
+            includingResourceValuesForKeys: keys,
+            options: []
+        ) ?? []
+        return Set(volumeURLs.compactMap { url in
+            guard let value = try? url.resourceValues(forKeys: Set(keys)).volumeIdentifier else {
+                return nil
+            }
+            return encodedIdentifier(value)
+        })
+    }
+
+    nonisolated private static func encodedIdentifier(_ value: Any?) -> Data? {
+        if let data = value as? Data { return data }
+        if let data = value as? NSData { return data as Data }
+        if let string = value as? String { return Data(string.utf8) }
+        if let number = value as? NSNumber { return Data(number.stringValue.utf8) }
+        return nil
+    }
+
+    nonisolated private static func isOnUnmountedExternalVolume(_ url: URL) -> Bool {
+        let components = url.standardizedFileURL.pathComponents
+        guard components.count >= 3,
+              components[0] == "/",
+              components[1] == "Volumes" else { return false }
+        let volumeURL = URL(fileURLWithPath: "/Volumes", isDirectory: true)
+            .appendingPathComponent(components[2], isDirectory: true)
+        return FileManager.default.fileExists(atPath: volumeURL.path) == false
     }
 
     private func startMediaProcessing(videos: [VideoRecord]) {
@@ -997,7 +1161,7 @@ final class LibraryAccessCoordinator {
                     let result = await mediaService.process(video: video, fileURL: fileURL)
                     try Task.checkCancellation()
                     if let updated = try await database.updateMediaInfo(videoID: video.id, result: result) {
-                        onVideoChanged?(updated)
+                        onVideoChanged?(presentedVideo(updated))
                     } else if let thumbnailID = result.thumbnailID {
                         try? await mediaService.removeThumbnails(identifiers: [thumbnailID])
                     }
@@ -1082,13 +1246,19 @@ final class LibraryAccessCoordinator {
         queryTask = Task {
             do {
                 if debounceNanoseconds > 0 { try await Task.sleep(nanoseconds: debounceNanoseconds) }
-                let videos = try await database.fetchVideos(
+                let databaseFilter: LibraryFilter = filter == .offline ? .all : filter
+                let records = try await database.fetchVideos(
                     libraryID: LibraryRecord.primaryID,
-                    filter: filter,
+                    filter: databaseFilter,
                     searchText: search
                 )
                 try Task.checkCancellation()
-                onVideosChanged?(videos)
+                let videos = presentedVideos(records)
+                onVideosChanged?(
+                    filter == .offline
+                        ? videos.filter { $0.availability == .offline }
+                        : videos
+                )
             } catch is CancellationError {
                 return
             } catch {
@@ -1099,17 +1269,38 @@ final class LibraryAccessCoordinator {
     }
 
     private func refreshVisibleVideosNow() async throws {
-        let videos = try await database.fetchVideos(
+        let filter = currentFilter
+        let databaseFilter: LibraryFilter = filter == .offline ? .all : filter
+        let records = try await database.fetchVideos(
             libraryID: LibraryRecord.primaryID,
-            filter: currentFilter,
+            filter: databaseFilter,
             searchText: currentSearch
         )
-        onVideosChanged?(videos)
+        let videos = presentedVideos(records)
+        onVideosChanged?(
+            filter == .offline
+                ? videos.filter { $0.availability == .offline }
+                : videos
+        )
         try await refreshSidebarFilterCounts()
     }
 
     private func refreshSidebarFilterCounts() async throws {
-        let counts = try await database.fetchSidebarFilterCounts(libraryID: LibraryRecord.primaryID)
-        onSidebarFilterCountsChanged?(counts)
+        let databaseCounts = try await database.fetchSidebarFilterCounts(libraryID: LibraryRecord.primaryID)
+        onSidebarFilterCountsChanged?(SidebarFilterCounts(
+            all: databaseCounts.all,
+            offline: offlineSourceNameByVideoID.count,
+            untagged: databaseCounts.untagged,
+            recent: databaseCounts.recent
+        ))
+    }
+
+    private func presentedVideos(_ videos: [VideoRecord]) -> [VideoRecord] {
+        videos.map(presentedVideo)
+    }
+
+    private func presentedVideo(_ video: VideoRecord) -> VideoRecord {
+        guard offlineSourceNameByVideoID[video.id] != nil else { return video }
+        return video.withAvailability(.offline)
     }
 }

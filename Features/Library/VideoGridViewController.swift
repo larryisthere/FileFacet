@@ -848,6 +848,7 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
     func configure(with video: VideoRecord, thumbnailURL: URL?) {
         loadViewIfNeeded()
         thumbnailView.image = thumbnailURL.flatMap(NSImage.init(contentsOf:))
+        thumbnailView.isOffline = video.availability == .offline
         filenameLabel.stringValue = video.filename
         let duration = video.duration.map { formattedDuration($0) } ?? video.fileExtension.uppercased()
         detailLabel.stringValue = duration
@@ -875,11 +876,21 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
 @MainActor
 private final class VideoThumbnailView: NSView {
     private let placeholderView = NSImageView()
+    private let offlineOverlayView = NSView()
+    private let offlineBadgeView = NSView()
+    private let offlineBadgeLabel = NSTextField(labelWithString: String(localized: .videoOfflineBadge))
 
     var image: NSImage? {
         didSet {
             placeholderView.isHidden = image != nil
             updateImageLayer()
+        }
+    }
+
+    var isOffline = false {
+        didSet {
+            offlineOverlayView.isHidden = isOffline == false
+            offlineBadgeView.isHidden = isOffline == false
         }
     }
 
@@ -899,11 +910,41 @@ private final class VideoThumbnailView: NSView {
         placeholderView.contentTintColor = .secondaryLabelColor
         placeholderView.imageScaling = .scaleProportionallyUpOrDown
         addSubview(placeholderView)
+
+        offlineOverlayView.translatesAutoresizingMaskIntoConstraints = false
+        offlineOverlayView.wantsLayer = true
+        offlineOverlayView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.50).cgColor
+        offlineOverlayView.isHidden = true
+        addSubview(offlineOverlayView)
+
+        offlineBadgeView.translatesAutoresizingMaskIntoConstraints = false
+        offlineBadgeView.wantsLayer = true
+        offlineBadgeView.layer?.cornerRadius = 5
+        offlineBadgeView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.72).cgColor
+        offlineBadgeView.layer?.borderColor = NSColor.white.withAlphaComponent(0.42).cgColor
+        offlineBadgeView.layer?.borderWidth = 1
+        offlineBadgeView.isHidden = true
+        offlineBadgeLabel.translatesAutoresizingMaskIntoConstraints = false
+        offlineBadgeLabel.font = .systemFont(ofSize: 10, weight: .semibold)
+        offlineBadgeLabel.textColor = .white
+        offlineBadgeView.addSubview(offlineBadgeLabel)
+        addSubview(offlineBadgeView)
+
         NSLayoutConstraint.activate([
             placeholderView.centerXAnchor.constraint(equalTo: centerXAnchor),
             placeholderView.centerYAnchor.constraint(equalTo: centerYAnchor),
             placeholderView.widthAnchor.constraint(equalToConstant: 42),
             placeholderView.heightAnchor.constraint(equalToConstant: 42),
+            offlineOverlayView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            offlineOverlayView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            offlineOverlayView.topAnchor.constraint(equalTo: topAnchor),
+            offlineOverlayView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            offlineBadgeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            offlineBadgeView.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            offlineBadgeLabel.leadingAnchor.constraint(equalTo: offlineBadgeView.leadingAnchor, constant: 6),
+            offlineBadgeLabel.trailingAnchor.constraint(equalTo: offlineBadgeView.trailingAnchor, constant: -6),
+            offlineBadgeLabel.topAnchor.constraint(equalTo: offlineBadgeView.topAnchor, constant: 2),
+            offlineBadgeLabel.bottomAnchor.constraint(equalTo: offlineBadgeView.bottomAnchor, constant: -2),
         ])
     }
 
