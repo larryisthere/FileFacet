@@ -4,6 +4,12 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+### Changed
+
+- Completed imports now offer a direct action to open Recent Imports and continue reviewing the imported videos.
+- Recently added videos now default to newest-first import ordering.
+- Finished notifications now include a close control, and removal undo expires when the browsing context changes, a new import begins, or the notification is dismissed.
+
 ## [1.0.5] - 2026-07-31
 
 ### Added
