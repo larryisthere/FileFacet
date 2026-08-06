@@ -41,6 +41,7 @@ struct LibraryVideoSort: Codable, Equatable, Sendable {
     let direction: LibraryVideoSortDirection
 
     static let standard = LibraryVideoSort(key: .filename, direction: .ascending)
+    static let recentlyAdded = LibraryVideoSort(key: .added, direction: .descending)
 }
 
 struct LibraryQueryRule: Codable, Equatable, Sendable {

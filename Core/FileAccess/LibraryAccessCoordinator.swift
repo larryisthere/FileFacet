@@ -253,6 +253,7 @@ final class LibraryAccessCoordinator {
     private func importItems(_ urls: [URL], entryPoint: LibraryImportEntryPoint) async {
         let plan = VideoFileDiscovery.importPlan(for: urls)
         guard plan.roots.isEmpty == false else {
+            discardVideoRemovalUndo()
             onImportStateChanged?(.failed(message: entryPoint.emptyMessage))
             return
         }
@@ -280,6 +281,7 @@ final class LibraryAccessCoordinator {
         } else {
             initialDetail = String(localized: .importProgressProcessing(plan.roots.count))
         }
+        discardVideoRemovalUndo()
         runImport(LibraryImportRequest(
             roots: plan.roots,
             title: entryPoint.title(for: plan),
@@ -317,6 +319,7 @@ final class LibraryAccessCoordinator {
             _ = await previousMutationTask?.value
             _ = await previousCleanupTask?.value
             guard let self else { return }
+            discardVideoRemovalUndo()
             var persistedSourceIDs = Set<String>()
             defer {
                 if importRevision == revision { importTask = nil }
@@ -782,6 +785,11 @@ final class LibraryAccessCoordinator {
     func undoLastMutation() {
         guard canUndoLastMutation else { return }
         undoManager.undo()
+    }
+
+    func discardVideoRemovalUndo() {
+        guard case .videoRemoval = lastUndoMutation else { return }
+        invalidateUndoHistory()
     }
 
     private func restoreRemovedVideos(_ snapshot: VideoRemovalSnapshot) {

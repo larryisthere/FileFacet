@@ -421,6 +421,40 @@
         }
       }
     },
+    "notification.dismiss" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dismiss notification"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭通知"
+          }
+        }
+      }
+    },
+    "action.view" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看"
+          }
+        }
+      }
+    },
     "action.remove" : {
       "extractionState" : "manual",
       "localizations" : {

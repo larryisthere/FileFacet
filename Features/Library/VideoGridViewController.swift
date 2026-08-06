@@ -23,9 +23,12 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     private let onImportDroppedItems: ([URL]) -> Void
     private let onRemoveVideos: ([String], @escaping (Bool) -> Void) -> Void
     private let onUndoLastMutation: () -> Void
+    private let onDismissNotification: () -> Void
+    var onViewRecentImports: (() -> Void)?
     private let importStatusView = ImportStatusView()
     private var importStatusHeightConstraint: NSLayoutConstraint?
     private var importState: LibraryImportState = .idle
+    private var browsingContextRevision = 0
     private var videos: [VideoRecord] = []
     private var selectionAnchorVideoID: String?
 
@@ -43,7 +46,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         onCancelImport: @escaping () -> Void,
         onImportDroppedItems: @escaping ([URL]) -> Void,
         onRemoveVideos: @escaping ([String], @escaping (Bool) -> Void) -> Void,
-        onUndoLastMutation: @escaping () -> Void
+        onUndoLastMutation: @escaping () -> Void,
+        onDismissNotification: @escaping () -> Void
     ) {
         self.onOpenVideo = onOpenVideo
         self.onRevealVideo = onRevealVideo
@@ -56,6 +60,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         self.onImportDroppedItems = onImportDroppedItems
         self.onRemoveVideos = onRemoveVideos
         self.onUndoLastMutation = onUndoLastMutation
+        self.onDismissNotification = onDismissNotification
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -129,7 +134,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
 
         importStatusView.translatesAutoresizingMaskIntoConstraints = false
         importStatusView.onCancel = { [weak self] in self?.onCancelImport() }
-        importStatusView.onDismiss = { [weak self] in self?.setImportState(.idle) }
+        importStatusView.onDismiss = { [weak self] in self?.dismissNotification() }
+        importStatusView.onView = { [weak self] in self?.onViewRecentImports?() }
         importStatusView.onUndo = { [weak self] in
             self?.onUndoLastMutation()
         }
@@ -167,10 +173,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
             importStatusView.configureImporting(title: title, detail: detail, progress: progress)
             showImportStatus()
         case let .completed(summary):
-            let foundNoVideos = summary.addedCount == 0
-                && summary.existingCount == 0
-                && summary.failedVideoCount == 0
-                && summary.failedInputCount == 0
+            let foundNoVideos = hasViewableImportResult(summary) == false
             if foundNoVideos {
                 let checkedDescription = summary.checkedFolderCount == summary.checkedInputCount
                     ? String(localized: .importCheckedFolderCount(summary.checkedInputCount))
@@ -195,7 +198,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
                 if summary.failedInputCount > 0 {
                     resultParts.append(String(localized: .importResultFailedInput(summary.failedInputCount)))
                 }
-                importStatusView.configureFinished(
+                importStatusView.configureCompleted(
                     title: summary.title,
                     detail: AppLocalization.list(resultParts)
                 )
@@ -216,11 +219,21 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         }
     }
 
-    func clearFinishedImportState() {
+    private func clearFinishedImportState() {
         guard case .importing = importState else {
             setImportState(.idle)
             return
         }
+    }
+
+    func endBrowsingContextNotificationLifecycle() {
+        browsingContextRevision &+= 1
+        clearFinishedImportState()
+    }
+
+    private func dismissNotification() {
+        setImportState(.idle)
+        onDismissNotification()
     }
 
     func offerVideoRemovalUndoForCurrentStatus() {
@@ -228,7 +241,21 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     }
 
     func removeVideoRemovalUndoOffer() {
-        importStatusView.configureDismissActionOnly()
+        switch importState {
+        case .importing:
+            importStatusView.configureCancelActionOnly()
+        case let .completed(summary) where hasViewableImportResult(summary):
+            importStatusView.configureViewActionOnly()
+        case .idle, .completed, .cancelled, .failed:
+            importStatusView.configureDismissActionOnly()
+        }
+    }
+
+    private func hasViewableImportResult(_ summary: LibraryImportSummary) -> Bool {
+        summary.addedCount > 0
+            || summary.existingCount > 0
+            || summary.failedVideoCount > 0
+            || summary.failedInputCount > 0
     }
 
     private func showImportStatus() {
@@ -438,10 +465,15 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         alert.addButton(withTitle: String(localized: .actionCancel))
         alert.buttons.first?.hasDestructiveAction = true
         let videoIDs = selected.map(\.id)
+        let removalContextRevision = browsingContextRevision
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
             self?.onRemoveVideos(videoIDs) { [weak self] succeeded in
                 guard let self, succeeded else { return }
+                guard browsingContextRevision == removalContextRevision else {
+                    onDismissNotification()
+                    return
+                }
                 self.importStatusView.configureUndo(
                     title: String(localized: .videoResultRemoved(videoIDs.count)),
                     detail: String(localized: .importResultOriginalRemains(videoIDs.count))
@@ -551,17 +583,20 @@ private final class ImportStatusView: NSView {
     private enum ActionMode {
         case cancel
         case dismiss
+        case view
         case undo
     }
 
     var onCancel: (() -> Void)?
     var onDismiss: (() -> Void)?
+    var onView: (() -> Void)?
     var onUndo: (() -> Void)?
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
     private let progressIndicator = NSProgressIndicator()
     private let actionButton = NSButton()
+    private let closeButton = NSButton()
     private var actionMode: ActionMode = .dismiss
 
     override init(frame frameRect: NSRect) {
@@ -591,6 +626,21 @@ private final class ImportStatusView: NSView {
         actionButton.target = self
         actionButton.action = #selector(performAction)
 
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.image = NSImage(
+            systemSymbolName: "xmark",
+            accessibilityDescription: String(localized: .notificationDismiss)
+        )
+        closeButton.title = ""
+        closeButton.imagePosition = .imageOnly
+        closeButton.bezelStyle = .inline
+        closeButton.controlSize = .small
+        closeButton.contentTintColor = .secondaryLabelColor
+        closeButton.target = self
+        closeButton.action = #selector(dismissNotification)
+        closeButton.toolTip = String(localized: .notificationDismiss)
+        closeButton.setAccessibilityLabel(String(localized: .notificationDismiss))
+
         let separator = NSBox()
         separator.translatesAutoresizingMaskIntoConstraints = false
         separator.boxType = .separator
@@ -598,6 +648,7 @@ private final class ImportStatusView: NSView {
         addSubview(copyStack)
         addSubview(progressIndicator)
         addSubview(actionButton)
+        addSubview(closeButton)
         addSubview(separator)
         NSLayoutConstraint.activate([
             copyStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
@@ -606,9 +657,13 @@ private final class ImportStatusView: NSView {
             progressIndicator.centerYAnchor.constraint(equalTo: centerYAnchor),
             progressIndicator.widthAnchor.constraint(equalToConstant: 150),
             actionButton.leadingAnchor.constraint(equalTo: progressIndicator.trailingAnchor, constant: 12),
-            actionButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            actionButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -8),
             actionButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             actionButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 58),
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 20),
+            closeButton.heightAnchor.constraint(equalToConstant: 20),
             separator.leadingAnchor.constraint(equalTo: leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: trailingAnchor),
             separator.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -642,6 +697,7 @@ private final class ImportStatusView: NSView {
         }
         actionButton.title = String(localized: .actionCancel)
         actionMode = .cancel
+        closeButton.isHidden = true
     }
 
     func configureFinished(title: String, detail: String) {
@@ -651,6 +707,17 @@ private final class ImportStatusView: NSView {
         progressIndicator.isHidden = true
         actionButton.title = String(localized: .actionDone)
         actionMode = .dismiss
+        closeButton.isHidden = false
+    }
+
+    func configureCompleted(title: String, detail: String) {
+        titleLabel.stringValue = title
+        detailLabel.stringValue = detail
+        progressIndicator.stopAnimation(nil)
+        progressIndicator.isHidden = true
+        actionButton.title = String(localized: .actionView)
+        actionMode = .view
+        closeButton.isHidden = false
     }
 
     func configureUndo(title: String, detail: String) {
@@ -660,6 +727,7 @@ private final class ImportStatusView: NSView {
         progressIndicator.isHidden = true
         actionButton.title = String(localized: .actionUndo)
         actionMode = .undo
+        closeButton.isHidden = false
     }
 
     func configureUndoActionOnly() {
@@ -667,17 +735,33 @@ private final class ImportStatusView: NSView {
         actionMode = .undo
     }
 
+    func configureCancelActionOnly() {
+        actionButton.title = String(localized: .actionCancel)
+        actionMode = .cancel
+        closeButton.isHidden = true
+    }
+
     func configureDismissActionOnly() {
         actionButton.title = String(localized: .actionDone)
         actionMode = .dismiss
+    }
+
+    func configureViewActionOnly() {
+        actionButton.title = String(localized: .actionView)
+        actionMode = .view
     }
 
     @objc private func performAction() {
         switch actionMode {
         case .cancel: onCancel?()
         case .dismiss: onDismiss?()
+        case .view: onView?()
         case .undo: onUndo?()
         }
+    }
+
+    @objc private func dismissNotification() {
+        onDismiss?()
     }
 }
 

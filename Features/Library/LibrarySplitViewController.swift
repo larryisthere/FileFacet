@@ -41,6 +41,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         @escaping (SmartCollectionRecord?) -> Void
     ) -> Void
     private let onDeleteSmartCollection: (String, @escaping (Bool) -> Void) -> Void
+    private let onEndVideoRemovalUndo: () -> Void
     private var contextTitle = String(localized: .libraryAllVideos)
     private var contextTagID: String?
     private var contextStatus: String?
@@ -93,6 +94,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         onImportDroppedItems: @escaping ([URL]) -> Void,
         onRemoveVideos: @escaping ([String], @escaping (Bool) -> Void) -> Void,
         onUndoLastMutation: @escaping () -> Void,
+        onEndVideoRemovalUndo: @escaping () -> Void,
         onOpenVideo: @escaping (VideoRecord) -> Void,
         onRevealVideo: @escaping (VideoRecord) -> Void,
         onCopyPath: @escaping (VideoRecord) -> Void,
@@ -129,6 +131,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         self.onCreateSmartCollection = onCreateSmartCollection
         self.onUpdateSmartCollection = onUpdateSmartCollection
         self.onDeleteSmartCollection = onDeleteSmartCollection
+        self.onEndVideoRemovalUndo = onEndVideoRemovalUndo
         self.settingsViewController = settingsViewController
         let inspector = InspectorViewController(
             onApplyTagDraft: onApplyTagDraft,
@@ -169,7 +172,8 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
                     completion(succeeded)
                 }
             },
-            onUndoLastMutation: onUndoLastMutation
+            onUndoLastMutation: onUndoLastMutation,
+            onDismissNotification: onEndVideoRemovalUndo
         )
         libraryContentViewController = LibraryContentViewController(
             ruleBarViewController: ruleBarViewController,
@@ -178,6 +182,9 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         super.init(nibName: nil, bundle: nil)
         videoGridViewController.onSelectionChanged = { [weak self] videos in
             self?.handleVideoSelectionChange(videos)
+        }
+        videoGridViewController.onViewRecentImports = { [weak self] in
+            self?.viewRecentImports()
         }
         inspectorViewController.onTagApplicationFinished = { [weak self] succeeded in
             guard succeeded else { return }
@@ -338,8 +345,14 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     }
 
     func setFilterFromSystem(_ filter: LibraryFilter) {
+        if isSameNavigationTarget(.filter(filter)) == false {
+            onEndVideoRemovalUndo()
+        }
         currentBaseFilter = filter
         selectedSmartCollection = nil
+        if filter == .recent {
+            currentRule.sort = .recentlyAdded
+        }
         sidebarViewController.selectFilter(filter)
         updateContext(for: filter)
         refreshRuleBar()
@@ -482,6 +495,20 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         performNavigation(to: target)
     }
 
+    private func viewRecentImports() {
+        let target = NavigationTarget.filter(.recent)
+        if isSameNavigationTarget(target) {
+            onEndVideoRemovalUndo()
+            videoGridViewController.endBrowsingContextNotificationLifecycle()
+            restoreCurrentSidebarSelection()
+            currentRule.sort = .recentlyAdded
+            refreshRuleBar()
+            applyCurrentQuery()
+            return
+        }
+        requestNavigation(to: target)
+    }
+
     private func isSameNavigationTarget(_ target: NavigationTarget) -> Bool {
         switch target {
         case let .filter(filter):
@@ -493,6 +520,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
 
     private func performNavigation(to target: NavigationTarget) {
         pendingNavigationTarget = nil
+        onEndVideoRemovalUndo()
         switch target {
         case let .filter(filter):
             if selectedSmartCollection != nil {
@@ -500,6 +528,9 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             }
             selectedSmartCollection = nil
             currentBaseFilter = filter
+            if filter == .recent {
+                currentRule.sort = .recentlyAdded
+            }
             sidebarViewController.selectFilter(filter)
             updateContext(for: filter)
         case let .smartCollection(collection):
@@ -1129,9 +1160,9 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private func setContextTitle(_ title: String, tagID: String?) {
         contextTitle = title
         contextTagID = tagID
+        videoGridViewController.endBrowsingContextNotificationLifecycle()
         if isImporting == false {
             contextStatus = nil
-            videoGridViewController.clearFinishedImportState()
         }
         updateWindowTitle()
     }

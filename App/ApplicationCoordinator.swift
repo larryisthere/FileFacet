@@ -39,6 +39,9 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
             coordinator.removeVideos(ids: videoIDs, completion: completion)
         },
         onUndoLastMutation: { [weak self] in self?.libraryAccessCoordinator?.undoLastMutation() },
+        onEndVideoRemovalUndo: { [weak self] in
+            self?.libraryAccessCoordinator?.discardVideoRemovalUndo()
+        },
         onOpenVideo: { [weak self] video in self?.openVideo(video) },
         onRevealVideo: { [weak self] video in self?.revealVideo(video) },
         onCopyPath: { [weak self] video in self?.copyPath(video) },
