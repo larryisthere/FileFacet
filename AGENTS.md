@@ -33,6 +33,9 @@
 - HTML 稿完成后交给用户确认；用户明确认可交互和 UI 方向后，再写入正式 AppKit 或 SwiftUI 实现。
 - 用户在 HTML 稿阶段提出的调整应先更新到原型并再次确认，减少正式实现阶段的方向性返工。
 - 简单文案、明确的局部样式修正和用户明确要求直接修改的事项，可以按用户指示进入实现。
+- `docs/prototypes/` 下的 HTML 稿统一使用 `prototype-shell.css` 和 `prototype-shell.js` 提供左侧原型导航、App menubar、字号令牌与收起行为；禁止在单个页面重复维护这些外壳结构。
+- 新增原型页面时，先按 `docs/prototypes/guidelines/index.html` 的页面骨架和检查清单实现，再在 `prototype-shell.js` 的页面登记表中增加入口。
+- 页面专属演示状态通过 `prototypePageActions` 或 `prototypePanelFooter` 模板接入共享左栏；产品界面内的操作继续放在模拟 App 窗口中。
 
 ## 工程规则
 

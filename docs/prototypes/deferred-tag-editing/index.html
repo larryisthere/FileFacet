@@ -129,9 +129,9 @@
     .thumb.forest::before { inset: 15% 4% 0; background: repeating-linear-gradient(76deg, transparent 0 18px, #344a35 19px 24px); }
     .thumb.night { background: linear-gradient(168deg, #183746 0 60%, #18232a 61%); }
     .thumb.night::before { width: 5px; height: 5px; left: 18%; top: 30%; border-radius: 50%; background: #ffd60a; box-shadow: 26px 11px 0 #ff9f0a, 59px -4px 0 #ffd60a, 91px 16px 0 #ff9f0a; }
-    .duration { position: absolute; right: 6px; bottom: 5px; padding: 2px 5px; border-radius: 4px; color: #fff; background: rgba(0,0,0,.66); font-size: 10px; }
+    .duration { position: absolute; right: 6px; bottom: 5px; padding: 2px 5px; border-radius: 4px; color: #fff; background: rgba(0,0,0,.66); font-size: var(--prototype-caption-font-size); }
     .filename { margin-top: 7px; overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-    .meta { margin-top: 2px; color: var(--secondary); font-size: 10px; }
+    .meta { margin-top: 2px; color: var(--secondary); font-size: var(--prototype-caption-font-size); }
     .empty { margin: 24vh auto 0; color: var(--secondary); text-align: center; }
     .empty strong { display: block; margin-bottom: 5px; color: var(--text); font-size: 16px; }
 
@@ -148,11 +148,11 @@
     .tag-row:hover { background: var(--button); }
     .tag-row input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
     .tag-name { flex: 1; }
-    .tag-path { color: var(--tertiary); font-size: 10px; }
+    .tag-path { color: var(--tertiary); font-size: var(--prototype-caption-font-size); }
     .create-row { width: 100%; min-height: 34px; justify-content: flex-start; border: 0; background: transparent; text-align: left; }
     .create-row svg { width: 15px; height: 15px; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; }
     .create-row .tag-name { color: var(--accent); }
-    .pending-badge { padding: 2px 5px; border-radius: 4px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-size: 9px; font-weight: 600; }
+    .pending-badge { padding: 2px 5px; border-radius: 4px; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-size: var(--prototype-caption-font-size); font-weight: 600; }
     .remove-pending { display: grid; width: 22px; height: 22px; padding: 0; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--secondary); }
     .remove-pending:hover { background: var(--button); color: var(--text); }
     .remove-pending svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
@@ -161,7 +161,7 @@
     .form-row { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 8px; margin: 8px 0; color: var(--secondary); font-size: 11px; }
     .form-row input, .form-row select { width: 100%; min-width: 0; height: 26px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; outline: 0; background: var(--canvas); color: var(--text); }
     .form-row input:focus, .form-row select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent); }
-    .popover-note { margin: 9px 0 11px; color: var(--secondary); font-size: 10px; line-height: 1.45; }
+    .popover-note { margin: 9px 0 11px; color: var(--secondary); font-size: var(--prototype-caption-font-size); line-height: 1.45; }
     .popover-actions { display: flex; justify-content: flex-end; gap: 7px; }
     .details { padding-top: 2px; }
     .detail-group { margin-bottom: 18px; }
@@ -186,16 +186,20 @@
     .sheet p { margin: 7px 0 18px; color: var(--secondary); font-size: 12px; }
     .sheet-actions { display: flex; justify-content: center; gap: 8px; }
 
-    .demo-bar { position: fixed; z-index: 60; left: 50%; bottom: 12px; display: flex; height: 36px; align-items: center; gap: 6px; padding: 5px 7px; transform: translateX(-50%); border-radius: 9px; background: rgba(42,42,44,.9); color: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.22); }
-    .demo-bar span { padding: 0 6px; color: rgba(255,255,255,.66); font-size: 10px; }
-    .demo-bar button { height: 25px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: #fff; font-size: 11px; }
-    .demo-bar button:hover { background: rgba(255,255,255,.14); }
-    .demo-bar a { display: inline-flex; height: 25px; align-items: center; padding: 0 10px; border-radius: 5px; color: #fff; font-size: 11px; text-decoration: none; white-space: nowrap; }
-    .demo-bar a:hover { background: rgba(255,255,255,.14); }
   </style>
+  <link rel="stylesheet" href="../prototype-shell.css">
 </head>
-<body>
-  <main class="desktop">
+<body data-prototype-page="deferred-tag-editing" data-prototype-subtitle="标签草稿与延后应用">
+  <template id="prototypePageActions">
+      <section class="prototype-group" aria-labelledby="prototypeActionsTitle">
+        <div class="prototype-group-title" id="prototypeActionsTitle">原型操作</div>
+        <button class="prototype-action" id="makeDraft">模拟勾选</button>
+        <button class="prototype-action" id="tryNewTag">演示新建</button>
+        <button class="prototype-action" id="resetDemo">重置</button>
+      </section>
+  </template>
+
+  <main class="desktop prototype-content prototype-app-surface">
     <section class="window" aria-label="标签草稿操作原型">
       <header class="titlebar">
         <div class="title-section">
@@ -286,8 +290,7 @@
     </section>
   </main>
 
-  <nav class="demo-bar" aria-label="原型演示控制"><span>原型操作</span><button id="makeDraft">模拟勾选</button><button id="tryNewTag">演示新建</button><button id="resetDemo">重置</button><span>关联原型</span><a href="../folder-structure-tags/index.html">目录标签导入</a><a href="../manual-video-import/index.html">基础导入</a></nav>
-
+  <script src="../prototype-shell.js"></script>
   <script>
     const initialVideos = [
       { id: 1, name: "海边日落.mp4", duration: "00:42", place: "旅行", style: "coast" },

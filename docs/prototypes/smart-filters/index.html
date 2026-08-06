@@ -70,24 +70,6 @@
         linear-gradient(135deg, rgba(200, 213, 227, .56), rgba(224, 226, 230, .2));
     }
 
-    .app-menubar {
-      position: fixed;
-      z-index: 60;
-      inset: 0 0 auto;
-      display: flex;
-      height: 25px;
-      align-items: center;
-      gap: 1px;
-      padding: 0 14px;
-      border-bottom: 1px solid rgba(60,60,67,.14);
-      background: color-mix(in srgb, var(--window) 91%, transparent);
-      box-shadow: 0 1px 5px rgba(0,0,0,.06);
-      backdrop-filter: blur(24px) saturate(1.35);
-      font-size: 12px;
-    }
-    .app-menubar span { padding: 0 8px; }
-    .app-menubar .app-name { font-weight: 650; }
-
     .window {
       position: relative;
       display: grid;
@@ -522,7 +504,7 @@
       border-radius: 5px;
       color: var(--secondary);
       background: transparent;
-      font-size: 10px;
+      font-size: var(--prototype-caption-font-size);
     }
     .copy-button:hover { background: rgba(127,127,127,.1); }
     .detail-field { display: grid; gap: 2px; }
@@ -599,7 +581,7 @@
       min-height: 14px;
       margin-top: 8px;
       color: var(--danger);
-      font-size: 10px;
+      font-size: var(--prototype-caption-font-size);
     }
     .editor-validation:empty { display: none; }
     .editor-delete { color: var(--danger); }
@@ -707,60 +689,31 @@
     }
     .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
-    .demo-bar {
-      position: fixed;
-      z-index: 70;
-      right: 12px;
-      bottom: 12px;
-      left: 12px;
-      display: flex;
-      min-height: 38px;
-      align-items: center;
-      gap: 4px;
-      padding: 5px 8px;
-      overflow-x: auto;
-      border: 1px solid rgba(255,255,255,.16);
-      border-radius: 9px;
-      color: #fff;
-      background: rgba(24,25,28,.88);
-      box-shadow: 0 10px 24px rgba(0,0,0,.25);
-      backdrop-filter: blur(18px);
-    }
-    .demo-label { padding: 0 6px; color: rgba(255,255,255,.66); font-size: 10px; white-space: nowrap; }
-    .demo-button, .demo-link {
-      display: inline-flex;
-      height: 27px;
-      align-items: center;
-      padding: 0 10px;
-      border-radius: 6px;
-      color: #fff;
-      background: transparent;
-      font-size: 11px;
-      text-decoration: none;
-      white-space: nowrap;
-    }
-    .demo-button:hover, .demo-link:hover { background: rgba(255,255,255,.13); }
-    .demo-button.active { background: rgba(255,255,255,.2); }
-    .demo-separator { width: 1px; height: 18px; flex: 0 0 1px; background: rgba(255,255,255,.2); }
-
     @media (max-width: 1150px) {
       .desktop { padding-right: 10px; padding-left: 10px; }
       .window { grid-template-columns: 208px minmax(500px, 1fr) 270px; }
       .titlebar { grid-template-columns: 208px minmax(500px, 1fr) 270px; }
     }
   </style>
+  <link rel="stylesheet" href="../prototype-shell.css">
 </head>
-<body>
-  <header class="app-menubar" aria-label="macOS 菜单栏">
-    <span class="app-name">FileFacet</span>
-    <span>文件</span>
-    <span>编辑</span>
-    <span>显示</span>
-    <span>窗口</span>
-    <span>帮助</span>
-  </header>
+<body data-prototype-page="smart-filters" data-prototype-subtitle="筛选、排序与智能分类">
+  <template id="prototypePageActions">
+      <section class="prototype-group" aria-labelledby="prototypeStatesTitle">
+        <div class="prototype-group-title" id="prototypeStatesTitle">页面状态</div>
+        <button class="prototype-action demo-button active" data-demo-state="default"><span class="prototype-action-mark"></span>默认资料库</button>
+        <button class="prototype-action demo-button" data-demo-state="tag-search"><span class="prototype-action-mark"></span>标签内搜索</button>
+        <button class="prototype-action demo-button" data-demo-state="filter"><span class="prototype-action-mark"></span>编辑条件弹层</button>
+        <button class="prototype-action demo-button" data-demo-state="temporary"><span class="prototype-action-mark"></span>临时结果</button>
+        <button class="prototype-action demo-button" data-demo-state="save"><span class="prototype-action-mark"></span>保存智能分类</button>
+        <button class="prototype-action demo-button" data-demo-state="saved"><span class="prototype-action-mark"></span>已保存</button>
+        <button class="prototype-action demo-button" data-demo-state="dirty"><span class="prototype-action-mark"></span>规则已修改</button>
+        <button class="prototype-action demo-button" data-demo-state="leave"><span class="prototype-action-mark"></span>离开草稿</button>
+        <button class="prototype-action demo-button" data-demo-state="empty"><span class="prototype-action-mark"></span>无结果</button>
+      </section>
+  </template>
 
-  <main class="desktop">
+  <main class="desktop prototype-content prototype-app-surface">
     <section class="window" id="appWindow" aria-label="FileFacet 排序、筛选与智能分类原型">
       <header class="titlebar">
         <div class="title-part">
@@ -901,25 +854,7 @@
     </section>
   </main>
 
-  <nav class="demo-bar" aria-label="原型状态控制">
-    <span class="demo-label">原型状态</span>
-    <button class="demo-button active" data-demo-state="default">默认资料库</button>
-    <button class="demo-button" data-demo-state="tag-search">标签内搜索</button>
-    <button class="demo-button" data-demo-state="filter">编辑条件弹层</button>
-    <button class="demo-button" data-demo-state="temporary">临时结果</button>
-    <button class="demo-button" data-demo-state="save">保存智能分类</button>
-    <button class="demo-button" data-demo-state="saved">已保存</button>
-    <button class="demo-button" data-demo-state="dirty">规则已修改</button>
-    <button class="demo-button" data-demo-state="leave">离开草稿</button>
-    <button class="demo-button" data-demo-state="empty">无结果</button>
-    <span class="demo-separator"></span>
-    <span class="demo-label">关联原型</span>
-    <a class="demo-link" href="../offline-library/index.html">离线资料库</a>
-    <a class="demo-link" href="../manual-video-import/index.html">基础导入</a>
-    <a class="demo-link" href="../folder-structure-tags/index.html">目录标签导入</a>
-    <a class="demo-link" href="../tag-sorting/index.html">标签排序</a>
-  </nav>
-
+  <script src="../prototype-shell.js"></script>
   <script>
     const videos = [
       { id: 1, name: "城市晨光.mp4", image: "../../assets/readme/fictional-posters/02-sci-fi-allegory.png", path: "项目素材 / 城市 / 城市晨光.mp4", duration: 78, width: 3840, height: 2160, size: 1840, added: 2, created: 28, modified: 1, tags: ["工作", "城市"], recent: true },

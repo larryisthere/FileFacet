@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FileFacet · HTML 原型规范</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --desktop: #d9dde3;
+      --window: rgba(246,246,247,.97);
+      --content: #fff;
+      --line: rgba(60,60,67,.18);
+      --line-strong: rgba(60,60,67,.28);
+      --text: #202124;
+      --secondary: #6e6e73;
+      --tertiary: #8e8e93;
+      --accent: #0a84ff;
+      --accent-soft: rgba(10,132,255,.13);
+      --success: #248a3d;
+      --code: #f2f3f5;
+      --shadow: 0 18px 54px rgba(20,24,31,.18), 0 2px 8px rgba(20,24,31,.1);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --desktop: #17191d;
+        --window: rgba(42,42,44,.98);
+        --content: #1f1f21;
+        --line: rgba(235,235,245,.13);
+        --line-strong: rgba(235,235,245,.24);
+        --text: #f2f2f7;
+        --secondary: #aeaeb2;
+        --tertiary: #8e8e93;
+        --accent-soft: rgba(10,132,255,.2);
+        --success: #30d158;
+        --code: #28282b;
+        --shadow: 0 20px 60px rgba(0,0,0,.42), 0 2px 8px rgba(0,0,0,.28);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-width: 960px; min-height: 100%; margin: 0; }
+    body {
+      color: var(--text);
+      background:
+        radial-gradient(circle at 12% 4%, rgba(255,255,255,.5), transparent 30%),
+        linear-gradient(145deg, var(--desktop), color-mix(in srgb, var(--desktop) 82%, black));
+      font-size: 14px;
+    }
+
+    button { color: inherit; }
+
+    .guide-shell {
+      min-height: 100vh;
+      padding: 45px 28px 64px;
+    }
+
+    .guide-content {
+      width: min(1040px, 100%);
+      margin: 0 auto;
+    }
+
+    .guide-header {
+      display: grid;
+      grid-template-columns: minmax(0,1fr) auto;
+      align-items: end;
+      gap: 24px;
+      margin-bottom: 22px;
+    }
+
+    .eyebrow {
+      margin: 0 0 7px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    h1 { margin: 0; font-size: 28px; letter-spacing: -.025em; }
+    .lead { max-width: 720px; margin: 9px 0 0; color: var(--secondary); line-height: 1.55; }
+    .status-badge { padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--success) 38%, transparent); border-radius: 999px; color: var(--success); background: color-mix(in srgb, var(--success) 10%, transparent); font-size: 12px; font-weight: 650; }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0,1fr));
+      gap: 12px;
+      margin-bottom: 22px;
+    }
+
+    .principle,
+    .section-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--window) 96%, transparent);
+      box-shadow: var(--shadow);
+    }
+
+    .principle { padding: 16px; }
+    .principle strong { display: block; margin-bottom: 6px; font-size: 14px; }
+    .principle p { margin: 0; color: var(--secondary); font-size: 12px; line-height: 1.5; }
+
+    .section-card { margin-top: 14px; overflow: hidden; }
+    .section-head { padding: 17px 20px 13px; border-bottom: 1px solid var(--line); }
+    .section-head h2 { margin: 0; font-size: 17px; }
+    .section-head p { margin: 5px 0 0; color: var(--secondary); font-size: 12px; line-height: 1.5; }
+    .section-body { padding: 18px 20px 20px; }
+
+    .anatomy {
+      display: grid;
+      grid-template-columns: 180px minmax(0,1fr);
+      min-height: 210px;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: var(--content);
+    }
+
+    .anatomy-nav { display: grid; place-content: center; color: white; background: #1f1f21; text-align: center; }
+    .anatomy-nav strong { font-size: 13px; }
+    .anatomy-nav span { margin-top: 5px; color: rgba(255,255,255,.55); font-size: 11px; }
+    .anatomy-app { display: grid; grid-template-rows: 25px minmax(0,1fr); }
+    .anatomy-menu { display: flex; align-items: center; gap: 14px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--window); font-size: 12px; }
+    .anatomy-window { display: grid; place-content: center; color: var(--secondary); background: linear-gradient(145deg, var(--desktop), var(--content)); text-align: center; }
+    .anatomy-window strong { color: var(--text); font-size: 14px; }
+    .anatomy-window span { margin-top: 5px; font-size: 12px; }
+
+    .token-table { width: 100%; border-collapse: collapse; }
+    .token-table th, .token-table td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+    .token-table th { color: var(--secondary); font-size: 11px; font-weight: 650; letter-spacing: .03em; }
+    .token-table tr:last-child td { border-bottom: 0; }
+    .token-table code { color: var(--accent); }
+
+    pre {
+      margin: 0;
+      overflow: auto;
+      padding: 15px 16px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--code);
+      font: 12px/1.55 "SFMono-Regular", Consolas, monospace;
+      white-space: pre;
+    }
+
+    code { font-family: "SFMono-Regular", Consolas, monospace; font-size: .92em; }
+    .rule-list, .check-list { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
+    .rule-list li, .check-list li { position: relative; padding-left: 22px; line-height: 1.5; }
+    .rule-list li::before { content: "•"; position: absolute; left: 5px; color: var(--accent); font-weight: 800; }
+    .check-list li::before { content: "✓"; position: absolute; left: 2px; color: var(--success); font-weight: 750; }
+    .rule-list span, .check-list span { color: var(--secondary); }
+
+    .two-column { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px; }
+    .subsection h3 { margin: 0 0 9px; font-size: 14px; }
+    .callout { margin-top: 14px; padding: 12px 14px; border-left: 3px solid var(--accent); border-radius: 7px; background: var(--accent-soft); line-height: 1.5; }
+
+    @media (max-width: 1120px) {
+      .principles, .two-column { grid-template-columns: 1fr; }
+    }
+  </style>
+  <link rel="stylesheet" href="../prototype-shell.css">
+</head>
+<body data-prototype-page="guidelines" data-prototype-subtitle="HTML 原型规范">
+  <main class="guide-shell prototype-content prototype-review-surface">
+    <div class="guide-content">
+      <header class="guide-header">
+        <div>
+          <p class="eyebrow">Prototype System</p>
+          <h1>FileFacet HTML 原型规范</h1>
+          <p class="lead">用于统一原型外壳、页面层级、字号、交互状态和验收交付。新原型从共享外壳开始，再补充当前功能需要验证的内容。</p>
+        </div>
+        <span class="status-badge">当前规范</span>
+      </header>
+
+      <section class="principles" aria-label="核心原则">
+        <article class="principle"><strong>用户任务优先</strong><p>页面围绕用户要完成的操作组织，关键入口、状态变化和反馈都应可直接操作。</p></article>
+        <article class="principle"><strong>共享外壳统一</strong><p>左导、menubar、字号令牌和收起行为由共享资源维护，页面不复制这些结构。</p></article>
+        <article class="principle"><strong>验收状态完整</strong><p>覆盖主路径、关键状态、必要异常和恢复方式，产品结论以用户验收为准。</p></article>
+      </section>
+
+      <section class="section-card">
+        <header class="section-head"><h2>1. 页面外壳</h2><p>左导属于原型工作区，menubar 和窗口属于 FileFacet 展示区域。</p></header>
+        <div class="section-body">
+          <div class="anatomy" aria-label="原型外壳结构示意">
+            <div class="anatomy-nav"><strong>原型导航</strong><span>从顶部贯穿到底部</span></div>
+            <div class="anatomy-app">
+              <div class="anatomy-menu"><strong>FileFacet</strong><span>文件</span><span>编辑</span><span>显示</span><span>窗口</span><span>帮助</span></div>
+              <div class="anatomy-window"><strong>App 展示区域</strong><span>menubar 仅覆盖这一侧；左导收起后同步扩展</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-card">
+        <header class="section-head"><h2>2. 共享资源与页面骨架</h2><p>共享脚本必须先于页面脚本加载，确保导航、menubar 和菜单节点已经存在。</p></header>
+        <div class="section-body">
+<pre><code>&lt;link rel="stylesheet" href="../prototype-shell.css"&gt;
+
+&lt;body data-prototype-page="feature-id"
+      data-prototype-subtitle="当前原型说明"
+      data-prototype-file-menu="import"&gt;
+  &lt;template id="prototypePageActions"&gt;
+    &lt;section class="prototype-group"&gt;…页面专属状态按钮…&lt;/section&gt;
+  &lt;/template&gt;
+
+  &lt;main class="desktop prototype-content prototype-app-surface"&gt;…&lt;/main&gt;
+
+  &lt;script src="../prototype-shell.js"&gt;&lt;/script&gt;
+  &lt;script&gt;…页面专属交互…&lt;/script&gt;
+&lt;/body&gt;</code></pre>
+          <div class="callout">新增页面时，在 <code>prototype-shell.js</code> 的页面登记表中增加一次入口。所有原型会自动获得新链接和当前页高亮。</div>
+        </div>
+      </section>
+
+      <section class="section-card">
+        <header class="section-head"><h2>3. 字号与密度</h2><p>相同语义使用相同层级；辅助信息保持可读。</p></header>
+        <div class="section-body">
+          <table class="token-table">
+            <thead><tr><th>语义</th><th>字号</th><th>共享令牌 / 使用规则</th></tr></thead>
+            <tbody>
+              <tr><td>App 主体</td><td>13px</td><td><code>--prototype-shell-font-size</code></td></tr>
+              <tr><td>menubar</td><td>12px</td><td><code>--prototype-menubar-font-size</code></td></tr>
+              <tr><td>左导项目</td><td>11px</td><td><code>--prototype-navigation-font-size</code></td></tr>
+              <tr><td>辅助文字</td><td>最低 11px</td><td><code>--prototype-caption-font-size</code></td></tr>
+              <tr><td>区块标题</td><td>13–16px</td><td>按页面层级使用，避免用字号承担过多装饰</td></tr>
+              <tr><td>原型说明区</td><td>14px</td><td>可高于 App 主体，保持与模拟 App 的边界</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section-card">
+        <header class="section-head"><h2>4. 交互与状态</h2><p>页面专属按钮进入左导；产品内部按钮保留在模拟 App 中。</p></header>
+        <div class="section-body two-column">
+          <div class="subsection">
+            <h3>原型应覆盖</h3>
+            <ul class="rule-list">
+              <li>核心用户主路径 <span>从入口到结果可以完整操作</span></li>
+              <li>关键状态转换 <span>进行中、成功、失败、撤销和恢复</span></li>
+              <li>必要异常状态 <span>权限、空结果、无效输入和离线</span></li>
+              <li>导航生命周期 <span>切换页面或分类后的状态清理</span></li>
+            </ul>
+          </div>
+          <div class="subsection">
+            <h3>外壳约定</h3>
+            <ul class="rule-list">
+              <li>单独按 <code>P</code> <span>收起或展开左导</span></li>
+              <li><code>data-prototype-app-menu="true"</code> <span>启用 App 菜单</span></li>
+              <li><code>data-prototype-file-menu="import"</code> <span>启用导入菜单</span></li>
+              <li>页面脚本使用稳定 ID <span>不要依赖显示文案判断业务状态</span></li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-card">
+        <header class="section-head"><h2>5. 交付前检查</h2><p>静态检查确认结构完整；产品行为继续由用户验收。</p></header>
+        <div class="section-body two-column">
+          <ul class="check-list">
+            <li>当前页面已经登记并正确高亮</li>
+            <li>共享 CSS 和 JS 路径可解析</li>
+            <li>页面中没有重复 ID</li>
+            <li>页面脚本通过 <code>node --check</code></li>
+          </ul>
+          <ul class="check-list">
+            <li>旧底部演示菜单已经移除</li>
+            <li>menubar 仅覆盖右侧 App 区域</li>
+            <li>输入控件聚焦时 <code>P</code> 不触发</li>
+            <li><code>git diff --check</code> 通过</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="../prototype-shell.js"></script>
+</body>
+</html>

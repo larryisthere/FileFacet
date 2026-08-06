@@ -74,6 +74,7 @@
     .review-shell {
       min-height: 100vh;
       padding: 20px 24px 34px;
+      font-size: 14px;
     }
 
     .review-head {
@@ -107,7 +108,7 @@
       border-radius: 999px;
       color: var(--warning);
       background: rgba(232, 166, 74, .12);
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 600;
       vertical-align: 1px;
     }
@@ -127,7 +128,7 @@
 
     .control-label {
       color: var(--secondary);
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: .04em;
@@ -147,7 +148,7 @@
       border: 0;
       border-radius: 5px;
       background: transparent;
-      font-size: 12px;
+      font-size: 13px;
     }
 
     .segmented button[aria-pressed="true"] {
@@ -251,7 +252,7 @@
     .context-title {
       overflow: hidden;
       margin: 0;
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 650;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -260,7 +261,7 @@
       margin-top: 1px;
       overflow: hidden;
       color: var(--secondary);
-      font-size: 10px;
+      font-size: 11px;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
@@ -306,7 +307,7 @@
       gap: 5px;
       padding: 8px 8px 3px;
       color: var(--secondary);
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 650;
     }
     .section-head .spacer { flex: 1; }
@@ -342,7 +343,7 @@
     }
     .source-row .count {
       color: var(--secondary);
-      font-size: 11px;
+      font-size: 12px;
       font-variant-numeric: tabular-nums;
     }
     .indent-1 { padding-left: 25px; }
@@ -397,7 +398,7 @@
       background: rgba(215,53,42,.12);
     }
     .status-title { font-weight: 650; }
-    .status-detail { margin-top: 2px; color: var(--secondary); font-size: 11px; line-height: 1.35; }
+    .status-detail { margin-top: 2px; color: var(--secondary); font-size: 12px; line-height: 1.35; }
     .status-action {
       min-height: 25px;
       padding: 3px 10px;
@@ -492,17 +493,17 @@
       border-radius: 4px;
       color: white;
       background: rgba(0,0,0,.68);
-      font-size: 10px;
+      font-size: 11px;
       font-variant-numeric: tabular-nums;
     }
     .video-name {
       overflow: hidden;
       margin: 6px 2px 0;
-      font-size: 11px;
+      font-size: 12px;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .video-meta { margin: 2px 2px 0; color: var(--secondary); font-size: 10px; }
+    .video-meta { margin: 2px 2px 0; color: var(--secondary); font-size: 11px; }
 
     .empty-state {
       display: grid;
@@ -532,7 +533,7 @@
       border: 1px solid var(--line);
       border-radius: 5px;
       background: rgba(127,127,127,.08);
-      font-size: 11px;
+      font-size: 12px;
     }
 
     .inspector {
@@ -596,7 +597,7 @@
       border-radius: 4px;
       color: white;
       background: transparent;
-      font-size: 10px;
+      font-size: var(--prototype-caption-font-size);
     }
     .check.on { border-color: var(--accent); background: var(--accent); }
     .check.mixed { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
@@ -611,7 +612,7 @@
       border-top: 1px solid var(--line);
       background: color-mix(in srgb, var(--inspector) 92%, var(--window));
     }
-    .draft-summary { min-height: 32px; color: var(--secondary); font-size: 11px; line-height: 1.35; }
+    .draft-summary { min-height: 32px; color: var(--secondary); font-size: 12px; line-height: 1.35; }
     .button-row { display: flex; justify-content: flex-end; gap: 8px; }
     .mac-button {
       min-height: 26px;
@@ -764,7 +765,7 @@
       color: var(--warning);
       background: color-mix(in srgb, var(--window) 91%, rgba(232,166,74,.18));
       box-shadow: 0 8px 20px rgba(0,0,0,.12);
-      font-size: 11px;
+      font-size: 12px;
       line-height: 1.4;
       pointer-events: none;
     }
@@ -775,8 +776,9 @@
       .review-subtitle { display: none; }
     }
   </style>
+  <link rel="stylesheet" href="../prototype-shell.css">
 </head>
-<body>
+<body data-prototype-page="localization" data-prototype-subtitle="本地化覆盖审查">
   <svg width="0" height="0" aria-hidden="true">
     <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
     <symbol id="i-inspector" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
@@ -793,7 +795,7 @@
     <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
   </svg>
 
-  <main class="review-shell">
+  <main class="review-shell prototype-content prototype-review-surface">
     <header class="review-head">
       <div>
         <h1 class="review-title">FileFacet · Localization review</h1>
@@ -1104,6 +1106,7 @@
     </section>
   </main>
 
+  <script src="../prototype-shell.js"></script>
   <script>
     const copy = {
       en: {
