@@ -4,6 +4,8 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-08-07
+
 ### Added
 
 - Added video-grid grouping by added, created, or modified date, duration, file size, and resolution, with independent group ordering, counts, collapsible sticky headers, and a direct clear control.
