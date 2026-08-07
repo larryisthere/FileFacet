@@ -1102,6 +1102,12 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
 
         guard modifiers.contains(.shift) else {
             selectionAnchorVideoID = selectedVideo.id
+            if modifiers.contains(.command) == false,
+               collectionView.selectionIndexPaths.contains(indexPath),
+               selectedVideoIDs != [selectedVideo.id] {
+                selectedVideoIDs = [selectedVideo.id]
+                notifySelectionChanged()
+            }
             return false
         }
 
