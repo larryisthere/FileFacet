@@ -4,6 +4,8 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-08-07
+
 ### Added
 
 - Added a unified Unavailable Videos category for temporarily offline and inaccessible videos, with `Command-1` through `Command-4` shortcuts for the four preset library categories.
