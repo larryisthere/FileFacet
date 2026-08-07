@@ -749,7 +749,7 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertEqual(tags.filter { $0.source == "finder" }.map(\.name), ["旅行"])
     }
 
-    func testSilentMaintenanceUpdatesMovedVideoAndRemovesConfirmedDeletion() async throws {
+    func testSilentMaintenanceUpdatesMovedVideoAndRetainsConfirmedMissingRecord() async throws {
         let fixture = try DatabaseFixture()
         defer { fixture.remove() }
         let store = try DatabaseStore(databaseURL: fixture.databaseURL)
@@ -764,7 +764,8 @@ final class DatabaseStoreTests: XCTestCase {
                 size: 10,
                 volumeIdentifier: volume,
                 fileResourceIdentifier: identity
-            )]
+            )],
+            importedAt: Date(timeIntervalSince1970: 100)
         )
         let video = try XCTUnwrap(imported.importedVideos.first)
         let tagID = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "保留", parentID: nil)
@@ -787,9 +788,83 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertEqual(moved.relativePath, "Moved/New.mp4")
         XCTAssertEqual(states[tagID], .on)
 
-        _ = try await store.reconcileSource(sourceID: "source-a", discoveredVideos: [])
+        let missingDate = Date(timeIntervalSince1970: 500)
+        _ = try await store.reconcileSource(
+            sourceID: "source-a",
+            discoveredVideos: [],
+            verifiedAt: missingDate
+        )
         let afterDeletion = try await store.fetchVideos(libraryID: LibraryRecord.primaryID)
+        let retained = try await store.fetchVideos(
+            libraryID: LibraryRecord.primaryID,
+            includeMissing: true
+        )
+        let retainedVideo = try XCTUnwrap(retained.first)
+        let retainedStates = try await store.tagAssignmentStates(
+            videoIDs: [retainedVideo.id],
+            tags: tags
+        )
         XCTAssertTrue(afterDeletion.isEmpty)
+        XCTAssertEqual(retainedVideo.id, video.id)
+        XCTAssertEqual(retainedVideo.availability, .unavailable)
+        XCTAssertEqual(retainedVideo.invalidatedAt, missingDate)
+        XCTAssertEqual(retainedStates[tagID], .on)
+    }
+
+    func testExactFingerprintRelinkRestoresMissingRecordAndPreservesTags() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "source-a", name: "A"))
+        try await store.saveSourceAuthorization(makeSource(id: "source-b", name: "B"))
+        let fingerprint = Data("content-fingerprint".utf8)
+        let original = makeDiscoveredVideo(
+            path: "Original.mp4",
+            size: 10,
+            volumeIdentifier: Data("old-volume".utf8),
+            fileResourceIdentifier: Data("old-file".utf8),
+            contentFingerprint: fingerprint
+        )
+        let imported = try await store.importVideos(
+            sourceID: "source-a",
+            discoveredVideos: [original],
+            importedAt: Date(timeIntervalSince1970: 100)
+        )
+        let video = try XCTUnwrap(imported.importedVideos.first)
+        let tagID = try await store.createTag(
+            libraryID: LibraryRecord.primaryID,
+            name: "保留",
+            parentID: nil
+        )
+        try await store.setTagAssignment(tagID: tagID, videoIDs: [video.id], enabled: true)
+        _ = try await store.reconcileSource(sourceID: "source-a", discoveredVideos: [])
+
+        let candidate = makeDiscoveredVideo(
+            path: "Relocated.mp4",
+            size: 10,
+            volumeIdentifier: Data("new-volume".utf8),
+            fileResourceIdentifier: Data("new-file".utf8),
+            contentFingerprint: fingerprint
+        )
+        let assessment = try await store.assessRelinkVideo(
+            id: video.id,
+            sourceID: "source-b",
+            discoveredVideo: candidate
+        )
+        let restored = try await store.relinkVideo(
+            id: video.id,
+            sourceID: "source-b",
+            discoveredVideo: candidate
+        )
+        let tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        let states = try await store.tagAssignmentStates(videoIDs: [restored.id], tags: tags)
+
+        XCTAssertEqual(assessment, .exactMatch)
+        XCTAssertEqual(restored.id, video.id)
+        XCTAssertEqual(restored.availability, .available)
+        XCTAssertEqual(restored.relativePath, "Relocated.mp4")
+        XCTAssertEqual(states[tagID], .on)
     }
 
     func testTenThousandVideoIndexAndTagFilterMeetMVPBudgets() async throws {
@@ -873,7 +948,8 @@ final class DatabaseStoreTests: XCTestCase {
         finderTags: [String] = [],
         modificationDate: Date? = nil,
         volumeIdentifier: Data? = nil,
-        fileResourceIdentifier: Data? = nil
+        fileResourceIdentifier: Data? = nil,
+        contentFingerprint: Data? = nil
     ) -> DiscoveredVideo {
         DiscoveredVideo(
             relativePath: path,
@@ -884,6 +960,7 @@ final class DatabaseStoreTests: XCTestCase {
             modificationDate: modificationDate,
             volumeIdentifier: volumeIdentifier,
             fileResourceIdentifier: fileResourceIdentifier,
+            contentFingerprint: contentFingerprint,
             finderTags: finderTags
         )
     }

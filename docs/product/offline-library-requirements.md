@@ -1,6 +1,7 @@
 # 离线资料库需求
 
 - 状态：已完成，已授权发布
+- 后续扩展：[`unavailable-videos-requirements.md`](unavailable-videos-requirements.md) 将“离线”扩展为统一的“不可用视频”，既有离线行为保持不变。
 - 日期：2026-07-31
 - 交互原型：[`../prototypes/offline-library/index.html`](../prototypes/offline-library/index.html)
 - 相关架构事实：[`../architecture/0002-mvp-defaults.md`](../architecture/0002-mvp-defaults.md)

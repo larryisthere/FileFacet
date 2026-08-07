@@ -192,7 +192,8 @@ struct VideoFileDiscovery: VideoFileDiscovering {
             volumeIdentifier: encodeIdentifier(values.volumeIdentifier),
             fileResourceIdentifier: encodeIdentifier(values.fileResourceIdentifier),
             finderTags: (values.tagNames ?? []).filter { $0.isEmpty == false },
-            fallbackPathKey: fallbackPathKey(for: fileURL)
+            fallbackPathKey: fallbackPathKey(for: fileURL),
+            lastKnownPath: fileURL.standardizedFileURL.path
         )
     }
 

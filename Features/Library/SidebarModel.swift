@@ -31,27 +31,27 @@ enum TagSortMode: String, CaseIterable {
 
 enum LibraryFilter: Equatable, Sendable {
     case all
-    case offline
     case untagged
     case recent
+    case unavailable
     case tag(String)
     case tags([String])
 }
 
 struct SidebarFilterCounts: Equatable, Sendable {
     let all: Int
-    let offline: Int
     let untagged: Int
     let recent: Int
+    let unavailable: Int
 
-    init(all: Int, offline: Int = 0, untagged: Int, recent: Int) {
+    init(all: Int, untagged: Int, recent: Int, unavailable: Int = 0) {
         self.all = all
-        self.offline = offline
         self.untagged = untagged
         self.recent = recent
+        self.unavailable = unavailable
     }
 
-    static let zero = SidebarFilterCounts(all: 0, offline: 0, untagged: 0, recent: 0)
+    static let zero = SidebarFilterCounts(all: 0, untagged: 0, recent: 0, unavailable: 0)
 }
 
 enum SidebarGroupKind {
@@ -77,6 +77,16 @@ final class SidebarFilterNode {
     let systemImageName: String
     let filter: LibraryFilter
     let videoCount: Int
+
+    var shortcutHint: String? {
+        switch filter {
+        case .all: "⌘1"
+        case .untagged: "⌘2"
+        case .recent: "⌘3"
+        case .unavailable: "⌘4"
+        case .tag, .tags: nil
+        }
+    }
 
     init(title: String, systemImageName: String, filter: LibraryFilter, videoCount: Int) {
         self.title = title

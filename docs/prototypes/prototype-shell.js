@@ -4,7 +4,7 @@
     { id: "folder-structure-tags", label: "目录标签导入" },
     { id: "smart-filters", label: "筛选与智能分类" },
     { id: "deferred-tag-editing", label: "标签编辑" },
-    { id: "offline-library", label: "离线资料库" },
+    { id: "offline-library", label: "不可用视频" },
     { id: "media-source-inspector", label: "媒体检查器" },
     { id: "tag-sorting", label: "标签排序" },
     { id: "localization", label: "本地化" }

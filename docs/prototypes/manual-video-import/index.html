@@ -692,6 +692,10 @@
               <svg viewBox="0 0 24 24"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
               <div><div class="folder-name">旅行素材 A / 精选</div><div class="folder-path">影片 / 旅行素材 A / 精选</div></div><span class="folder-note">6 个已导入视频</span>
             </div>
+            <div class="folder-row" data-folder="failed" data-new="0" data-existing="0" data-failed="2">
+              <svg viewBox="0 0 24 24"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+              <div><div class="folder-name">损坏素材</div><div class="folder-path">下载 / 损坏素材</div></div><span class="folder-note">2 个视频无法处理</span>
+            </div>
           </div>
           <div class="sheet-footer"><button class="small-button" id="closePicker">取消</button><button class="small-button accent" id="startImport">导入</button></div>
         </div>
@@ -725,6 +729,8 @@
     let videos = initialVideos.map(video => ({ ...video }));
     let selectedID = 1;
     let selectedIDs = new Set([1]);
+    let pendingViewVideoIDs = [];
+    let pendingViewDestination = "recent";
     let pendingRemovalIDs = [];
     let lastRemoval = null;
     let importTimer = null;
@@ -828,6 +834,40 @@
       document.getElementById("inspectorPath").textContent = video.path;
       document.getElementById("inspectorDuration").textContent = video.duration;
       renderVideos();
+    }
+
+    function prepareImportView(addedIDs, existingCount) {
+      const existingIDs = initialVideos
+        .map(video => video.id)
+        .filter(id => videos.some(video => video.id === id))
+        .slice(0, existingCount);
+      pendingViewVideoIDs = [...new Set([...addedIDs, ...existingIDs])];
+      pendingViewDestination = existingIDs.length > 0 ? "all" : "recent";
+    }
+
+    function viewPendingImportVideos() {
+      const visibleTargetIDs = pendingViewVideoIDs.filter(id => videos.some(video => video.id === id));
+      if (visibleTargetIDs.length === 0) return;
+      document.querySelectorAll(".nav-row").forEach(row => row.classList.remove("selected"));
+      const targetNav = pendingViewDestination === "all" ? "allVideosNav" : "recentVideosNav";
+      document.getElementById(targetNav).classList.add("selected");
+      document.getElementById("viewTitle").textContent = pendingViewDestination === "all" ? "全部视频" : "最近添加";
+      searchInput.value = "";
+      selectedIDs = new Set(visibleTargetIDs);
+      selectedID = visibleTargetIDs[0];
+      updateInspectorForSelection();
+      renderVideos();
+      requestAnimationFrame(() => {
+        document.querySelector(`[data-id="${selectedID}"]`)?.scrollIntoView({ block: "center" });
+      });
+    }
+
+    function resetBrowsingStateForManualNavigation() {
+      selectedID = null;
+      selectedIDs = new Set();
+      updateInspectorForSelection();
+      renderVideos();
+      gridScroll.scrollTop = 0;
     }
 
     function showVideoContextMenu(event, id) {
@@ -1134,8 +1174,10 @@
       clearInterval(importTimer);
       importTimer = null;
       const styles = ["coast", "city", "studio"];
+      const addedIDs = [];
       for (let index = 0; index < scenario.newCount; index += 1) {
         const id = Math.max(0, ...videos.map(video => video.id)) + 1;
+        addedIDs.push(id);
         videos.unshift({
           id,
           name: `${scenario.label} ${index + 1}.mov`,
@@ -1144,7 +1186,8 @@
           style: styles[index % styles.length]
         });
       }
-      const discoveredAnyVideo = scenario.newCount > 0 || scenario.existingCount > 0;
+      prepareImportView(addedIDs, scenario.existingCount);
+      const discoveredAnyVideo = pendingViewVideoIDs.length > 0;
       if (discoveredAnyVideo) {
         emptyMode = false;
         selectedID = videos[0]?.id ?? null;
@@ -1188,12 +1231,16 @@
       const existing = Number(currentFolder.dataset.existing);
       const failed = Number(currentFolder.dataset.failed);
       const folderName = currentFolder.querySelector(".folder-name").textContent;
+      const addedIDs = [];
 
       for (let index = 0; index < newCount; index += 1) {
         const id = Math.max(0, ...videos.map(video => video.id)) + 1;
+        addedIDs.push(id);
         const styles = ["coast", "city", "studio", "forest", "indoor", "night"];
         videos.unshift({ id, name: `${folderName} ${index + 1}.mov`, path: `${folderName} / 新视频 ${index + 1}.mov`, duration: `00:${String(24 + index * 7).padStart(2, "0")}`, style: styles[index % styles.length] });
       }
+
+      prepareImportView(addedIDs, existing);
 
       emptyMode = false;
       document.getElementById("inspectorDetails").hidden = false;
@@ -1208,9 +1255,9 @@
       cancelImport.hidden = true;
       undoRemoval.hidden = true;
       dismissStatus.hidden = false;
-      dismissStatus.textContent = "查看";
+      dismissStatus.textContent = pendingViewVideoIDs.length > 0 ? "查看" : "完成";
       closeStatus.hidden = false;
-      statusLifecycle = "importComplete";
+      statusLifecycle = pendingViewVideoIDs.length > 0 ? "importComplete" : "terminal";
       if (selectedID) selectVideo(selectedID);
       else renderVideos();
     }
@@ -1265,6 +1312,8 @@
       videos = initialVideos.map(video => ({ ...video }));
       selectedID = 1;
       selectedIDs = new Set([1]);
+      pendingViewVideoIDs = [];
+      pendingViewDestination = "recent";
       pendingRemovalIDs = [];
       lastRemoval = null;
       statusLifecycle = "idle";
@@ -1311,9 +1360,7 @@
     undoRemoval.addEventListener("click", undoLastRemoval);
     dismissStatus.addEventListener("click", () => {
       if (statusLifecycle === "importComplete") {
-        document.querySelectorAll(".nav-row").forEach(row => row.classList.remove("selected"));
-        document.getElementById("recentVideosNav").classList.add("selected");
-        document.getElementById("viewTitle").textContent = "最近添加";
+        viewPendingImportVideos();
       }
       endStatusLifecycle();
     });
@@ -1351,10 +1398,12 @@
       row.classList.add("selected");
     }));
     document.querySelectorAll(".nav-row").forEach(row => row.addEventListener("click", () => {
+      const changesBrowsingContext = row.classList.contains("selected") === false;
       endTerminalStatusForNavigation();
       document.querySelectorAll(".nav-row").forEach(item => item.classList.remove("selected"));
       row.classList.add("selected");
       document.getElementById("viewTitle").textContent = row.querySelector(".label")?.textContent ?? "资料库";
+      if (changesBrowsingContext) resetBrowsingStateForManualNavigation();
     }));
     modalBackdrop.addEventListener("click", event => { if (event.target === modalBackdrop) hidePicker(); });
     removalBackdrop.addEventListener("click", event => { if (event.target === removalBackdrop) cancelPendingRemoval(); });

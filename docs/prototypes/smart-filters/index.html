@@ -738,6 +738,10 @@
           <svg class="nav-icon" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M7 9h10M7 13h7"></path></svg>
           <span class="nav-label">所有视频</span><span class="nav-count" id="allCount">12</span>
         </button>
+        <button class="nav-row" data-view="untagged">
+          <svg class="nav-icon" viewBox="0 0 24 24"><path d="M4 6h7l2 2h7v10H4z"></path><path d="m8 12 8 0M8 15h5"></path></svg>
+          <span class="nav-label">未打标签</span><span class="nav-count">1</span>
+        </button>
         <button class="nav-row" data-view="recent">
           <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
           <span class="nav-label">最近导入</span><span class="nav-count">4</span>
@@ -913,10 +917,12 @@
     let activeEditor = null;
     let editorDraft = null;
     let pendingNavigation = null;
+    let resetBrowsingStateOnRender = false;
 
     const appWindow = document.getElementById("appWindow");
     const searchInput = document.getElementById("searchInput");
     const videoGrid = document.getElementById("videoGrid");
+    const gridScroll = document.querySelector(".grid-scroll");
     const emptyState = document.getElementById("emptyState");
     const ruleBar = document.getElementById("ruleBar");
     const editorPopover = document.getElementById("editorPopover");
@@ -1018,11 +1024,14 @@
 
     function visibleVideos() {
       let source = currentView === "recent" ? videos.filter(video => video.recent) : videos;
+      if (currentView === "untagged") source = source.filter(video => video.tags.length === 0);
       if (currentView === "tag" && currentScopeTag) {
         source = source.filter(video => video.tags.includes(currentScopeTag));
       }
       source = applyRule(source, searchInput.value, filenameRule, requiredTagRule, appliedFilters, matchMode);
-      return sortVideos(source, sortKey, sortDirection);
+      return currentView === "recent"
+        ? sortVideos(source, "added", "asc")
+        : sortVideos(source, sortKey, sortDirection);
     }
 
     function renderSidebar() {
@@ -1063,6 +1072,12 @@
       if (currentView === "tag" && currentScopeTag) {
         pieces.push(`<span class="scope-summary"><span class="tag-dot" style="--tag-color:${tagColors[currentScopeTag]}"></span><span>范围：${escapeAttribute(currentScopeTag)}</span></span>`);
       }
+      if (currentView === "untagged") {
+        pieces.push('<span class="scope-summary">系统范围：未打标签</span>');
+      }
+      if (currentView === "recent") {
+        pieces.push('<span class="scope-summary">系统范围：最近 30 天加入</span>');
+      }
 
       if (temporarySearch) {
         if (pieces.length) pieces.push('<span class="relation-connector">并且</span>');
@@ -1092,7 +1107,7 @@
       const sortActive = activeEditor?.kind === "sort" ? " active" : "";
       const hasCustomSort = sortKey !== "name" || sortDirection !== "asc";
       const hasEditableRule = requiredTagRule || temporarySearch || filenameRule || appliedFilters.length || sortKey !== "name" || sortDirection !== "asc";
-      const hasSavableRule = currentScopeTag || hasEditableRule;
+      const hasSavableRule = currentScopeTag || ["untagged", "recent"].includes(currentView) || hasEditableRule;
 
       let actions = "";
       if (currentView === "smart" && smartDirty) {
@@ -1105,7 +1120,7 @@
           <button class="link-button" data-rule-action="save-as" title="存为智能分类…" aria-label="存为智能分类…"${hasSavableRule ? "" : " disabled"}>保存</button>`;
       }
 
-      const hasVisibleFilterCondition = currentScopeTag || requiredTagRule || temporarySearch || filenameRule || appliedFilters.length;
+      const hasVisibleFilterCondition = currentScopeTag || ["untagged", "recent"].includes(currentView) || requiredTagRule || temporarySearch || filenameRule || appliedFilters.length;
       const addFilterControl = hasVisibleFilterCondition
         ? `<button class="rule-icon-button${addActive}" data-open-add title="添加筛选条件（⇧⌘F）" aria-label="添加筛选条件（⇧⌘F）"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M7.5 9h9M9 12h6M10.5 15h3"></path></svg></button>`
         : `<button class="add-chip${addActive}" data-open-add title="添加筛选条件（⇧⌘F）">添加筛选条件</button>`;
@@ -1115,9 +1130,11 @@
         ${pieces.join("")}
         ${addFilterControl}
         <span class="rule-divider"></span>
-        ${hasCustomSort
-          ? `<span class="summary-condition"><button class="summary-chip${sortActive}" data-edit-sort>排序：${sortNames[sortKey]} · ${sortDirectionCopy()[sortDirection]}</button><button class="summary-remove" data-remove-sort aria-label="恢复默认排序">×</button></span>`
-          : `<button class="add-chip${sortActive}" data-edit-sort title="添加排序">添加排序</button>`}
+        ${currentView === "recent"
+          ? '<span class="scope-summary" title="“最近导入”的系统排序，无法修改">系统排序：加入时间 · 由新到旧</span>'
+          : hasCustomSort
+            ? `<span class="summary-condition"><button class="summary-chip${sortActive}" data-edit-sort>排序：${sortNames[sortKey]} · ${sortDirectionCopy()[sortDirection]}</button><button class="summary-remove" data-remove-sort aria-label="恢复默认排序">×</button></span>`
+            : `<button class="add-chip${sortActive}" data-edit-sort title="添加排序">添加排序</button>`}
         <span class="bar-spacer"></span>
         ${actions}
       `;
@@ -1307,9 +1324,14 @@
 
     function renderGrid() {
       const items = visibleVideos();
-      if (!items.some(video => video.id === selectedID)) selectedID = items[0]?.id ?? null;
+      if (resetBrowsingStateOnRender) {
+        selectedID = null;
+      } else if (selectedID !== null && !items.some(video => video.id === selectedID)) {
+        selectedID = items[0]?.id ?? null;
+      }
       const titles = {
         all: "所有视频",
+        untagged: "未打标签",
         recent: "最近导入",
         tag: currentScopeTag ?? "标签",
         smart: savedRule?.name ?? "智能分类"
@@ -1328,6 +1350,10 @@
         </button>
       `).join("");
       emptyState.hidden = items.length !== 0;
+      if (resetBrowsingStateOnRender) {
+        gridScroll.scrollTop = 0;
+        resetBrowsingStateOnRender = false;
+      }
       videoGrid.querySelectorAll("[data-video-id]").forEach(card => {
         card.addEventListener("click", () => {
           selectedID = Number(card.dataset.videoId);
@@ -1576,6 +1602,7 @@
       pendingNavigation = null;
 
       if (target.view === "smart") {
+        resetBrowsingStateOnRender = true;
         loadSavedRule();
         return;
       }
@@ -1585,6 +1612,7 @@
       editorPopover.hidden = true;
       currentView = target.view;
       currentScopeTag = target.view === "tag" ? target.scopeTag : null;
+      resetBrowsingStateOnRender = true;
       closeFloating();
       renderGrid();
     }

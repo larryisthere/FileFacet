@@ -56,6 +56,8 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private var pendingNavigationTarget: NavigationTarget?
     private var isPresentingSmartCollectionAlert = false
     private var pendingVideoSelectionIDs: [String]?
+    private var pendingVideoRevealRequest: VideoRevealRequest?
+    private var resetBrowsingStateForNextVideoUpdate = false
     private var isPresentingSelectionAlert = false
     private var didApplyInitialLayout = false
     private var shouldApplyInitialLayout = false
@@ -93,6 +95,8 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         onCancelImport: @escaping () -> Void,
         onImportDroppedItems: @escaping ([URL]) -> Void,
         onRemoveVideos: @escaping ([String], @escaping (Bool) -> Void) -> Void,
+        onRelinkVideo: @escaping (VideoRecord) -> Void,
+        onRetryRelinkVideo: @escaping (String) -> Void,
         onUndoLastMutation: @escaping () -> Void,
         onEndVideoRemovalUndo: @escaping () -> Void,
         onOpenVideo: @escaping (VideoRecord) -> Void,
@@ -137,7 +141,9 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             onApplyTagDraft: onApplyTagDraft,
             loadTagStates: loadTagStates,
             filePath: filePath,
-            offlineSourceName: offlineSourceName
+            offlineSourceName: offlineSourceName,
+            onRelinkVideo: onRelinkVideo,
+            onRemoveVideos: onRemoveVideos
         )
         inspectorViewController = inspector
         sidebarViewController = SidebarViewController(
@@ -157,6 +163,8 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             onOpenVideo: onOpenVideo,
             onRevealVideo: onRevealVideo,
             onCopyPath: onCopyPath,
+            onRelinkVideo: onRelinkVideo,
+            onRetryRelinkVideo: onRetryRelinkVideo,
             onPreviewVideos: onPreviewVideos,
             onSelectionChanged: { [weak inspector] videos in inspector?.setSelection(videos) },
             thumbnailURL: thumbnailURL,
@@ -180,11 +188,14 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             videoGridViewController: videoGridViewController
         )
         super.init(nibName: nil, bundle: nil)
+        inspectorViewController.onVideoRemoved = { [weak self] count in
+            self?.videoGridViewController.showVideoRemovalUndo(videoCount: count)
+        }
         videoGridViewController.onSelectionChanged = { [weak self] videos in
             self?.handleVideoSelectionChange(videos)
         }
-        videoGridViewController.onViewRecentImports = { [weak self] in
-            self?.viewRecentImports()
+        videoGridViewController.onViewVideos = { [weak self] request in
+            self?.viewVideos(request)
         }
         inspectorViewController.onTagApplicationFinished = { [weak self] succeeded in
             guard succeeded else { return }
@@ -284,6 +295,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
               let inspectorSplitViewItem,
               let settingsSplitViewItem else { return }
         isShowingSettings = true
+        sidebarViewController.setPresetShortcutHintsVisible(false)
         sidebarWasCollapsedBeforeSettings = sidebarSplitViewItem.isCollapsed
         inspectorWasCollapsedBeforeSettings = inspectorSplitViewItem.isCollapsed
         removeSplitViewItem(inspectorSplitViewItem)
@@ -336,25 +348,52 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
 
     func setVideos(_ videos: [VideoRecord]) {
         visibleVideoCount = videos.count
-        videoGridViewController.setVideos(videos)
+        let resetBrowsingState = resetBrowsingStateForNextVideoUpdate
+        resetBrowsingStateForNextVideoUpdate = false
+        videoGridViewController.setVideos(videos, resetBrowsingState: resetBrowsingState)
+        if let request = pendingVideoRevealRequest,
+           videoGridViewController.selectAndRevealVideos(ids: request.videoIDs) {
+            pendingVideoRevealRequest = nil
+        }
         updateWindowTitle()
+    }
+
+    func setOperationStatus(_ status: LibraryOperationStatus?) {
+        videoGridViewController.setOperationStatus(status)
+    }
+
+    func setRelinkingVideoID(_ videoID: String?) {
+        videoGridViewController.setRelinkingVideoID(videoID)
+        inspectorViewController.setRelinkingVideoID(videoID)
     }
 
     func setSidebarFilterCounts(_ counts: SidebarFilterCounts) {
         sidebarViewController.setFilterCounts(counts)
     }
 
+    func setPresetShortcutHintsVisible(_ visible: Bool) {
+        sidebarViewController.setPresetShortcutHintsVisible(visible && isShowingSettings == false)
+    }
+
+    var canNavigateLibraryPresets: Bool {
+        isLibraryAvailable && isShowingSettings == false
+    }
+
+    func navigateToPreset(_ filter: LibraryFilter) {
+        guard canNavigateLibraryPresets else { return }
+        requestNavigation(to: .filter(filter))
+    }
+
     func setFilterFromSystem(_ filter: LibraryFilter) {
         if isSameNavigationTarget(.filter(filter)) == false {
             onEndVideoRemovalUndo()
+            resetBrowsingStateForNextVideoUpdate = true
         }
         currentBaseFilter = filter
         selectedSmartCollection = nil
-        if filter == .recent {
-            currentRule.sort = .recentlyAdded
-        }
         sidebarViewController.selectFilter(filter)
         updateContext(for: filter)
+        updateInspectorBrowsingContext()
         refreshRuleBar()
     }
 
@@ -425,6 +464,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             scopeTitle: selectedSmartCollection == nil ? currentScopeTitle : nil,
             temporarySearch: temporaryFilenameSearch,
             rule: currentRule,
+            presetSort: selectedSmartCollection == nil ? currentBaseFilter.presetSort : nil,
             tags: tags,
             smartCollection: selectedSmartCollection,
             isDirty: smartCollectionIsDirty,
@@ -438,13 +478,13 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         switch currentBaseFilter {
         case .tag, .tags, .untagged, .recent:
             return true
-        case .all, .offline:
+        case .all, .unavailable:
             return false
         }
     }
 
     private var canSaveCurrentContext: Bool {
-        selectedSmartCollection != nil || currentBaseFilter != .offline
+        selectedSmartCollection != nil || currentBaseFilter != .unavailable
     }
 
     private var currentScopeTitle: String? {
@@ -453,8 +493,14 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             tags.first(where: { $0.id == tagID })?.name
         case let .tags(tagIDs):
             String(localized: .selectionTagCount(tagIDs.count))
-        case .all, .offline, .untagged, .recent:
+        case .all:
             nil
+        case .untagged:
+            String(localized: .libraryUntagged)
+        case .recent:
+            String(localized: .libraryRecent)
+        case .unavailable:
+            String(localized: "library.unavailable", defaultValue: "Unavailable Videos")
         }
     }
 
@@ -495,15 +541,12 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         performNavigation(to: target)
     }
 
-    private func viewRecentImports() {
-        let target = NavigationTarget.filter(.recent)
+    private func viewVideos(_ request: VideoRevealRequest) {
+        guard request.videoIDs.isEmpty == false else { return }
+        pendingVideoRevealRequest = request
+        let target = NavigationTarget.filter(request.destination)
         if isSameNavigationTarget(target) {
-            onEndVideoRemovalUndo()
-            videoGridViewController.endBrowsingContextNotificationLifecycle()
-            restoreCurrentSidebarSelection()
-            currentRule.sort = .recentlyAdded
-            refreshRuleBar()
-            applyCurrentQuery()
+            performNavigation(to: target)
             return
         }
         requestNavigation(to: target)
@@ -521,6 +564,20 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private func performNavigation(to target: NavigationTarget) {
         pendingNavigationTarget = nil
         onEndVideoRemovalUndo()
+        let isPendingVideoRevealTarget: Bool
+        switch target {
+        case let .filter(filter):
+            isPendingVideoRevealTarget = pendingVideoRevealRequest?.destination == filter
+        case .smartCollection:
+            isPendingVideoRevealTarget = false
+        }
+        if isPendingVideoRevealTarget {
+            currentRule = .standard
+            setTemporaryFilenameSearch("", applyQuery: false)
+        } else {
+            pendingVideoRevealRequest = nil
+            resetBrowsingStateForNextVideoUpdate = true
+        }
         switch target {
         case let .filter(filter):
             if selectedSmartCollection != nil {
@@ -528,9 +585,6 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             }
             selectedSmartCollection = nil
             currentBaseFilter = filter
-            if filter == .recent {
-                currentRule.sort = .recentlyAdded
-            }
             sidebarViewController.selectFilter(filter)
             updateContext(for: filter)
         case let .smartCollection(collection):
@@ -541,8 +595,17 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             sidebarViewController.selectSmartCollection(id: collection.id)
             setContextTitle(collection.name, tagID: nil)
         }
+        updateInspectorBrowsingContext()
         refreshRuleBar()
         applyCurrentQuery()
+    }
+
+    private func updateInspectorBrowsingContext() {
+        inspectorViewController.setBrowsingContext(
+            selectedSmartCollection == nil && currentBaseFilter == .unavailable
+                ? .unavailable
+                : .library
+        )
     }
 
     private func restoreCurrentSidebarSelection() {
@@ -557,12 +620,15 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         switch filter {
         case .all:
             setContextTitle(String(localized: .libraryAllVideos), tagID: nil)
-        case .offline:
-            setContextTitle(String(localized: .libraryOffline), tagID: nil)
         case .untagged:
             setContextTitle(String(localized: .libraryUntagged), tagID: nil)
         case .recent:
             setContextTitle(String(localized: .libraryRecent), tagID: nil)
+        case .unavailable:
+            setContextTitle(String(
+                localized: "library.unavailable",
+                defaultValue: "Unavailable Videos"
+            ), tagID: nil)
         case let .tag(tagID):
             let title = tags.first(where: { $0.id == tagID })?.name
                 ?? String(localized: "filter.deletedTag", defaultValue: "Deleted Tag")
@@ -606,6 +672,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
                         performNavigation(to: target)
                     } else {
                         pendingNavigationTarget = nil
+                        pendingVideoRevealRequest = nil
                         restoreCurrentSidebarSelection()
                     }
                 }
@@ -615,6 +682,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
                 }
             default:
                 pendingNavigationTarget = nil
+                pendingVideoRevealRequest = nil
                 restoreCurrentSidebarSelection()
             }
         }
@@ -632,7 +700,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
                 rule.requiredConditions.append(.untagged)
             case .recent:
                 rule.requiredConditions.append(.addedWithinDays(30))
-            case .all, .offline:
+            case .all, .unavailable:
                 break
             }
         }
@@ -701,6 +769,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
                 setTemporaryFilenameSearch("", applyQuery: false)
                 sidebarViewController.selectSmartCollection(id: collection.id)
                 setContextTitle(collection.name, tagID: nil)
+                updateInspectorBrowsingContext()
                 refreshRuleBar()
                 applyCurrentQuery()
             }
@@ -773,6 +842,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
                     currentRule = .standard
                     sidebarViewController.selectFilter(.all)
                     updateContext(for: .all)
+                    updateInspectorBrowsingContext()
                     refreshRuleBar()
                     applyCurrentQuery()
                 }

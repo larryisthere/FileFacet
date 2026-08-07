@@ -61,8 +61,13 @@ struct MediaSourceInfo: Codable, Equatable, Sendable {
 struct VideoRecord: Equatable, Identifiable, Sendable {
     enum Availability: String, Sendable {
         case available
-        case missing
         case offline
+        case unavailable
+    }
+
+    enum UnavailableReason: Sendable {
+        case missingFromKnownLocation
+        case accessLost
     }
 
     enum ProcessingStatus: String, Sendable {
@@ -87,7 +92,10 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
     let thumbnailStatus: ProcessingStatus
     let firstIndexedAt: Date
     let availability: Availability
+    let unavailableReason: UnavailableReason?
+    let invalidatedAt: Date?
     let mediaSourceInfo: MediaSourceInfo?
+    let contentFingerprint: Data?
 
     init(
         id: String,
@@ -106,7 +114,10 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
         thumbnailStatus: ProcessingStatus,
         firstIndexedAt: Date,
         availability: Availability,
-        mediaSourceInfo: MediaSourceInfo? = nil
+        unavailableReason: UnavailableReason? = nil,
+        invalidatedAt: Date? = nil,
+        mediaSourceInfo: MediaSourceInfo? = nil,
+        contentFingerprint: Data? = nil
     ) {
         self.id = id
         self.libraryID = libraryID
@@ -124,10 +135,16 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
         self.thumbnailStatus = thumbnailStatus
         self.firstIndexedAt = firstIndexedAt
         self.availability = availability
+        self.unavailableReason = unavailableReason
+        self.invalidatedAt = invalidatedAt
         self.mediaSourceInfo = mediaSourceInfo
+        self.contentFingerprint = contentFingerprint
     }
 
-    func withAvailability(_ availability: Availability) -> VideoRecord {
+    func withAvailability(
+        _ availability: Availability,
+        unavailableReason: UnavailableReason? = nil
+    ) -> VideoRecord {
         VideoRecord(
             id: id,
             libraryID: libraryID,
@@ -145,7 +162,10 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
             thumbnailStatus: thumbnailStatus,
             firstIndexedAt: firstIndexedAt,
             availability: availability,
-            mediaSourceInfo: mediaSourceInfo
+            unavailableReason: unavailableReason,
+            invalidatedAt: invalidatedAt,
+            mediaSourceInfo: mediaSourceInfo,
+            contentFingerprint: contentFingerprint
         )
     }
 }
@@ -156,6 +176,7 @@ struct RemovedVideoRecord: Equatable, Sendable {
     let relativePath: String
     let volumeIdentifier: Data?
     let fileResourceIdentifier: Data?
+    let contentFingerprint: Data?
     let filename: String
     let fileExtension: String
     let fileSize: Int64
@@ -173,6 +194,7 @@ struct RemovedVideoRecord: Equatable, Sendable {
     let lastSeenScanID: String?
     let finderTagsImportedAt: Date?
     let mediaSourceInfo: MediaSourceInfo?
+    let invalidatedAt: Date?
 
     init(
         id: String,
@@ -180,6 +202,7 @@ struct RemovedVideoRecord: Equatable, Sendable {
         relativePath: String,
         volumeIdentifier: Data?,
         fileResourceIdentifier: Data?,
+        contentFingerprint: Data? = nil,
         filename: String,
         fileExtension: String,
         fileSize: Int64,
@@ -196,13 +219,15 @@ struct RemovedVideoRecord: Equatable, Sendable {
         updatedAt: Date,
         lastSeenScanID: String?,
         finderTagsImportedAt: Date?,
-        mediaSourceInfo: MediaSourceInfo? = nil
+        mediaSourceInfo: MediaSourceInfo? = nil,
+        invalidatedAt: Date? = nil
     ) {
         self.id = id
         self.libraryID = libraryID
         self.relativePath = relativePath
         self.volumeIdentifier = volumeIdentifier
         self.fileResourceIdentifier = fileResourceIdentifier
+        self.contentFingerprint = contentFingerprint
         self.filename = filename
         self.fileExtension = fileExtension
         self.fileSize = fileSize
@@ -220,6 +245,7 @@ struct RemovedVideoRecord: Equatable, Sendable {
         self.lastSeenScanID = lastSeenScanID
         self.finderTagsImportedAt = finderTagsImportedAt
         self.mediaSourceInfo = mediaSourceInfo
+        self.invalidatedAt = invalidatedAt
     }
 }
 
@@ -230,6 +256,7 @@ struct RemovedVideoLocation: Equatable, Sendable {
     let lastVerifiedAt: Date
     let isAvailable: Bool
     let fallbackPathKey: Data?
+    let lastKnownPath: String?
 }
 
 struct RemovedVideoTagRelation: Equatable, Sendable {

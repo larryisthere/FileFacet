@@ -1,5 +1,16 @@
 import AppKit
 
+struct VideoRevealRequest: Equatable, Sendable {
+    let videoIDs: [String]
+    let destination: LibraryFilter
+
+    init(videoIDs: [String], destination: LibraryFilter) {
+        var seen = Set<String>()
+        self.videoIDs = videoIDs.filter { seen.insert($0).inserted }
+        self.destination = destination
+    }
+}
+
 @MainActor
 final class VideoGridViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegate {
     private static let itemIdentifier = NSUserInterfaceItemIdentifier("VideoCollectionViewItem")
@@ -15,6 +26,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     private let onOpenVideo: (VideoRecord) -> Void
     private let onRevealVideo: (VideoRecord) -> Void
     private let onCopyPath: (VideoRecord) -> Void
+    private let onRelinkVideo: (VideoRecord) -> Void
+    private let onRetryRelinkVideo: (String) -> Void
     private let onPreviewVideos: ([VideoRecord]) -> Void
     var onSelectionChanged: ([VideoRecord]) -> Void
     private let thumbnailURL: (VideoRecord) -> URL?
@@ -24,10 +37,13 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     private let onRemoveVideos: ([String], @escaping (Bool) -> Void) -> Void
     private let onUndoLastMutation: () -> Void
     private let onDismissNotification: () -> Void
-    var onViewRecentImports: (() -> Void)?
+    var onViewVideos: ((VideoRevealRequest) -> Void)?
     private let importStatusView = ImportStatusView()
     private var importStatusHeightConstraint: NSLayoutConstraint?
     private var importState: LibraryImportState = .idle
+    private var operationStatus: LibraryOperationStatus?
+    private var relinkingVideoID: String?
+    private var relinkBrowsingContextRevision: Int?
     private var browsingContextRevision = 0
     private var videos: [VideoRecord] = []
     private var selectionAnchorVideoID: String?
@@ -39,6 +55,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         onOpenVideo: @escaping (VideoRecord) -> Void,
         onRevealVideo: @escaping (VideoRecord) -> Void,
         onCopyPath: @escaping (VideoRecord) -> Void,
+        onRelinkVideo: @escaping (VideoRecord) -> Void,
+        onRetryRelinkVideo: @escaping (String) -> Void,
         onPreviewVideos: @escaping ([VideoRecord]) -> Void,
         onSelectionChanged: @escaping ([VideoRecord]) -> Void,
         thumbnailURL: @escaping (VideoRecord) -> URL?,
@@ -52,6 +70,8 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         self.onOpenVideo = onOpenVideo
         self.onRevealVideo = onRevealVideo
         self.onCopyPath = onCopyPath
+        self.onRelinkVideo = onRelinkVideo
+        self.onRetryRelinkVideo = onRetryRelinkVideo
         self.onPreviewVideos = onPreviewVideos
         self.onSelectionChanged = onSelectionChanged
         self.thumbnailURL = thumbnailURL
@@ -135,9 +155,14 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         importStatusView.translatesAutoresizingMaskIntoConstraints = false
         importStatusView.onCancel = { [weak self] in self?.onCancelImport() }
         importStatusView.onDismiss = { [weak self] in self?.dismissNotification() }
-        importStatusView.onView = { [weak self] in self?.onViewRecentImports?() }
+        importStatusView.onView = { [weak self] in self?.viewVideosForCurrentStatus() }
         importStatusView.onUndo = { [weak self] in
             self?.onUndoLastMutation()
+        }
+        importStatusView.onRetry = { [weak self] in
+            guard let self,
+                  case let .relinkFailed(videoID, _) = operationStatus else { return }
+            onRetryRelinkVideo(videoID)
         }
         container.addSubview(scrollView)
         container.addSubview(emptyState)
@@ -165,6 +190,11 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     func setImportState(_ state: LibraryImportState) {
         loadViewIfNeeded()
         importState = state
+        guard operationStatus == nil else { return }
+        renderImportState(state)
+    }
+
+    private func renderImportState(_ state: LibraryImportState) {
         switch state {
         case .idle:
             importStatusView.isHidden = true
@@ -173,8 +203,11 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
             importStatusView.configureImporting(title: title, detail: detail, progress: progress)
             showImportStatus()
         case let .completed(summary):
-            let foundNoVideos = hasViewableImportResult(summary) == false
-            if foundNoVideos {
+            let hasReportedResult = summary.addedCount > 0
+                || summary.existingCount > 0
+                || summary.failedVideoCount > 0
+                || summary.failedInputCount > 0
+            if hasReportedResult == false {
                 let checkedDescription = summary.checkedFolderCount == summary.checkedInputCount
                     ? String(localized: .importCheckedFolderCount(summary.checkedInputCount))
                     : String(localized: .importCheckedItemCount(summary.checkedInputCount))
@@ -198,10 +231,12 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
                 if summary.failedInputCount > 0 {
                     resultParts.append(String(localized: .importResultFailedInput(summary.failedInputCount)))
                 }
-                importStatusView.configureCompleted(
-                    title: summary.title,
-                    detail: AppLocalization.list(resultParts)
-                )
+                let resultDetail = AppLocalization.list(resultParts)
+                if hasViewableImportResult(summary) {
+                    importStatusView.configureCompleted(title: summary.title, detail: resultDetail)
+                } else {
+                    importStatusView.configureFinished(title: summary.title, detail: resultDetail)
+                }
             }
             showImportStatus()
         case .cancelled:
@@ -219,6 +254,70 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         }
     }
 
+    func setOperationStatus(_ status: LibraryOperationStatus?) {
+        loadViewIfNeeded()
+        if status != nil,
+           relinkBrowsingContextRevision != browsingContextRevision {
+            return
+        }
+        operationStatus = status
+        guard let status else {
+            renderImportState(importState)
+            return
+        }
+        importState = .idle
+        switch status {
+        case let .relinkSucceeded(filename):
+            importStatusView.configurePassive(
+                title: String(
+                    localized: "unavailable.relink.succeeded",
+                    defaultValue: "Relinked"
+                ),
+                detail: String(
+                    format: String(
+                        localized: "unavailable.relink.succeeded.detail",
+                        defaultValue: "“%@” is accessible again"
+                    ),
+                    filename
+                )
+            )
+        case .relinkExisting:
+            importStatusView.configureViewExisting(
+                title: String(
+                    localized: "unavailable.relink.existing.title",
+                    defaultValue: "The selected file already exists in FileFacet"
+                ),
+                detail: String(
+                    localized: "unavailable.relink.existing.detail",
+                    defaultValue: "The current unavailable record was not changed."
+                ),
+                actionTitle: String(
+                    localized: "unavailable.relink.existing.view",
+                    defaultValue: "View Existing Video"
+                )
+            )
+        case let .relinkFailed(_, message):
+            importStatusView.configureRetry(
+                title: String(
+                    localized: "unavailable.relink.failed",
+                    defaultValue: "Could Not Relink Original"
+                ),
+                detail: message,
+                actionTitle: String(localized: "action.retry", defaultValue: "Retry")
+            )
+        }
+        showImportStatus()
+    }
+
+    func setRelinkingVideoID(_ videoID: String?) {
+        relinkingVideoID = videoID
+        if videoID != nil {
+            relinkBrowsingContextRevision = browsingContextRevision
+        } else {
+            relinkBrowsingContextRevision = nil
+        }
+    }
+
     private func clearFinishedImportState() {
         guard case .importing = importState else {
             setImportState(.idle)
@@ -228,16 +327,30 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
 
     func endBrowsingContextNotificationLifecycle() {
         browsingContextRevision &+= 1
+        operationStatus = nil
         clearFinishedImportState()
     }
 
     private func dismissNotification() {
+        if operationStatus != nil {
+            operationStatus = nil
+            renderImportState(importState)
+            return
+        }
         setImportState(.idle)
         onDismissNotification()
     }
 
     func offerVideoRemovalUndoForCurrentStatus() {
         importStatusView.configureUndoActionOnly()
+    }
+
+    func showVideoRemovalUndo(videoCount: Int) {
+        importStatusView.configureUndo(
+            title: String(localized: .videoResultRemoved(videoCount)),
+            detail: String(localized: .importResultOriginalRemains(videoCount))
+        )
+        showImportStatus()
     }
 
     func removeVideoRemovalUndoOffer() {
@@ -252,10 +365,30 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     }
 
     private func hasViewableImportResult(_ summary: LibraryImportSummary) -> Bool {
-        summary.addedCount > 0
-            || summary.existingCount > 0
-            || summary.failedVideoCount > 0
-            || summary.failedInputCount > 0
+        summary.addedVideoIDs.isEmpty == false || summary.existingVideoIDs.isEmpty == false
+    }
+
+    private func viewVideosForCurrentStatus() {
+        let request: VideoRevealRequest?
+        if case let .relinkExisting(existingVideoID, isUnavailable) = operationStatus {
+            request = VideoRevealRequest(
+                videoIDs: [existingVideoID],
+                destination: isUnavailable ? .unavailable : .all
+            )
+        } else if case let .completed(summary) = importState {
+            if summary.existingVideoIDs.isEmpty {
+                request = VideoRevealRequest(videoIDs: summary.addedVideoIDs, destination: .recent)
+            } else {
+                request = VideoRevealRequest(
+                    videoIDs: summary.addedVideoIDs + summary.existingVideoIDs,
+                    destination: .all
+                )
+            }
+        } else {
+            request = nil
+        }
+        guard let request, request.videoIDs.isEmpty == false else { return }
+        onViewVideos?(request)
     }
 
     private func showImportStatus() {
@@ -263,15 +396,19 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         importStatusHeightConstraint?.constant = 52
     }
 
-    func setVideos(_ videos: [VideoRecord]) {
+    func setVideos(_ videos: [VideoRecord], resetBrowsingState: Bool = false) {
         loadViewIfNeeded()
-        let selectedVideoIDs = Set(
-            collectionView.selectionIndexPaths.compactMap { indexPath in
-                self.videos.indices.contains(indexPath.item) ? self.videos[indexPath.item].id : nil
-            }
-        )
+        let selectedVideoIDs: Set<String> = resetBrowsingState
+            ? []
+            : Set(
+                collectionView.selectionIndexPaths.compactMap { indexPath in
+                    self.videos.indices.contains(indexPath.item) ? self.videos[indexPath.item].id : nil
+                }
+            )
         self.videos = videos
-        if let selectionAnchorVideoID,
+        if resetBrowsingState {
+            selectionAnchorVideoID = nil
+        } else if let selectionAnchorVideoID,
            videos.contains(where: { $0.id == selectionAnchorVideoID }) == false {
             self.selectionAnchorVideoID = nil
         }
@@ -281,6 +418,10 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
                 selectedVideoIDs.contains(videos[index].id) ? IndexPath(item: index, section: 0) : nil
             }
         )
+        if resetBrowsingState {
+            scrollView.contentView.scroll(to: .zero)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
         scrollView.hasVerticalScroller = videos.isEmpty == false
         updateEmptyState()
         notifySelectionChanged()
@@ -308,6 +449,24 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
             }
         )
         if notify { notifySelectionChanged() }
+    }
+
+    @discardableResult
+    func selectAndRevealVideos(ids videoIDs: [String]) -> Bool {
+        loadViewIfNeeded()
+        var seen = Set<String>()
+        let uniqueVideoIDs = videoIDs.filter { seen.insert($0).inserted }
+        let indexes = uniqueVideoIDs.compactMap { videoID in
+            videos.firstIndex(where: { $0.id == videoID })
+        }
+        guard uniqueVideoIDs.isEmpty == false, indexes.count == uniqueVideoIDs.count else { return false }
+        let indexPaths = Set(indexes.map { IndexPath(item: $0, section: 0) })
+        let firstIndexPath = IndexPath(item: indexes[0], section: 0)
+        selectionAnchorVideoID = uniqueVideoIDs[0]
+        collectionView.selectionIndexPaths = indexPaths
+        collectionView.scrollToItems(at: [firstIndexPath], scrollPosition: .centeredVertically)
+        notifySelectionChanged()
+        return true
     }
 
     func showRestoredVideos(_ videoIDs: [String]) {
@@ -417,6 +576,11 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         }
 
         let video = videos[indexPath.item]
+        let selected = selectedVideos()
+        if selected.isEmpty == false,
+           selected.allSatisfy({ $0.availability != .available }) {
+            return unavailableContextMenu(for: selected)
+        }
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.addItem(makeContextMenuItem(
@@ -450,17 +614,89 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         return menu
     }
 
+    private func unavailableContextMenu(for selected: [VideoRecord]) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        if selected.count == 1,
+           let video = selected.first,
+           video.availability == .unavailable {
+            let relinkItem = NSMenuItem(
+                title: String(
+                    localized: "unavailable.relink.action",
+                    defaultValue: "Relink Original…"
+                ),
+                action: #selector(relinkVideoFromContextMenu(_:)),
+                keyEquivalent: ""
+            )
+            relinkItem.target = self
+            relinkItem.representedObject = video.id
+            relinkItem.isEnabled = relinkingVideoID != video.id
+            menu.addItem(relinkItem)
+            menu.addItem(.separator())
+        }
+
+        let removeTitle = selected.count > 1
+            ? String(
+                format: String(
+                    localized: "unavailable.remove.action.multiple",
+                    defaultValue: "Remove %lld Videos from FileFacet…"
+                ),
+                selected.count
+            )
+            : String(
+                localized: "unavailable.remove.action",
+                defaultValue: "Remove from FileFacet…"
+            )
+        let removeItem = NSMenuItem(
+            title: removeTitle,
+            action: #selector(removeVideosFromContextMenu(_:)),
+            keyEquivalent: "\u{8}"
+        )
+        removeItem.keyEquivalentModifierMask = [.command]
+        removeItem.target = self
+        removeItem.isEnabled = true
+        menu.addItem(removeItem)
+        return menu
+    }
+
     private func requestRemoveSelectedVideos() {
         let selected = selectedVideos()
         guard selected.isEmpty == false, let window = view.window else { return }
+        let isUnavailableSelection = selected.allSatisfy { $0.availability != .available }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = selected.count > 1
-            ? String(localized: .videoRemoveTitleMultiple(selected.count))
-            : String(localized: .videoRemoveTitleSingle)
-        alert.informativeText = selected.count > 1
-            ? String(localized: .videoRemoveDetailMultiple)
-            : String(localized: .videoRemoveDetailSingle)
+        if isUnavailableSelection {
+            if selected.count > 1 {
+                alert.messageText = String(
+                    format: String(
+                        localized: "unavailable.remove.title.multiple",
+                        defaultValue: "Remove %lld records from FileFacet?"
+                    ),
+                    selected.count
+                )
+                alert.informativeText = String(
+                    localized: "unavailable.remove.detail.multiple",
+                    defaultValue: "The original tags and media information for these records will be deleted from FileFacet. This will not affect original files that may exist on your Mac."
+                )
+            } else {
+                alert.messageText = String(
+                    localized: "unavailable.remove.title",
+                    defaultValue: "Remove this record from FileFacet?"
+                )
+                alert.informativeText = String(
+                    localized: "unavailable.remove.detail",
+                    defaultValue: "The original tags and media information will be deleted from FileFacet. This will not affect the original file that may exist on your Mac."
+                )
+            }
+        } else {
+            alert.messageText = selected.count > 1
+                ? String(localized: .videoRemoveTitleMultiple(selected.count))
+                : String(localized: .videoRemoveTitleSingle)
+            alert.informativeText = selected.count > 1
+                ? String(localized: .videoRemoveDetailMultiple)
+                : String(localized: .videoRemoveDetailSingle)
+        }
         alert.addButton(withTitle: String(localized: .actionRemove))
         alert.addButton(withTitle: String(localized: .actionCancel))
         alert.buttons.first?.hasDestructiveAction = true
@@ -474,11 +710,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
                     onDismissNotification()
                     return
                 }
-                self.importStatusView.configureUndo(
-                    title: String(localized: .videoResultRemoved(videoIDs.count)),
-                    detail: String(localized: .importResultOriginalRemains(videoIDs.count))
-                )
-                self.showImportStatus()
+                self.showVideoRemovalUndo(videoCount: videoIDs.count)
             }
         }
     }
@@ -544,6 +776,12 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         if let video = video(from: sender) { onCopyPath(video) }
     }
 
+    @objc private func relinkVideoFromContextMenu(_ sender: NSMenuItem) {
+        guard let video = video(from: sender),
+              video.availability == .unavailable else { return }
+        onRelinkVideo(video)
+    }
+
     @objc private func removeVideosFromContextMenu(_ sender: NSMenuItem) {
         requestRemoveSelectedVideos()
     }
@@ -585,12 +823,14 @@ private final class ImportStatusView: NSView {
         case dismiss
         case view
         case undo
+        case retry
     }
 
     var onCancel: (() -> Void)?
     var onDismiss: (() -> Void)?
     var onView: (() -> Void)?
     var onUndo: (() -> Void)?
+    var onRetry: (() -> Void)?
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
@@ -697,7 +937,17 @@ private final class ImportStatusView: NSView {
         }
         actionButton.title = String(localized: .actionCancel)
         actionMode = .cancel
+        actionButton.isHidden = false
         closeButton.isHidden = true
+    }
+
+    func configurePassive(title: String, detail: String) {
+        titleLabel.stringValue = title
+        detailLabel.stringValue = detail
+        progressIndicator.stopAnimation(nil)
+        progressIndicator.isHidden = true
+        actionButton.isHidden = true
+        closeButton.isHidden = false
     }
 
     func configureFinished(title: String, detail: String) {
@@ -707,6 +957,7 @@ private final class ImportStatusView: NSView {
         progressIndicator.isHidden = true
         actionButton.title = String(localized: .actionDone)
         actionMode = .dismiss
+        actionButton.isHidden = false
         closeButton.isHidden = false
     }
 
@@ -717,6 +968,7 @@ private final class ImportStatusView: NSView {
         progressIndicator.isHidden = true
         actionButton.title = String(localized: .actionView)
         actionMode = .view
+        actionButton.isHidden = false
         closeButton.isHidden = false
     }
 
@@ -727,6 +979,31 @@ private final class ImportStatusView: NSView {
         progressIndicator.isHidden = true
         actionButton.title = String(localized: .actionUndo)
         actionMode = .undo
+        actionButton.isHidden = false
+        closeButton.isHidden = false
+    }
+
+    func configureRetry(title: String, detail: String, actionTitle: String) {
+        configureAction(title: title, detail: detail, actionTitle: actionTitle, mode: .retry)
+    }
+
+    func configureViewExisting(title: String, detail: String, actionTitle: String) {
+        configureAction(title: title, detail: detail, actionTitle: actionTitle, mode: .view)
+    }
+
+    private func configureAction(
+        title: String,
+        detail: String,
+        actionTitle: String,
+        mode: ActionMode
+    ) {
+        titleLabel.stringValue = title
+        detailLabel.stringValue = detail
+        progressIndicator.stopAnimation(nil)
+        progressIndicator.isHidden = true
+        actionButton.title = actionTitle
+        actionMode = mode
+        actionButton.isHidden = false
         closeButton.isHidden = false
     }
 
@@ -757,6 +1034,7 @@ private final class ImportStatusView: NSView {
         case .dismiss: onDismiss?()
         case .view: onView?()
         case .undo: onUndo?()
+        case .retry: onRetry?()
         }
     }
 
@@ -932,7 +1210,7 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
     func configure(with video: VideoRecord, thumbnailURL: URL?) {
         loadViewIfNeeded()
         thumbnailView.image = thumbnailURL.flatMap(NSImage.init(contentsOf:))
-        thumbnailView.isOffline = video.availability == .offline
+        thumbnailView.availability = video.availability
         filenameLabel.stringValue = video.filename
         let duration = video.duration.map { formattedDuration($0) } ?? video.fileExtension.uppercased()
         detailLabel.stringValue = duration
@@ -971,10 +1249,22 @@ private final class VideoThumbnailView: NSView {
         }
     }
 
-    var isOffline = false {
+    var availability: VideoRecord.Availability = .available {
         didSet {
-            offlineOverlayView.isHidden = isOffline == false
-            offlineBadgeView.isHidden = isOffline == false
+            let isUnavailable = availability != .available
+            offlineOverlayView.isHidden = isUnavailable == false
+            offlineBadgeView.isHidden = isUnavailable == false
+            switch availability {
+            case .available, .offline:
+                offlineBadgeLabel.stringValue = String(localized: .videoOfflineBadge)
+                offlineBadgeView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.72).cgColor
+            case .unavailable:
+                offlineBadgeLabel.stringValue = String(
+                    localized: "video.unavailableBadge",
+                    defaultValue: "Unavailable"
+                )
+                offlineBadgeView.layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.84).cgColor
+            }
         }
     }
 

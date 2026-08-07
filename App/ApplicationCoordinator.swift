@@ -27,6 +27,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     private let folderImportMethodPresenter = FolderImportMethodPresenter()
     private var privacyShield: NSView?
     private var idleTimer: Timer?
+    private var modifierFlagsMonitor: Any?
 
     private lazy var libraryViewController = LibrarySplitViewController(
         onCancelImport: { [weak self] in self?.libraryAccessCoordinator?.cancelImport() },
@@ -38,6 +39,12 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
             }
             coordinator.removeVideos(ids: videoIDs, completion: completion)
         },
+        onRelinkVideo: { [weak self] video in
+            self?.libraryAccessCoordinator?.relinkVideo(video)
+        },
+        onRetryRelinkVideo: { [weak self] videoID in
+            self?.libraryAccessCoordinator?.retryRelinkVideo(id: videoID)
+        },
         onUndoLastMutation: { [weak self] in self?.libraryAccessCoordinator?.undoLastMutation() },
         onEndVideoRemovalUndo: { [weak self] in
             self?.libraryAccessCoordinator?.discardVideoRemovalUndo()
@@ -47,7 +54,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         onCopyPath: { [weak self] video in self?.copyPath(video) },
         onPreviewVideos: { [weak self] videos in self?.previewVideos(videos) },
         thumbnailURL: { [weak self] video in self?.libraryAccessCoordinator?.thumbnailURL(for: video) },
-        filePath: { [weak self] video in self?.libraryAccessCoordinator?.fileURL(for: video)?.path },
+        filePath: { [weak self] video in self?.libraryAccessCoordinator?.displayPath(for: video) },
         offlineSourceName: { [weak self] video in
             self?.libraryAccessCoordinator?.offlineSourceName(for: video)
         },
@@ -208,8 +215,15 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         libraryAccessCoordinator?.onOperationError = { [weak self] message in
             self?.libraryViewController.setOperationError(message)
         }
+        libraryAccessCoordinator?.onOperationStatusChanged = { [weak self] status in
+            self?.libraryViewController.setOperationStatus(status)
+        }
+        libraryAccessCoordinator?.onRelinkingVideoChanged = { [weak self] videoID in
+            self?.libraryViewController.setRelinkingVideoID(videoID)
+        }
 
         installMainMenu()
+        installModifierFlagsMonitor()
         render(lockState: lockCoordinator.state)
         windowController.window?.center()
         windowController.window?.makeKeyAndOrderFront(nil)
@@ -222,6 +236,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         case .unlocked:
             windowController.setRootViewController(libraryViewController)
         case .locked, .authenticating, .failed:
+            libraryViewController.setPresetShortcutHintsVisible(false)
             quickLookCoordinator.close()
             let view = LockView(
                 state: lockState,
@@ -237,6 +252,12 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
             selector: #selector(applicationWillResignActive),
             name: NSApplication.willResignActiveNotification,
             object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidResignKey),
+            name: NSWindow.didResignKeyNotification,
+            object: windowController.window
         )
         NotificationCenter.default.addObserver(
             self,
@@ -271,6 +292,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     }
 
     @objc private func applicationWillResignActive() {
+        libraryViewController.setPresetShortcutHintsVisible(false)
         guard lockCoordinator.isAuthenticationEnabled else { return }
         installPrivacyShield()
         if preferencesStore.idleLockInterval == .immediately,
@@ -282,6 +304,23 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     @objc private func applicationDidBecomeActive() {
         render(lockState: lockCoordinator.state)
         removePrivacyShield()
+    }
+
+    @objc private func windowDidResignKey() {
+        libraryViewController.setPresetShortcutHintsVisible(false)
+    }
+
+    private func installModifierFlagsMonitor() {
+        guard modifierFlagsMonitor == nil else { return }
+        modifierFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) {
+            [weak self] event in
+            guard let self else { return event }
+            let commandIsPressed = event.modifierFlags
+                .intersection(.deviceIndependentFlagsMask)
+                .contains(.command)
+            libraryViewController.setPresetShortcutHintsVisible(commandIsPressed)
+            return event
+        }
     }
 
     @objc private func workspaceRequiresLock() {
@@ -391,6 +430,22 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         libraryViewController.presentAddFilterMenu()
     }
 
+    @objc private func showAllVideos() {
+        libraryViewController.navigateToPreset(.all)
+    }
+
+    @objc private func showUntaggedVideos() {
+        libraryViewController.navigateToPreset(.untagged)
+    }
+
+    @objc private func showRecentVideos() {
+        libraryViewController.navigateToPreset(.recent)
+    }
+
+    @objc private func showUnavailableVideos() {
+        libraryViewController.navigateToPreset(.unavailable)
+    }
+
     private func openVideo(_ video: VideoRecord) {
         guard let url = libraryAccessCoordinator?.fileURL(for: video) else { return }
         NSWorkspace.shared.open(url)
@@ -430,6 +485,14 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
             return lockCoordinator.state == .unlocked
                 && databaseStore != nil
                 && libraryViewController.canUseRuleCommands
+        }
+        if menuItem.action == #selector(showAllVideos)
+            || menuItem.action == #selector(showUntaggedVideos)
+            || menuItem.action == #selector(showRecentVideos)
+            || menuItem.action == #selector(showUnavailableVideos) {
+            return lockCoordinator.state == .unlocked
+                && databaseStore != nil
+                && libraryViewController.canNavigateLibraryPresets
         }
         if menuItem.action == #selector(showSettings) || menuItem.action == #selector(showAbout) {
             return lockCoordinator.state == .unlocked
@@ -531,6 +594,24 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         editMenu.addItem(addFilterItem)
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
+
+        let viewMenuItem = NSMenuItem()
+        let viewMenu = NSMenu(title: String(localized: "menu.view", defaultValue: "View"))
+        let presetItems: [(String, Selector, String)] = [
+            (String(localized: .libraryAllVideos), #selector(showAllVideos), "1"),
+            (String(localized: .libraryUntagged), #selector(showUntaggedVideos), "2"),
+            (String(localized: .libraryRecent), #selector(showRecentVideos), "3"),
+            (String(localized: "library.unavailable", defaultValue: "Unavailable Videos"),
+             #selector(showUnavailableVideos), "4"),
+        ]
+        for (title, action, keyEquivalent) in presetItems {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
+            item.keyEquivalentModifierMask = [.command]
+            item.target = self
+            viewMenu.addItem(item)
+        }
+        viewMenuItem.submenu = viewMenu
+        mainMenu.addItem(viewMenuItem)
 
         let windowMenuItem = NSMenuItem()
         let windowMenu = NSMenu(title: String(localized: .menuWindow))

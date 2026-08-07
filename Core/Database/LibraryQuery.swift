@@ -44,6 +44,15 @@ struct LibraryVideoSort: Codable, Equatable, Sendable {
     static let recentlyAdded = LibraryVideoSort(key: .added, direction: .descending)
 }
 
+extension LibraryFilter {
+    var presetSort: LibraryVideoSort? {
+        switch self {
+        case .recent: .recentlyAdded
+        case .all, .untagged, .unavailable, .tag, .tags: nil
+        }
+    }
+}
+
 struct LibraryQueryRule: Codable, Equatable, Sendable {
     var requiredTagIDs: [String]
     var requiredConditions: [LibraryFilterCondition]

@@ -5,8 +5,19 @@ struct InspectorTagDraftSnapshot {
     let creations: [TagCreationDraft]
 }
 
+enum InspectorBrowsingContext: Equatable {
+    case library
+    case unavailable
+}
+
 @MainActor
 final class InspectorViewController: NSViewController {
+    private enum Mode {
+        case tags
+        case resolve
+        case details
+    }
+
     private enum DetailSection: Int, CaseIterable {
         case file
         case video
@@ -64,6 +75,8 @@ final class InspectorViewController: NSViewController {
     private let loadTagStates: ([String], @escaping ([String: TagAssignmentState]) -> Void) -> Void
     private let filePath: (VideoRecord) -> String?
     private let offlineSourceName: (VideoRecord) -> String?
+    private let onRelinkVideo: (VideoRecord) -> Void
+    private let onRemoveVideos: ([String], @escaping (Bool) -> Void) -> Void
     private var selectedVideo: VideoRecord?
     private var selectedVideos: [VideoRecord] = []
     private var tags: [TagRecord] = []
@@ -77,7 +90,10 @@ final class InspectorViewController: NSViewController {
     private var tagSearchText = ""
     private var newTagPopover: NSPopover?
     private var collapsedDetailSections: Set<DetailSection> = []
+    private var browsingContext: InspectorBrowsingContext = .library
+    private var relinkingVideoID: String?
     var onTagApplicationFinished: ((Bool) -> Void)?
+    var onVideoRemoved: ((Int) -> Void)?
     var selectedVideoIDs: [String] { selectedVideos.map(\.id) }
     var hasPendingTagChanges: Bool { pendingTagAssignments.isEmpty == false }
 
@@ -85,12 +101,16 @@ final class InspectorViewController: NSViewController {
         onApplyTagDraft: @escaping ([TagCreationDraft], [String: Bool], [String], @escaping (Bool) -> Void) -> Void,
         loadTagStates: @escaping ([String], @escaping ([String: TagAssignmentState]) -> Void) -> Void,
         filePath: @escaping (VideoRecord) -> String?,
-        offlineSourceName: @escaping (VideoRecord) -> String?
+        offlineSourceName: @escaping (VideoRecord) -> String?,
+        onRelinkVideo: @escaping (VideoRecord) -> Void,
+        onRemoveVideos: @escaping ([String], @escaping (Bool) -> Void) -> Void
     ) {
         self.onApplyTagDraft = onApplyTagDraft
         self.loadTagStates = loadTagStates
         self.filePath = filePath
         self.offlineSourceName = offlineSourceName
+        self.onRelinkVideo = onRelinkVideo
+        self.onRemoveVideos = onRemoveVideos
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -159,6 +179,27 @@ final class InspectorViewController: NSViewController {
         scheduleInitialTagStateLoadIfNeeded()
     }
 
+    func setBrowsingContext(_ context: InspectorBrowsingContext) {
+        guard browsingContext != context else { return }
+        browsingContext = context
+        closeNewTagPopover()
+        sectionControl.setLabel(
+            context == .unavailable
+                ? String(localized: "inspector.resolve", defaultValue: "Resolve")
+                : String(localized: .inspectorTags),
+            forSegment: 0
+        )
+        sectionControl.selectedSegment = 0
+        renderSelection()
+        scheduleInitialTagStateLoadIfNeeded()
+    }
+
+    func setRelinkingVideoID(_ videoID: String?) {
+        guard relinkingVideoID != videoID else { return }
+        relinkingVideoID = videoID
+        renderSelection()
+    }
+
     func setTags(_ tags: [TagRecord]) {
         self.tags = tags
         renderSelection()
@@ -167,7 +208,7 @@ final class InspectorViewController: NSViewController {
 
     func refreshTagAssignments() {
         let videoIDs = selectedVideos.map(\.id)
-        guard sectionControl.selectedSegment == 0,
+        guard mode == .tags,
               videoIDs.isEmpty == false,
               hasPendingTagChanges == false,
               isApplyingTagChanges == false else { return }
@@ -202,14 +243,20 @@ final class InspectorViewController: NSViewController {
             updateActionArea()
         }
         clearContent()
+        contentStack.spacing = mode == .resolve ? 16 : 9
         let videos = selectedVideos
 
+        if mode == .resolve {
+            addResolveControls(for: videos)
+            updateScrollDocumentSize()
+            return
+        }
         guard videos.isEmpty == false else {
             addSecondaryText(String(localized: .inspectorEmpty))
             updateScrollDocumentSize()
             return
         }
-        guard sectionControl.selectedSegment == 1 else {
+        guard mode == .details else {
             addTagControls()
             updateScrollDocumentSize()
             return
@@ -227,7 +274,12 @@ final class InspectorViewController: NSViewController {
 
         addFilename(video.filename)
         let accessStatus: String
-        if video.availability == .offline {
+        if video.availability == .unavailable {
+            accessStatus = String(
+                localized: "detail.accessUnavailable",
+                defaultValue: "Unavailable"
+            )
+        } else if video.availability == .offline {
             if let sourceName = offlineSourceName(video), sourceName.isEmpty == false {
                 accessStatus = String(localized: .detailAccessOfflineNamed(sourceName))
             } else {
@@ -237,9 +289,8 @@ final class InspectorViewController: NSViewController {
             accessStatus = String(localized: .detailAccessAvailable)
         }
         let media = video.mediaSourceInfo
-        addDetailSection(
-            .file,
-            fields: [
+        let lastKnownLocation = lastKnownLocationDisplay(for: video)
+        let fileFields: [(String, String)] = [
                 (
                     String(localized: .detailContainerFormat),
                     formattedContainer(media)
@@ -253,12 +304,14 @@ final class InspectorViewController: NSViewController {
                 (String(localized: .detailCreated), formattedDate(video.creationDate)),
                 (String(localized: .detailModified), formattedDate(video.modificationDate)),
                 (String(localized: .detailAccessStatus), accessStatus),
-                (
-                    String(localized: .detailPath),
-                    filePath(video) ?? String(localized: .detailPathUnavailable)
-                ),
-            ]
-        )
+                (video.availability == .unavailable
+                    ? lastKnownLocation.title
+                    : String(localized: .detailPath),
+                 video.availability == .unavailable
+                    ? lastKnownLocation.value
+                    : filePath(video) ?? String(localized: .detailPathUnavailable)),
+        ]
+        addDetailSection(.file, fields: fileFields)
         addDetailSection(
             .video,
             fields: [
@@ -285,6 +338,278 @@ final class InspectorViewController: NSViewController {
             ]
         )
         updateScrollDocumentSize()
+    }
+
+    private var mode: Mode {
+        if sectionControl.selectedSegment == 1 { return .details }
+        return browsingContext == .unavailable ? .resolve : .tags
+    }
+
+    private func addResolveControls(for videos: [VideoRecord]) {
+        guard videos.isEmpty == false else {
+            addResolveTitle(String(
+                localized: "unavailable.resolve.empty.title",
+                defaultValue: "Select a video to resolve"
+            ))
+            addSecondaryText(String(
+                localized: "unavailable.resolve.empty.detail",
+                defaultValue: "Select a video to see its status and available actions."
+            ))
+            return
+        }
+
+        guard let video = selectedVideo else {
+            addResolveTitle(String(
+                format: String(
+                    localized: "unavailable.resolve.selection.title",
+                    defaultValue: "%lld Unavailable Videos Selected"
+                ),
+                videos.count
+            ))
+            addSecondaryText(String(
+                localized: "unavailable.resolve.selection.detail",
+                defaultValue: "Relinking requires confirming each original file individually. The current selection can only be removed in a batch."
+            ))
+            addUnavailableSelectionSummaryCard(videos)
+            addResolveActions(showsRelink: false, selectedCount: videos.count)
+            return
+        }
+
+        switch video.availability {
+        case .unavailable:
+            let lastKnownLocation = lastKnownLocationDisplay(for: video)
+            addResolveTitle(String(
+                localized: "detail.accessUnavailable",
+                defaultValue: "Unavailable"
+            ))
+            addResolveFactCard(
+                title: lastKnownLocation.title,
+                value: lastKnownLocation.value,
+                promise: String(
+                    localized: "unavailable.retainedDetail",
+                    defaultValue: "Original tags and media information will be preserved."
+                )
+            )
+            addResolveActions(showsRelink: true, selectedCount: 1)
+        case .offline:
+            addResolveTitle(String(
+                localized: "unavailable.resolve.offline.title",
+                defaultValue: "Currently Offline"
+            ))
+            let source = offlineSourceName(video).flatMap { $0.isEmpty ? nil : $0 }
+            addResolveFactCard(
+                title: String(localized: "unavailable.resolve.source", defaultValue: "Source"),
+                value: source.map {
+                    String(
+                        format: String(
+                            localized: "unavailable.resolve.source.offline.named",
+                            defaultValue: "“%@” is not connected"
+                        ),
+                        $0
+                    )
+                } ?? String(
+                    localized: "unavailable.resolve.source.offline",
+                    defaultValue: "The source is not connected"
+                ),
+                promise: String(
+                    localized: "unavailable.resolve.offline.detail",
+                    defaultValue: "It will restore automatically after the device is connected. Original tags and media information will be preserved."
+                )
+            )
+            addResolveActions(showsRelink: false, selectedCount: 1)
+        case .available:
+            addSecondaryText(String(localized: .inspectorEmpty))
+        }
+    }
+
+    private func lastKnownLocationDisplay(for video: VideoRecord) -> (title: String, value: String) {
+        if let path = filePath(video), path.isEmpty == false {
+            return (
+                String(localized: "detail.lastKnownLocation", defaultValue: "Last Known Location"),
+                path
+            )
+        }
+        return (
+            String(localized: "detail.lastKnownFile", defaultValue: "Last Known File"),
+            video.filename
+        )
+    }
+
+    private func addResolveTitle(_ value: String) {
+        let label = NSTextField(wrappingLabelWithString: value)
+        label.font = .systemFont(ofSize: 16, weight: .semibold)
+        contentStack.addArrangedSubview(label)
+        label.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+    }
+
+    private func addResolveFactCard(title: String, value: String, promise: String) {
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        titleLabel.textColor = .secondaryLabelColor
+
+        let valueLabel = NSTextField(wrappingLabelWithString: value)
+        valueLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        valueLabel.isSelectable = true
+
+        let fact = NSStackView(views: [titleLabel, valueLabel])
+        fact.orientation = .vertical
+        fact.alignment = .leading
+        fact.spacing = 3
+
+        let promiseLabel = NSTextField(wrappingLabelWithString: promise)
+        promiseLabel.font = .systemFont(ofSize: 11)
+        promiseLabel.textColor = .secondaryLabelColor
+
+        addResolveCard(views: [fact, promiseLabel])
+    }
+
+    private func addUnavailableSelectionSummaryCard(_ videos: [VideoRecord]) {
+        let counts: [(String, Int)] = [
+            (String(localized: "detail.accessUnavailable", defaultValue: "Unavailable"),
+             videos.filter { $0.availability == .unavailable }.count),
+            (String(localized: .videoOfflineBadge),
+             videos.filter { $0.availability == .offline }.count),
+        ].filter { $0.1 > 0 }
+        let rows = counts.map { title, count -> [NSView] in
+            let titleLabel = NSTextField(labelWithString: title)
+            titleLabel.textColor = .secondaryLabelColor
+            let countLabel = NSTextField(labelWithString: count.formatted())
+            countLabel.alignment = .right
+            return [titleLabel, countLabel]
+        }
+        let grid = NSGridView(views: rows)
+        grid.rowSpacing = 7
+        grid.columnSpacing = 12
+        grid.column(at: 0).xPlacement = .leading
+        grid.column(at: 1).xPlacement = .trailing
+        addResolveCard(views: [grid])
+    }
+
+    private func addResolveCard(views: [NSView]) {
+        let card = InspectorResolveCardView()
+        let cardStack = NSStackView(views: views)
+        cardStack.translatesAutoresizingMaskIntoConstraints = false
+        cardStack.orientation = .vertical
+        cardStack.alignment = .leading
+        cardStack.spacing = 10
+        card.addSubview(cardStack)
+        NSLayoutConstraint.activate([
+            cardStack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12),
+            cardStack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12),
+            cardStack.topAnchor.constraint(equalTo: card.topAnchor, constant: 12),
+            cardStack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
+        ])
+        views.forEach {
+            $0.widthAnchor.constraint(equalTo: cardStack.widthAnchor).isActive = true
+        }
+        contentStack.addArrangedSubview(card)
+        card.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+    }
+
+    private func addResolveActions(showsRelink: Bool, selectedCount: Int) {
+        let group = NSStackView()
+        group.orientation = .vertical
+        group.alignment = .leading
+        group.spacing = 8
+
+        if showsRelink {
+            let isRelinking = selectedVideo.map { $0.id == relinkingVideoID } ?? false
+            let relinkButton = InspectorResolvePrimaryButton(
+                title: isRelinking
+                    ? String(
+                        localized: "unavailable.relink.checking",
+                        defaultValue: "Checking the selected file…"
+                    )
+                    : String(
+                        localized: "unavailable.relink.action",
+                        defaultValue: "Relink Original…"
+                    ),
+                target: self,
+                action: #selector(relinkSelectedVideo)
+            )
+            relinkButton.isEnabled = isRelinking == false
+            group.addArrangedSubview(relinkButton)
+            relinkButton.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+        }
+
+        let removeTitle = selectedCount > 1
+            ? String(
+                format: String(
+                    localized: "unavailable.remove.action.multiple",
+                    defaultValue: "Remove %lld Videos from FileFacet…"
+                ),
+                selectedCount
+            )
+            : String(
+                localized: "unavailable.remove.action",
+                defaultValue: "Remove from FileFacet…"
+            )
+        let removeButton = NSButton(
+            title: removeTitle,
+            target: self,
+            action: #selector(removeSelectedUnavailableVideos)
+        )
+        removeButton.isBordered = false
+        removeButton.alignment = .center
+        removeButton.font = .systemFont(ofSize: 12, weight: .medium)
+        removeButton.contentTintColor = .systemOrange
+        removeButton.isEnabled = selectedVideos.contains { $0.id == relinkingVideoID } == false
+        group.addArrangedSubview(removeButton)
+        removeButton.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+        removeButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 28).isActive = true
+
+        contentStack.addArrangedSubview(group)
+        group.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+    }
+
+    @objc private func relinkSelectedVideo() {
+        guard let selectedVideo,
+              selectedVideo.id != relinkingVideoID,
+              selectedVideo.availability == .unavailable else { return }
+        onRelinkVideo(selectedVideo)
+    }
+
+    @objc private func removeSelectedUnavailableVideos() {
+        let videos = selectedVideos.filter { $0.availability != .available }
+        guard browsingContext == .unavailable,
+              videos.isEmpty == false,
+              videos.count == selectedVideos.count,
+              let window = view.window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        if videos.count > 1 {
+            alert.messageText = String(
+                format: String(
+                    localized: "unavailable.remove.title.multiple",
+                    defaultValue: "Remove %lld records from FileFacet?"
+                ),
+                videos.count
+            )
+            alert.informativeText = String(
+                localized: "unavailable.remove.detail.multiple",
+                defaultValue: "The original tags and media information for these records will be deleted from FileFacet. This will not affect original files that may exist on your Mac."
+            )
+        } else {
+            alert.messageText = String(
+                localized: "unavailable.remove.title",
+                defaultValue: "Remove this record from FileFacet?"
+            )
+            alert.informativeText = String(
+                localized: "unavailable.remove.detail",
+                defaultValue: "The original tags and media information will be deleted from FileFacet. This will not affect the original file that may exist on your Mac."
+            )
+        }
+        alert.addButton(withTitle: String(localized: .actionRemove))
+        alert.addButton(withTitle: String(localized: .actionCancel))
+        alert.buttons.first?.hasDestructiveAction = true
+        let videoIDs = videos.map(\.id)
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn else { return }
+            self.onRemoveVideos(videoIDs) { [weak self] succeeded in
+                guard succeeded else { return }
+                self?.onVideoRemoved?(videoIDs.count)
+            }
+        }
     }
 
     private func addPrimaryText(_ value: String) {
@@ -644,13 +969,13 @@ final class InspectorViewController: NSViewController {
 
     @objc private func changeSection(_ sender: NSSegmentedControl) {
         closeNewTagPopover()
-        guard sender.selectedSegment == 0 else {
+        guard mode == .tags else {
             renderSelection()
             return
         }
         showTagLoadingState()
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.sectionControl.selectedSegment == 0 else { return }
+            guard let self, self.mode == .tags else { return }
             if self.tagStateVideoIDs == self.selectedVideos.map(\.id) {
                 self.renderSelection()
             } else {
@@ -695,7 +1020,7 @@ final class InspectorViewController: NSViewController {
     }
 
     var canBeginCreatingTag: Bool {
-        selectedVideos.isEmpty == false && isApplyingTagChanges == false
+        mode == .tags && selectedVideos.isEmpty == false && isApplyingTagChanges == false
     }
 
     func beginCreatingTag() {
@@ -784,7 +1109,7 @@ final class InspectorViewController: NSViewController {
     }
 
     private func scheduleInitialTagStateLoadIfNeeded() {
-        guard sectionControl.selectedSegment == 0,
+        guard mode == .tags,
               selectedVideos.isEmpty == false,
               tagStateVideoIDs != selectedVideos.map(\.id) else { return }
         DispatchQueue.main.async { [weak self] in
@@ -908,7 +1233,7 @@ final class InspectorViewController: NSViewController {
 
     private func updateActionArea() {
         guard isViewLoaded else { return }
-        let tagContentAvailable = sectionControl.selectedSegment == 0
+        let tagContentAvailable = mode == .tags
             && selectedVideos.isEmpty == false
             && tagStateVideoIDs == selectedVideos.map(\.id)
         actionContainer.isHidden = tagContentAvailable == false
@@ -945,7 +1270,7 @@ final class InspectorViewController: NSViewController {
 
     private func updateTagSearchFieldVisibility() {
         guard isViewLoaded else { return }
-        tagSearchField.isHidden = sectionControl.selectedSegment != 0
+        tagSearchField.isHidden = mode != .tags
             || selectedVideos.isEmpty
     }
 
@@ -972,6 +1297,111 @@ final class InspectorViewController: NSViewController {
 
 private final class InspectorContentStackView: NSStackView {
     override var isFlipped: Bool { true }
+}
+
+private final class InspectorResolveCardView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        updateAppearance()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        layer?.cornerRadius = 7
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+        layer?.borderWidth = 1
+        layer?.borderColor = (isDark
+            ? NSColor.white.withAlphaComponent(0.13)
+            : NSColor.black.withAlphaComponent(0.18)).cgColor
+        layer?.backgroundColor = NSColor.secondaryLabelColor
+            .withAlphaComponent(isDark ? 0.11 : 0.09).cgColor
+    }
+}
+
+private final class InspectorResolvePrimaryButton: NSButton {
+    private var trackingArea: NSTrackingArea?
+    private var isHovered = false
+    private var isPressed = false
+
+    init(title: String, target: AnyObject?, action: Selector?) {
+        super.init(frame: .zero)
+        self.title = title
+        self.target = target
+        self.action = action
+        isBordered = false
+        bezelStyle = .regularSquare
+        controlSize = .large
+        font = .systemFont(ofSize: 13, weight: .semibold)
+        alignment = .center
+        contentTintColor = .white
+        focusRingType = .default
+        wantsLayer = true
+        layer?.cornerRadius = 7
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 34)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        needsDisplay = true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isPressed = true
+        needsDisplay = true
+        displayIfNeeded()
+        super.mouseDown(with: event)
+        isPressed = false
+        needsDisplay = true
+    }
+
+    override func updateLayer() {
+        let alpha = isPressed ? 0.72 : (isHovered ? 0.88 : 1)
+        layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(alpha).cgColor
+    }
 }
 
 private final class TagCheckbox: NSButton {

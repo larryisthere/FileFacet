@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FileFacet · 离线资料库原型</title>
+  <title>FileFacet · 不可用视频原型</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -23,6 +23,7 @@
       --selection: rgba(10, 132, 255, .18);
       --success: #248a3d;
       --offline: #6e6e73;
+      --unavailable: #c93400;
       --warning-soft: rgba(110, 110, 115, .09);
       --shadow: 0 24px 70px rgba(20, 24, 31, .28), 0 2px 10px rgba(20, 24, 31, .14);
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
@@ -45,6 +46,7 @@
         --selection: rgba(10, 132, 255, .27);
         --success: #30d158;
         --offline: #aeaeb2;
+        --unavailable: #ff9f0a;
         --warning-soft: rgba(174, 174, 178, .11);
         --shadow: 0 26px 80px rgba(0, 0, 0, .56), 0 2px 12px rgba(0, 0, 0, .4);
       }
@@ -173,9 +175,11 @@
       white-space: nowrap;
     }
     .nav-count {
+      min-width: 28px;
       color: var(--secondary);
       font-size: 11px;
       font-variant-numeric: tabular-nums;
+      text-align: right;
     }
     .tag-dot {
       width: 8px;
@@ -196,6 +200,67 @@
       flex-direction: column;
       overflow: hidden;
       background: var(--content);
+    }
+    .inline-status {
+      position: relative;
+      z-index: 2;
+      display: none;
+      min-height: 42px;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 16px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--content) 90%, var(--accent) 10%);
+    }
+    .inline-status.visible { display: flex; }
+    .status-mark {
+      width: 8px;
+      height: 8px;
+      flex: 0 0 8px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    .inline-status.success .status-mark { background: var(--success); }
+    .inline-status.error .status-mark { background: var(--unavailable); }
+    .status-copy { min-width: 0; flex: 1; }
+    .status-title { font-size: 12px; font-weight: 600; }
+    .status-detail {
+      margin-top: 1px;
+      overflow: hidden;
+      color: var(--secondary);
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .status-action {
+      min-width: 54px;
+      height: 25px;
+      padding: 0 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--content) 88%, var(--text) 12%);
+      box-shadow: 0 1px 1px rgba(0,0,0,.06);
+      white-space: nowrap;
+    }
+    .status-close {
+      display: grid;
+      width: 25px;
+      min-width: 25px;
+      height: 25px;
+      place-items: center;
+      padding: 0;
+      border-radius: 6px;
+      color: var(--secondary);
+      background: transparent;
+    }
+    .status-close:hover { color: var(--text); background: rgba(127,127,127,.14); }
+    .status-close svg {
+      width: 13px;
+      height: 13px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
     }
     .grid-scroll { flex: 1; min-height: 0; overflow: auto; padding: 20px; }
     .video-grid {
@@ -228,14 +293,14 @@
       height: 100%;
       object-fit: cover;
     }
-    .video-card.is-offline .thumb::after {
+    .video-card.is-unavailable .thumb::after {
       content: "";
       position: absolute;
       inset: 0;
       background: rgba(0,0,0,.50);
       pointer-events: none;
     }
-    .offline-badge {
+    .state-badge {
       position: absolute;
       z-index: 1;
       top: 6px;
@@ -249,6 +314,7 @@
       font-weight: 600;
       backdrop-filter: blur(8px);
     }
+    .state-badge.unavailable { background: color-mix(in srgb, var(--unavailable) 84%, rgba(32,33,36,.72)); }
     .filename {
       margin-top: 14px;
       overflow: hidden;
@@ -364,6 +430,45 @@
       overflow-wrap: anywhere;
       user-select: text;
     }
+    .resolve-pane { display: grid; align-content: start; gap: 16px; }
+    .resolve-heading { display: grid; gap: 5px; }
+    .resolve-title { margin: 0; font-size: 16px; line-height: 1.25; }
+    .resolve-detail { margin: 0; color: var(--secondary); font-size: 12px; line-height: 1.5; }
+    .resolve-facts {
+      display: grid;
+      gap: 8px;
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--warning-soft);
+    }
+    .resolve-fact { display: grid; gap: 2px; }
+    .resolve-fact-label { color: var(--secondary); font-size: 11px; }
+    .resolve-fact-value { font-size: 12px; overflow-wrap: anywhere; }
+    .resolve-promise { margin: 2px 0 0; color: var(--secondary); font-size: 11px; line-height: 1.45; }
+    .resolve-actions { display: grid; gap: 8px; }
+    .primary-action {
+      width: 100%;
+      min-height: 32px;
+      padding: 5px 12px;
+      border-radius: 7px;
+      color: #fff;
+      background: var(--accent);
+      font-weight: 600;
+    }
+    .primary-action:disabled { opacity: .62; }
+    .secondary-action {
+      width: 100%;
+      min-height: 28px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      color: var(--unavailable);
+      background: transparent;
+    }
+    .secondary-action:hover { background: rgba(127,127,127,.08); }
+    .selection-summary { display: grid; gap: 6px; }
+    .selection-summary-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+    .selection-summary-row span:last-child { color: var(--secondary); font-variant-numeric: tabular-nums; }
     .inspector-footer {
       display: grid;
       gap: 8px;
@@ -380,6 +485,79 @@
       background: color-mix(in srgb, var(--window) 80%, var(--text) 4%);
     }
     .small-button:disabled { color: var(--tertiary); opacity: .52; }
+    .small-button.accent { color: #fff; border-color: var(--accent); background: var(--accent); }
+    .small-button.destructive { color: var(--unavailable); }
+    .context-menu {
+      position: fixed;
+      z-index: 110;
+      display: grid;
+      min-width: 190px;
+      padding: 5px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--window) 96%, transparent);
+      box-shadow: 0 10px 30px rgba(0,0,0,.28);
+      backdrop-filter: blur(18px);
+    }
+    .context-menu button {
+      min-height: 25px;
+      padding: 3px 9px;
+      border-radius: 5px;
+      background: transparent;
+      text-align: left;
+    }
+    .context-menu button:hover,
+    .context-menu button:focus-visible { color: #fff; background: var(--accent); outline: 0; }
+    .context-menu button.destructive { color: var(--unavailable); }
+    .context-separator { height: 1px; margin: 4px 5px; background: var(--line); }
+    .dialog-backdrop {
+      position: fixed;
+      z-index: 90;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(0,0,0,.24);
+      backdrop-filter: blur(2px);
+    }
+    .dialog {
+      width: min(390px, calc(100vw - 48px));
+      padding: 20px;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: var(--window);
+      box-shadow: 0 24px 70px rgba(0,0,0,.3);
+    }
+    .dialog h2 { margin: 0; font-size: 16px; }
+    .dialog p { margin: 9px 0 18px; color: var(--secondary); font-size: 12px; line-height: 1.5; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .verification-dialog { width: min(500px, calc(100vw - 48px)); }
+    .comparison-table {
+      display: grid;
+      margin: 16px 0 12px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .comparison-row {
+      display: grid;
+      grid-template-columns: 70px minmax(0, 1fr) minmax(0, 1fr);
+      min-height: 34px;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+    }
+    .comparison-row:last-child { border-bottom: 0; }
+    .comparison-row > span { min-width: 0; padding: 7px 9px; overflow-wrap: anywhere; }
+    .comparison-row > span + span { border-left: 1px solid var(--line); }
+    .comparison-header {
+      min-height: 29px;
+      color: var(--secondary);
+      background: rgba(127,127,127,.07);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .comparison-label { color: var(--secondary); font-size: 11px; }
+    .comparison-selected { color: var(--unavailable); }
+    .verification-promise { margin-bottom: 18px !important; }
 
     @media (max-width: 1120px) {
       .desktop { padding-right: 10px; padding-left: 10px; }
@@ -389,19 +567,30 @@
   </style>
   <link rel="stylesheet" href="../prototype-shell.css">
 </head>
-<body data-prototype-page="offline-library" data-prototype-subtitle="离线资料库状态">
+<body data-prototype-page="offline-library" data-prototype-subtitle="不可用视频与分类快捷键">
   <template id="prototypePageActions">
       <section class="prototype-group" aria-labelledby="prototypeStatesTitle">
         <div class="prototype-group-title" id="prototypeStatesTitle">页面状态</div>
         <button class="prototype-action demo-button active" id="normalButton"><span class="prototype-action-mark"></span>正常资料库</button>
         <button class="prototype-action demo-button" id="disconnectButton"><span class="prototype-action-mark"></span>模拟“归档盘”离线</button>
+        <button class="prototype-action demo-button" id="accessLostButton"><span class="prototype-action-mark"></span>模拟访问连接丢失</button>
+        <button class="prototype-action demo-button" id="missingButton"><span class="prototype-action-mark"></span>模拟移入废纸篓</button>
+        <button class="prototype-action demo-button" id="mixedButton"><span class="prototype-action-mark"></span>无法访问与离线共存</button>
+        <button class="prototype-action demo-button" id="multipleButton"><span class="prototype-action-mark"></span>模拟多选处理</button>
         <button class="prototype-action demo-button" id="reconnectButton"><span class="prototype-action-mark"></span>重新接入磁盘</button>
         <button class="prototype-action demo-button" id="resetButton">重置</button>
+      </section>
+      <section class="prototype-group" aria-labelledby="prototypeRelinkTitle">
+        <div class="prototype-group-title" id="prototypeRelinkTitle">重新定位反馈</div>
+        <button class="prototype-action demo-button" id="relinkSuccessDemo"><span class="prototype-action-mark"></span>模拟内容确认成功</button>
+        <button class="prototype-action demo-button" id="relinkMismatchDemo"><span class="prototype-action-mark"></span>模拟内容不同或证据不足</button>
+        <button class="prototype-action demo-button" id="relinkConflictDemo"><span class="prototype-action-mark"></span>模拟文件已存在</button>
+        <button class="prototype-action demo-button" id="relinkFailureDemo"><span class="prototype-action-mark"></span>模拟其他失败</button>
       </section>
   </template>
 
   <main class="desktop prototype-content prototype-app-surface">
-    <section class="window" aria-label="FileFacet 离线资料库原型">
+    <section class="window" aria-label="FileFacet 不可用视频原型">
       <header class="titlebar">
         <div class="title-part">
           <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
@@ -418,24 +607,38 @@
 
       <aside class="sidebar" aria-label="资料库侧栏">
         <div class="section-label">资料库</div>
-        <button class="nav-row selected" data-filter="all">
-          <span class="nav-label">所有视频</span><span class="nav-count" id="allCount">8</span>
+        <button class="nav-row preset-row selected" data-filter="all" aria-keyshortcuts="Meta+1">
+          <span class="nav-label">所有视频</span><span class="nav-count" id="allCount" data-shortcut="⌘1">8</span>
         </button>
-        <button class="nav-row" data-filter="recent">
-          <span class="nav-label">最近导入</span><span class="nav-count">3</span>
+        <button class="nav-row preset-row" data-filter="untagged" aria-keyshortcuts="Meta+2">
+          <span class="nav-label">未打标签</span><span class="nav-count" id="untaggedCount" data-shortcut="⌘2">1</span>
         </button>
-        <button class="nav-row" id="offlineNav" data-filter="offline" hidden>
-          <span class="nav-label">离线</span><span class="nav-count" id="offlineCount">4</span>
+        <button class="nav-row preset-row" data-filter="recent" aria-keyshortcuts="Meta+3">
+          <span class="nav-label">最近添加</span><span class="nav-count" id="recentCount" data-shortcut="⌘3">3</span>
+        </button>
+        <button class="nav-row preset-row" data-filter="unavailable" aria-keyshortcuts="Meta+4">
+          <span class="nav-label">不可用视频</span><span class="nav-count" id="unavailableCount" data-shortcut="⌘4">0</span>
         </button>
 
         <div class="section-label">标签</div>
-        <button class="nav-row"><span class="tag-dot" style="--tag-color:#ff9f0a"></span><span class="nav-label">旅行</span><span class="nav-count">4</span></button>
-        <button class="nav-row indent-1"><span class="tag-dot" style="--tag-color:#ffd60a"></span><span class="nav-label">城市</span><span class="nav-count">2</span></button>
-        <button class="nav-row"><span class="tag-dot" style="--tag-color:#64d2ff"></span><span class="nav-label">工作</span><span class="nav-count">3</span></button>
-        <button class="nav-row"><span class="tag-dot" style="--tag-color:#30d158"></span><span class="nav-label">待整理</span><span class="nav-count">2</span></button>
+        <button class="nav-row" data-filter="tag:旅行"><span class="tag-dot" style="--tag-color:#ff9f0a"></span><span class="nav-label">旅行</span><span class="nav-count">4</span></button>
+        <button class="nav-row indent-1" data-filter="tag:城市"><span class="tag-dot" style="--tag-color:#ffd60a"></span><span class="nav-label">城市</span><span class="nav-count">2</span></button>
+        <button class="nav-row" data-filter="tag:工作"><span class="tag-dot" style="--tag-color:#64d2ff"></span><span class="nav-label">工作</span><span class="nav-count">3</span></button>
+        <button class="nav-row" data-filter="tag:待整理"><span class="tag-dot" style="--tag-color:#30d158"></span><span class="nav-label">待整理</span><span class="nav-count">2</span></button>
       </aside>
 
       <section class="content">
+        <div class="inline-status" id="inlineStatus" role="status" aria-live="polite">
+          <span class="status-mark" aria-hidden="true"></span>
+          <div class="status-copy">
+            <div class="status-title" id="statusTitle"></div>
+            <div class="status-detail" id="statusDetail"></div>
+          </div>
+          <button class="status-action" id="statusAction" hidden></button>
+          <button class="status-close" id="closeStatus" title="关闭通知" aria-label="关闭通知">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"></path></svg>
+          </button>
+        </div>
         <div class="grid-scroll">
           <div class="video-grid" id="videoGrid"></div>
           <div class="empty-state" id="emptyState" hidden>
@@ -447,16 +650,27 @@
 
       <aside class="inspector" aria-label="视频检查器">
         <div class="inspector-shell">
-          <div class="segment-control" aria-label="检查器内容">
-            <button class="segment-button selected" id="tagsSegment" data-inspector-mode="tags">标签</button>
-            <button class="segment-button" id="detailsSegment" data-inspector-mode="details">详细信息</button>
+          <div class="segment-control" role="tablist" aria-label="检查器内容">
+            <button class="segment-button selected" id="tagsSegment" role="tab" aria-selected="true" data-inspector-mode="tags">标签</button>
+            <button class="segment-button" id="detailsSegment" role="tab" aria-selected="false" data-inspector-mode="details">详细信息</button>
           </div>
           <input class="tag-search" id="tagSearch" type="search" placeholder="搜索标签">
           <div class="inspector-scroll">
-            <section id="tagsPane">
+            <section id="tagsPane" role="tabpanel" aria-labelledby="tagsSegment">
               <div class="tag-checkboxes" id="tagCheckboxes"></div>
             </section>
-            <section class="detail-pane" id="detailsPane" hidden>
+            <section class="resolve-pane" id="resolvePane" role="tabpanel" aria-labelledby="tagsSegment" hidden>
+              <div class="resolve-heading">
+                <h2 class="resolve-title" id="resolveTitle">选择一个不可用视频</h2>
+                <p class="resolve-detail" id="resolveDetail">查看当前状态并选择后续处理方式。</p>
+              </div>
+              <div class="resolve-facts" id="resolveFacts"></div>
+              <div class="resolve-actions">
+                <button class="primary-action" id="relinkButton">重新定位原文件…</button>
+                <button class="secondary-action" id="removeUnavailableButton">从 FileFacet 移除…</button>
+              </div>
+            </section>
+            <section class="detail-pane" id="detailsPane" role="tabpanel" aria-labelledby="detailsSegment" hidden>
               <div class="detail-filename">
                 <span id="detailFilename"></span>
                 <button class="copy-button">复制</button>
@@ -468,7 +682,7 @@
               <div class="detail-field"><span class="detail-title">创建时间</span><span class="detail-value" id="createdValue"></span></div>
               <div class="detail-field"><span class="detail-title">修改时间</span><span class="detail-value" id="modifiedValue"></span></div>
               <div class="detail-field"><span class="detail-title">访问状态</span><span class="detail-value" id="accessValue"></span></div>
-              <div class="detail-field"><span class="detail-title">路径</span><span class="detail-value" id="relativePath"></span></div>
+              <div class="detail-field"><span class="detail-title" id="pathTitle">路径</span><span class="detail-value" id="relativePath"></span></div>
             </section>
           </div>
           <div class="inspector-footer" id="inspectorFooter">
@@ -482,6 +696,42 @@
       </aside>
     </section>
   </main>
+
+  <div class="dialog-backdrop" id="removeDialog" hidden>
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="removeDialogTitle">
+      <h2 id="removeDialogTitle">从 FileFacet 移除这条记录？</h2>
+      <p id="removeDialogDetail">原有标签和媒体信息将从 FileFacet 删除。此操作不会影响 Mac 上可能存在的原文件。</p>
+      <div class="dialog-actions">
+        <button class="small-button" id="cancelRemovalButton">取消</button>
+        <button class="small-button destructive" id="confirmRemovalButton">移除</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="dialog-backdrop" id="relinkMismatchDialog" hidden>
+    <section class="dialog verification-dialog" role="alertdialog" aria-modal="true" aria-labelledby="relinkMismatchTitle" aria-describedby="relinkMismatchDetail">
+      <h2 id="relinkMismatchTitle">所选文件与原记录不完全一致</h2>
+      <p id="relinkMismatchDetail">FileFacet 无法确认它们是同一个视频。请核对以下差异。</p>
+      <div class="comparison-table" aria-label="原记录与所选文件差异">
+        <div class="comparison-row comparison-header"><span></span><span>原记录</span><span>所选文件</span></div>
+        <div class="comparison-row"><span class="comparison-label">文件名</span><span>深夜访谈.mp4</span><span class="comparison-selected">深夜访谈（修订版）.mp4</span></div>
+        <div class="comparison-row"><span class="comparison-label">时长</span><span>04:31</span><span class="comparison-selected">04:26</span></div>
+        <div class="comparison-row"><span class="comparison-label">大小</span><span>1.2 GB</span><span class="comparison-selected">1.18 GB</span></div>
+      </div>
+      <p class="verification-promise">如果继续，原有标签会保留；媒体信息和缩略图将按所选文件更新。</p>
+      <div class="dialog-actions">
+        <button class="small-button" id="cancelMismatchButton">取消</button>
+        <button class="small-button" id="confirmMismatchButton">仍然连接</button>
+        <button class="small-button accent" id="reselectMismatchButton">重新选择</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="context-menu" id="videoContextMenu" role="menu" hidden>
+    <button id="contextRelinkButton" role="menuitem">重新定位原文件…</button>
+    <div class="context-separator" id="contextSeparator"></div>
+    <button class="destructive" id="contextRemoveButton" role="menuitem">从 FileFacet 移除…</button>
+  </div>
 
   <script src="../prototype-shell.js"></script>
   <script>
@@ -571,7 +821,7 @@
         path: "工作 / 研究 / 创意工作坊.mp4",
         duration: "02:24",
         resolution: "1920 × 1080",
-        tags: ["工作"],
+        tags: [],
         recent: true
       }
     ];
@@ -580,51 +830,153 @@
     const allTags = ["旅行", "城市", "工作", "待整理"];
     const fileSizes = ["1.8 GB", "842 MB", "2.4 GB", "615 MB", "3.1 GB", "1.2 GB", "2.0 GB", "936 MB"];
     let diskOffline = false;
+    let accessLostVideoIDs = new Set();
+    let missingVideoIDs = new Set();
+    let removedVideoIDs = new Set();
+    let commandKeyHeld = false;
     let currentFilter = "all";
-    let selectedID = 1;
+    let selectedVideoIDs = new Set([1]);
     let inspectorMode = "tags";
+    let contextVideoID = null;
+    let relinkInProgress = false;
+    let relinkTimer = null;
+    let nextRelinkOutcome = "success";
+    let statusActionKind = null;
+    let pendingMismatchVideoID = null;
 
     const videoGrid = document.getElementById("videoGrid");
     const emptyState = document.getElementById("emptyState");
     const searchInput = document.getElementById("searchInput");
-    const offlineNav = document.getElementById("offlineNav");
     const viewTitle = document.getElementById("viewTitle");
     const viewCount = document.getElementById("viewCount");
+    const tagsSegment = document.getElementById("tagsSegment");
+    const detailsSegment = document.getElementById("detailsSegment");
     const tagSearch = document.getElementById("tagSearch");
     const tagsPane = document.getElementById("tagsPane");
+    const resolvePane = document.getElementById("resolvePane");
     const detailsPane = document.getElementById("detailsPane");
     const inspectorFooter = document.getElementById("inspectorFooter");
+    const pathTitle = document.getElementById("pathTitle");
+    const removeDialog = document.getElementById("removeDialog");
     const normalButton = document.getElementById("normalButton");
     const disconnectButton = document.getElementById("disconnectButton");
+    const accessLostButton = document.getElementById("accessLostButton");
+    const missingButton = document.getElementById("missingButton");
+    const mixedButton = document.getElementById("mixedButton");
+    const multipleButton = document.getElementById("multipleButton");
     const reconnectButton = document.getElementById("reconnectButton");
+    const videoContextMenu = document.getElementById("videoContextMenu");
+    const contextRelinkButton = document.getElementById("contextRelinkButton");
+    const contextSeparator = document.getElementById("contextSeparator");
+    const contextRemoveButton = document.getElementById("contextRemoveButton");
+    const inlineStatus = document.getElementById("inlineStatus");
+    const statusTitle = document.getElementById("statusTitle");
+    const statusDetail = document.getElementById("statusDetail");
+    const statusAction = document.getElementById("statusAction");
+    const closeStatus = document.getElementById("closeStatus");
+    const relinkSuccessDemo = document.getElementById("relinkSuccessDemo");
+    const relinkMismatchDemo = document.getElementById("relinkMismatchDemo");
+    const relinkConflictDemo = document.getElementById("relinkConflictDemo");
+    const relinkFailureDemo = document.getElementById("relinkFailureDemo");
+    const relinkMismatchDialog = document.getElementById("relinkMismatchDialog");
+    const presetCounts = {
+      all: document.getElementById("allCount"),
+      untagged: document.getElementById("untaggedCount"),
+      recent: document.getElementById("recentCount"),
+      unavailable: document.getElementById("unavailableCount")
+    };
+    const shortcutFilters = {
+      "1": "all",
+      "2": "untagged",
+      "3": "recent",
+      "4": "unavailable"
+    };
 
     function isOffline(video) {
       return diskOffline && video.source === archiveSource;
     }
 
-    function visibleVideos() {
-      const query = searchInput.value.trim().toLocaleLowerCase();
-      return videos.filter(video => {
-        if (currentFilter === "offline" && !isOffline(video)) return false;
-        if (currentFilter === "recent" && !video.recent) return false;
-        if (!query) return true;
-        return [video.name, video.path, ...video.tags]
-          .some(value => value.toLocaleLowerCase().includes(query));
+    function isMissingFromKnownLocation(video) {
+      return missingVideoIDs.has(video.id);
+    }
+
+    function hasLostAccess(video) {
+      return accessLostVideoIDs.has(video.id);
+    }
+
+    function cannotAccess(video) {
+      return isMissingFromKnownLocation(video) || hasLostAccess(video);
+    }
+
+    function isRemoved(video) {
+      return removedVideoIDs.has(video.id);
+    }
+
+    function isUnavailable(video) {
+      return !isRemoved(video) && (cannotAccess(video) || isOffline(video));
+    }
+
+    function isActive(video) {
+      return !isRemoved(video) && !isMissingFromKnownLocation(video);
+    }
+
+    function selectedVideos() {
+      return videos.filter(video => selectedVideoIDs.has(video.id) && !isRemoved(video));
+    }
+
+    function unavailablePriority(video) {
+      return cannotAccess(video) ? 0 : 1;
+    }
+
+    function presetTotal(filter) {
+      if (filter === "all") return videos.filter(isActive).length;
+      if (filter === "untagged") return videos.filter(video => isActive(video) && video.tags.length === 0).length;
+      if (filter === "recent") return videos.filter(video => isActive(video) && video.recent).length;
+      return videos.filter(isUnavailable).length;
+    }
+
+    function renderPresetCounts() {
+      Object.entries(presetCounts).forEach(([filter, element]) => {
+        const count = presetTotal(filter);
+        element.dataset.count = String(count);
+        element.textContent = commandKeyHeld ? element.dataset.shortcut : String(count);
       });
     }
 
-    function selectVisibleVideo(items) {
-      if (!items.some(video => video.id === selectedID)) {
-        selectedID = items[0]?.id ?? null;
+    function setCommandKeyHeld(held) {
+      if (commandKeyHeld === held) return;
+      commandKeyHeld = held;
+      renderPresetCounts();
+    }
+
+    function visibleVideos() {
+      const query = searchInput.value.trim().toLocaleLowerCase();
+      const items = videos.filter(video => {
+        if (currentFilter === "all" && !isActive(video)) return false;
+        if (currentFilter === "untagged" && (!isActive(video) || video.tags.length !== 0)) return false;
+        if (currentFilter === "recent" && (!isActive(video) || !video.recent)) return false;
+        if (currentFilter === "unavailable" && !isUnavailable(video)) return false;
+        if (currentFilter.startsWith("tag:") && (!isActive(video) || !video.tags.includes(currentFilter.slice(4)))) return false;
+        return !query || [video.name, video.path, ...video.tags]
+          .some(value => value.toLocaleLowerCase().includes(query));
+      });
+
+      if (currentFilter === "unavailable") {
+        items.sort((left, right) => unavailablePriority(left) - unavailablePriority(right));
       }
+      return items;
+    }
+
+    function selectVisibleVideo(items) {
+      const visibleIDs = new Set(items.map(video => video.id));
+      selectedVideoIDs = new Set([...selectedVideoIDs].filter(id => visibleIDs.has(id)));
+      if (selectedVideoIDs.size === 0 && items[0]) selectedVideoIDs.add(items[0].id);
     }
 
     function render() {
       const items = visibleVideos();
       selectVisibleVideo(items);
-      const offlineTotal = videos.filter(isOffline).length;
-      offlineNav.hidden = offlineTotal === 0;
-      document.getElementById("offlineCount").textContent = offlineTotal;
+      renderPresetCounts();
 
       document.querySelectorAll("[data-filter]").forEach(row => {
         row.classList.toggle("selected", row.dataset.filter === currentFilter);
@@ -632,61 +984,104 @@
 
       const titles = {
         all: "所有视频",
-        recent: "最近导入",
-        offline: "离线"
+        untagged: "未打标签",
+        recent: "最近添加",
+        unavailable: "不可用视频"
       };
-      const title = titles[currentFilter];
+      const title = currentFilter.startsWith("tag:") ? currentFilter.slice(4) : titles[currentFilter];
       viewTitle.textContent = title;
       viewCount.textContent = `${items.length} 个视频`;
 
-      videoGrid.innerHTML = items.map(video => `
-        <button class="video-card${video.id === selectedID ? " selected" : ""}${isOffline(video) ? " is-offline" : ""}" data-video-id="${video.id}">
+      videoGrid.innerHTML = items.map(video => {
+        const state = cannotAccess(video)
+          ? "unavailable"
+          : isOffline(video)
+              ? "offline"
+              : null;
+        const stateLabels = { unavailable: "无法访问", offline: "离线" };
+        const stateBadge = state
+          ? `<span class="state-badge ${state}">${stateLabels[state]}</span>`
+          : "";
+        return `
+        <button class="video-card${selectedVideoIDs.has(video.id) ? " selected" : ""}${state ? " is-unavailable" : ""}" data-video-id="${video.id}" aria-pressed="${selectedVideoIDs.has(video.id)}">
           <div class="thumb">
             <img src="${video.image}" alt="">
-            ${isOffline(video) ? '<span class="offline-badge">离线</span>' : ""}
+            ${stateBadge}
           </div>
           <div class="filename">${video.name}</div>
           <div class="duration">${video.duration}</div>
         </button>
-      `).join("");
+      `;
+      }).join("");
       emptyState.hidden = items.length !== 0;
 
       videoGrid.querySelectorAll("[data-video-id]").forEach(card => {
-        card.addEventListener("click", () => {
-          selectedID = Number(card.dataset.videoId);
+        card.addEventListener("click", event => {
+          const videoID = Number(card.dataset.videoId);
+          if (currentFilter === "unavailable" && event.metaKey) {
+            if (selectedVideoIDs.has(videoID) && selectedVideoIDs.size > 1) {
+              selectedVideoIDs.delete(videoID);
+            } else {
+              selectedVideoIDs.add(videoID);
+            }
+          } else {
+            selectedVideoIDs = new Set([videoID]);
+          }
           render();
+        });
+        card.addEventListener("contextmenu", event => {
+          const videoID = Number(card.dataset.videoId);
+          const video = videos.find(item => item.id === videoID);
+          if (currentFilter !== "unavailable" || !video || !isUnavailable(video)) return;
+          event.preventDefault();
+          if (!selectedVideoIDs.has(videoID)) selectedVideoIDs = new Set([videoID]);
+          contextVideoID = videoID;
+          render();
+          showContextMenu(event.clientX, event.clientY);
         });
       });
       renderInspector();
     }
 
     function renderInspector() {
-      const selected = videos.find(video => video.id === selectedID);
+      const selection = selectedVideos();
+      const selected = selection.length === 1 ? selection[0] : null;
+      const unavailableContext = currentFilter === "unavailable";
+
+      tagsSegment.textContent = unavailableContext ? "处理" : "标签";
+      tagsSegment.dataset.inspectorMode = unavailableContext ? "resolve" : "tags";
+      tagsSegment.setAttribute("aria-controls", unavailableContext ? "resolvePane" : "tagsPane");
+      detailsSegment.setAttribute("aria-controls", "detailsPane");
+      const allowedModes = unavailableContext ? ["resolve", "details"] : ["tags", "details"];
+      if (!allowedModes.includes(inspectorMode)) inspectorMode = allowedModes[0];
+
       document.querySelectorAll("[data-inspector-mode]").forEach(button => {
-        button.classList.toggle("selected", button.dataset.inspectorMode === inspectorMode);
+        const selected = button.dataset.inspectorMode === inspectorMode;
+        button.classList.toggle("selected", selected);
+        button.setAttribute("aria-selected", String(selected));
       });
       tagsPane.hidden = inspectorMode !== "tags";
+      resolvePane.hidden = inspectorMode !== "resolve";
       detailsPane.hidden = inspectorMode !== "details";
-      tagSearch.hidden = inspectorMode !== "tags" || !selected;
-      inspectorFooter.hidden = inspectorMode !== "tags" || !selected;
+      tagSearch.hidden = inspectorMode !== "tags" || selection.length === 0;
+      inspectorFooter.hidden = inspectorMode !== "tags" || selection.length === 0;
+      pathTitle.textContent = "路径";
 
-      if (!selected) {
+      if (unavailableContext) renderResolvePane(selection);
+
+      if (selection.length === 0) {
         document.getElementById("tagCheckboxes").innerHTML = '<div class="tag-empty">未选择视频</div>';
         document.getElementById("detailFilename").textContent = "未选择视频";
-        [
-          "formatValue",
-          "sizeValue",
-          "durationValue",
-          "resolutionValue",
-          "createdValue",
-          "modifiedValue",
-          "accessValue",
-          "relativePath"
-        ].forEach(id => { document.getElementById(id).textContent = "—"; });
+        fillUnavailableDetails();
         return;
       }
 
-      const offline = isOffline(selected);
+      if (selection.length > 1) {
+        document.getElementById("detailFilename").textContent = `已选择 ${selection.length} 个视频`;
+        fillUnavailableDetails();
+        return;
+      }
+
       const tagQuery = tagSearch.value.trim().toLocaleLowerCase();
       const visibleTags = allTags.filter(tag => tag.toLocaleLowerCase().includes(tagQuery));
       document.getElementById("tagCheckboxes").innerHTML = visibleTags.length
@@ -698,6 +1093,8 @@
           `).join("")
         : '<div class="tag-empty">没有匹配的标签</div>';
 
+      const offline = isOffline(selected);
+      const unavailable = cannotAccess(selected);
       document.getElementById("detailFilename").textContent = selected.name;
       document.getElementById("formatValue").textContent = selected.name.split(".").pop().toUpperCase();
       document.getElementById("sizeValue").textContent = fileSizes[selected.id - 1];
@@ -705,37 +1102,242 @@
       document.getElementById("resolutionValue").textContent = selected.resolution;
       document.getElementById("createdValue").textContent = "2026年7月18日 14:36";
       document.getElementById("modifiedValue").textContent = "2026年7月27日 09:12";
-      document.getElementById("accessValue").textContent = offline
-        ? `当前离线 · “${selected.source}”未连接`
-        : "可以访问";
-      document.getElementById("relativePath").textContent = offline
+      document.getElementById("accessValue").textContent = unavailable
+        ? "无法访问"
+        : offline
+            ? `当前离线 · “${selected.source}”未连接`
+            : "可以访问";
+      document.getElementById("relativePath").textContent = offline && !unavailable
         ? "文件位置不可用"
         : selected.path;
+      pathTitle.textContent = unavailable ? "最后已知位置" : "路径";
+    }
+
+    function fillUnavailableDetails() {
+      [
+        "formatValue",
+        "sizeValue",
+        "durationValue",
+        "resolutionValue",
+        "createdValue",
+        "modifiedValue",
+        "accessValue",
+        "relativePath"
+      ].forEach(id => { document.getElementById(id).textContent = "—"; });
+    }
+
+    function factMarkup(label, value) {
+      return `<div class="resolve-fact"><span class="resolve-fact-label">${label}</span><span class="resolve-fact-value">${value}</span></div>`;
+    }
+
+    function promiseMarkup(value) {
+      return `<p class="resolve-promise">${value}</p>`;
+    }
+
+    function renderResolvePane(selection) {
+      const resolveTitle = document.getElementById("resolveTitle");
+      const resolveDetail = document.getElementById("resolveDetail");
+      const resolveFacts = document.getElementById("resolveFacts");
+      const relinkButton = document.getElementById("relinkButton");
+      const removeButton = document.getElementById("removeUnavailableButton");
+      resolveDetail.hidden = false;
+
+      if (selection.length === 0) {
+        resolveTitle.textContent = "选择一个视频进行处理";
+        resolveDetail.textContent = "选中视频后，这里会显示当前状态和可执行操作。";
+        resolveFacts.innerHTML = "";
+        resolveFacts.hidden = true;
+        relinkButton.hidden = true;
+        removeButton.hidden = true;
+        return;
+      }
+
+      resolveFacts.hidden = false;
+      removeButton.hidden = false;
+      relinkButton.disabled = false;
+      relinkButton.textContent = "重新定位原文件…";
+      if (selection.length > 1) {
+        const unavailableCount = selection.filter(cannotAccess).length;
+        const offlineCount = selection.filter(isOffline).length;
+        resolveTitle.textContent = `已选择 ${selection.length} 个不可用视频`;
+        resolveDetail.textContent = "重新定位需要逐个确认原文件；当前选择只提供批量移除。";
+        resolveFacts.innerHTML = `<div class="selection-summary">
+          ${unavailableCount ? `<div class="selection-summary-row"><span>无法访问</span><span>${unavailableCount}</span></div>` : ""}
+          ${offlineCount ? `<div class="selection-summary-row"><span>离线</span><span>${offlineCount}</span></div>` : ""}
+        </div>`;
+        relinkButton.hidden = true;
+        removeButton.textContent = `从 FileFacet 移除 ${selection.length} 个视频…`;
+        return;
+      }
+
+      const selected = selection[0];
+      removeButton.textContent = "从 FileFacet 移除…";
+      resolveDetail.hidden = true;
+      if (cannotAccess(selected)) {
+        resolveTitle.textContent = "无法访问";
+        resolveFacts.innerHTML = factMarkup("最后已知位置", selected.path)
+          + promiseMarkup("原有标签和媒体信息会保留");
+        relinkButton.hidden = false;
+      } else {
+        resolveTitle.textContent = "当前离线";
+        resolveFacts.innerHTML = factMarkup("来源", `“${selected.source}”未连接`)
+          + promiseMarkup("连接设备后会自动恢复。原有标签和媒体信息会保留");
+        relinkButton.hidden = true;
+      }
+      if (!relinkButton.hidden && relinkInProgress) {
+        relinkButton.disabled = true;
+        relinkButton.textContent = "正在核对所选文件…";
+      }
     }
 
     function setDemoButtons(activeButton) {
-      [normalButton, disconnectButton, reconnectButton].forEach(button => {
+      document.querySelectorAll(".demo-button").forEach(button => {
         button.classList.toggle("active", button === activeButton);
       });
     }
 
+    function cancelRelinkSimulation() {
+      clearTimeout(relinkTimer);
+      relinkTimer = null;
+      relinkInProgress = false;
+      pendingMismatchVideoID = null;
+      relinkMismatchDialog.hidden = true;
+    }
+
+    function dismissStatus() {
+      inlineStatus.classList.remove("visible", "success", "error");
+      statusAction.hidden = true;
+      statusActionKind = null;
+    }
+
+    function showStatus(kind, title, detail, actionLabel = null, actionKind = null) {
+      inlineStatus.classList.remove("success", "error");
+      inlineStatus.classList.add("visible", kind);
+      statusTitle.textContent = title;
+      statusDetail.textContent = detail;
+      statusAction.hidden = actionLabel == null;
+      statusAction.textContent = actionLabel ?? "";
+      statusActionKind = actionKind;
+    }
+
+    function resetRelinkDemoVideo() {
+      const video = videos.find(item => item.id === 6);
+      if (!video) return;
+      video.name = "深夜访谈.mp4";
+      video.path = "访谈 / 深夜访谈.mp4";
+      video.duration = "04:31";
+      fileSizes[5] = "1.2 GB";
+    }
+
+    function completeRelinkSuccess(video, detail = `“${video.name}”已恢复访问`) {
+      missingVideoIDs.delete(video.id);
+      accessLostVideoIDs.delete(video.id);
+      if (currentFilter === "unavailable" && presetTotal("unavailable") === 0) {
+        currentFilter = "all";
+        inspectorMode = "tags";
+      }
+      selectedVideoIDs = new Set([video.id]);
+      render();
+      showStatus("success", "已重新连接", detail);
+    }
+
     function setDiskOffline() {
+      cancelRelinkSimulation();
+      dismissStatus();
+      resetRelinkDemoVideo();
       diskOffline = true;
+      accessLostVideoIDs.clear();
+      missingVideoIDs.clear();
+      removedVideoIDs.clear();
+      currentFilter = "unavailable";
+      selectedVideoIDs = new Set([2]);
+      inspectorMode = "resolve";
       setDemoButtons(disconnectButton);
       render();
     }
 
-    function reconnectDisk() {
+    function setAccessLost() {
+      cancelRelinkSimulation();
+      dismissStatus();
+      resetRelinkDemoVideo();
       diskOffline = false;
-      if (currentFilter === "offline") currentFilter = "all";
+      accessLostVideoIDs = new Set([6]);
+      missingVideoIDs.clear();
+      removedVideoIDs.clear();
+      currentFilter = "unavailable";
+      selectedVideoIDs = new Set([6]);
+      inspectorMode = "resolve";
+      setDemoButtons(accessLostButton);
+      render();
+    }
+
+    function setMissingVideo() {
+      cancelRelinkSimulation();
+      dismissStatus();
+      resetRelinkDemoVideo();
+      diskOffline = false;
+      accessLostVideoIDs.clear();
+      missingVideoIDs = new Set([6]);
+      removedVideoIDs.clear();
+      currentFilter = "unavailable";
+      selectedVideoIDs = new Set([6]);
+      inspectorMode = "resolve";
+      setDemoButtons(missingButton);
+      render();
+    }
+
+    function setMixedUnavailable() {
+      cancelRelinkSimulation();
+      dismissStatus();
+      resetRelinkDemoVideo();
+      diskOffline = true;
+      accessLostVideoIDs = new Set([1]);
+      missingVideoIDs = new Set([6]);
+      removedVideoIDs.clear();
+      currentFilter = "unavailable";
+      selectedVideoIDs = new Set([1]);
+      inspectorMode = "resolve";
+      setDemoButtons(mixedButton);
+      render();
+    }
+
+    function setMultipleUnavailable() {
+      cancelRelinkSimulation();
+      dismissStatus();
+      resetRelinkDemoVideo();
+      diskOffline = true;
+      accessLostVideoIDs = new Set([1]);
+      missingVideoIDs = new Set([6]);
+      removedVideoIDs.clear();
+      currentFilter = "unavailable";
+      selectedVideoIDs = new Set([1, 2, 6]);
+      inspectorMode = "resolve";
+      setDemoButtons(multipleButton);
+      render();
+    }
+
+    function reconnectDisk() {
+      cancelRelinkSimulation();
+      dismissStatus();
+      resetRelinkDemoVideo();
+      diskOffline = false;
+      if (currentFilter === "unavailable" && presetTotal("unavailable") === 0) {
+        currentFilter = "all";
+      }
       setDemoButtons(reconnectButton);
       render();
     }
 
     function resetPrototype() {
+      cancelRelinkSimulation();
+      dismissStatus();
+      resetRelinkDemoVideo();
       diskOffline = false;
+      accessLostVideoIDs.clear();
+      missingVideoIDs.clear();
+      removedVideoIDs.clear();
       currentFilter = "all";
-      selectedID = 1;
+      selectedVideoIDs = new Set([1]);
       inspectorMode = "tags";
       searchInput.value = "";
       tagSearch.value = "";
@@ -743,10 +1345,174 @@
       render();
     }
 
+    function relinkSelectedVideo() {
+      const selection = selectedVideos();
+      if (selection.length !== 1) return;
+      const selected = selection[0];
+      const selectedID = selected.id;
+      if (!cannotAccess(selected)) return;
+      if (relinkInProgress) return;
+      dismissStatus();
+      relinkInProgress = true;
+      render();
+      const outcome = nextRelinkOutcome;
+      nextRelinkOutcome = "success";
+      relinkTimer = setTimeout(() => {
+        relinkTimer = null;
+        relinkInProgress = false;
+        if (outcome === "success") {
+          setDemoButtons(relinkSuccessDemo);
+          completeRelinkSuccess(selected);
+          return;
+        }
+
+        render();
+        if (outcome === "mismatch") {
+          pendingMismatchVideoID = selectedID;
+          setDemoButtons(relinkMismatchDemo);
+          relinkMismatchDialog.hidden = false;
+          document.getElementById("reselectMismatchButton").focus();
+          return;
+        }
+        if (outcome === "conflict") {
+          setDemoButtons(relinkConflictDemo);
+          showStatus(
+            "error",
+            "所选文件已存在于 FileFacet",
+            "该文件已属于另一条视频记录，当前记录保持不变",
+            "查看已有视频",
+            "viewExisting"
+          );
+          return;
+        }
+
+        setDemoButtons(relinkFailureDemo);
+        showStatus(
+          "error",
+          "无法重新定位原文件",
+          "无法读取所选文件，请重新选择后重试",
+          "重试",
+          "retry"
+        );
+      }, 650);
+    }
+
+    function previewRelinkOutcome(outcome, activeButton) {
+      cancelRelinkSimulation();
+      dismissStatus();
+      resetRelinkDemoVideo();
+      diskOffline = false;
+      accessLostVideoIDs.clear();
+      missingVideoIDs = new Set([6]);
+      removedVideoIDs.clear();
+      currentFilter = "unavailable";
+      selectedVideoIDs = new Set([6]);
+      inspectorMode = "resolve";
+      nextRelinkOutcome = outcome;
+      setDemoButtons(activeButton);
+      render();
+      relinkSelectedVideo();
+    }
+
+    function closeMismatchDialog() {
+      relinkMismatchDialog.hidden = true;
+      pendingMismatchVideoID = null;
+      document.getElementById("relinkButton").focus();
+    }
+
+    function reselectMismatchFile() {
+      relinkMismatchDialog.hidden = true;
+      pendingMismatchVideoID = null;
+      nextRelinkOutcome = "success";
+      relinkSelectedVideo();
+    }
+
+    function confirmMismatchFile() {
+      const video = videos.find(item => item.id === pendingMismatchVideoID);
+      if (!video) return closeMismatchDialog();
+      relinkMismatchDialog.hidden = true;
+      pendingMismatchVideoID = null;
+      video.name = "深夜访谈（修订版）.mp4";
+      video.path = "访谈 / 深夜访谈（修订版）.mp4";
+      video.duration = "04:26";
+      fileSizes[5] = "1.18 GB";
+      setDemoButtons(relinkMismatchDemo);
+      completeRelinkSuccess(video, `“${video.name}”已按照你的确认重新连接`);
+    }
+
+    function openRemoveDialog() {
+      const selection = selectedVideos().filter(isUnavailable);
+      if (selection.length === 0) return;
+      const count = selection.length;
+      document.getElementById("removeDialogTitle").textContent = count === 1
+        ? "从 FileFacet 移除这条记录？"
+        : `从 FileFacet 移除 ${count} 条记录？`;
+      document.getElementById("removeDialogDetail").textContent = count === 1
+        ? "原有标签和媒体信息将从 FileFacet 删除。此操作不会影响 Mac 上可能存在的原文件。"
+        : "这些记录的原有标签和媒体信息将从 FileFacet 删除。此操作不会影响 Mac 上可能存在的原文件。";
+      removeDialog.hidden = false;
+      document.getElementById("cancelRemovalButton").focus();
+    }
+
+    function closeRemoveDialog() {
+      removeDialog.hidden = true;
+      document.getElementById("removeUnavailableButton").focus();
+    }
+
+    function confirmRemoval() {
+      selectedVideos().filter(isUnavailable).forEach(video => {
+        removedVideoIDs.add(video.id);
+        missingVideoIDs.delete(video.id);
+        accessLostVideoIDs.delete(video.id);
+      });
+      removeDialog.hidden = true;
+      selectedVideoIDs.clear();
+      if (currentFilter === "unavailable" && presetTotal("unavailable") === 0) {
+        currentFilter = "all";
+        inspectorMode = "tags";
+        setDemoButtons(normalButton);
+      } else {
+        setDemoButtons(null);
+      }
+      render();
+    }
+
+    function switchToFilter(filter) {
+      if (filter !== currentFilter) dismissStatus();
+      currentFilter = filter;
+      selectedVideoIDs.clear();
+      inspectorMode = filter === "unavailable" ? "resolve" : "tags";
+      hideContextMenu();
+      render();
+    }
+
+    function showContextMenu(x, y) {
+      const video = videos.find(item => item.id === contextVideoID);
+      const selection = selectedVideos();
+      const canRelink = selection.length === 1
+        && video
+        && cannotAccess(video);
+      contextRelinkButton.hidden = !canRelink;
+      contextSeparator.hidden = !canRelink;
+      contextRemoveButton.textContent = selection.length > 1
+        ? `从 FileFacet 移除 ${selection.length} 个视频…`
+        : "从 FileFacet 移除…";
+      videoContextMenu.hidden = false;
+      const menuWidth = 210;
+      const menuHeight = canRelink ? 72 : 40;
+      videoContextMenu.style.left = `${Math.min(x, window.innerWidth - menuWidth - 8)}px`;
+      videoContextMenu.style.top = `${Math.min(y, window.innerHeight - menuHeight - 8)}px`;
+      (canRelink ? contextRelinkButton : contextRemoveButton).focus();
+    }
+
+    function hideContextMenu() {
+      videoContextMenu.hidden = true;
+      contextVideoID = null;
+    }
+
     document.querySelectorAll("[data-filter]").forEach(row => {
       row.addEventListener("click", () => {
-        currentFilter = row.dataset.filter;
-        render();
+        switchToFilter(row.dataset.filter);
       });
     });
     searchInput.addEventListener("input", render);
@@ -759,8 +1525,75 @@
     });
     normalButton.addEventListener("click", resetPrototype);
     disconnectButton.addEventListener("click", setDiskOffline);
+    accessLostButton.addEventListener("click", setAccessLost);
+    missingButton.addEventListener("click", setMissingVideo);
+    mixedButton.addEventListener("click", setMixedUnavailable);
+    multipleButton.addEventListener("click", setMultipleUnavailable);
     reconnectButton.addEventListener("click", reconnectDisk);
+    relinkSuccessDemo.addEventListener("click", () => previewRelinkOutcome("success", relinkSuccessDemo));
+    relinkMismatchDemo.addEventListener("click", () => previewRelinkOutcome("mismatch", relinkMismatchDemo));
+    relinkConflictDemo.addEventListener("click", () => previewRelinkOutcome("conflict", relinkConflictDemo));
+    relinkFailureDemo.addEventListener("click", () => previewRelinkOutcome("failure", relinkFailureDemo));
     document.getElementById("resetButton").addEventListener("click", resetPrototype);
+    document.getElementById("relinkButton").addEventListener("click", relinkSelectedVideo);
+    document.getElementById("removeUnavailableButton").addEventListener("click", openRemoveDialog);
+    contextRelinkButton.addEventListener("click", () => {
+      hideContextMenu();
+      relinkSelectedVideo();
+    });
+    contextRemoveButton.addEventListener("click", () => {
+      hideContextMenu();
+      openRemoveDialog();
+    });
+    statusAction.addEventListener("click", () => {
+      if (statusActionKind === "viewExisting") {
+        dismissStatus();
+        currentFilter = "all";
+        selectedVideoIDs = new Set([4]);
+        inspectorMode = "tags";
+        render();
+        return;
+      }
+      if (statusActionKind === "retry") {
+        dismissStatus();
+        relinkSelectedVideo();
+      }
+    });
+    closeStatus.addEventListener("click", dismissStatus);
+    document.getElementById("cancelMismatchButton").addEventListener("click", closeMismatchDialog);
+    document.getElementById("reselectMismatchButton").addEventListener("click", reselectMismatchFile);
+    document.getElementById("confirmMismatchButton").addEventListener("click", confirmMismatchFile);
+    document.getElementById("cancelRemovalButton").addEventListener("click", closeRemoveDialog);
+    document.getElementById("confirmRemovalButton").addEventListener("click", confirmRemoval);
+    removeDialog.addEventListener("click", event => {
+      if (event.target === removeDialog) closeRemoveDialog();
+    });
+    relinkMismatchDialog.addEventListener("click", event => {
+      if (event.target === relinkMismatchDialog) closeMismatchDialog();
+    });
+    document.addEventListener("click", event => {
+      if (!videoContextMenu.hidden && !videoContextMenu.contains(event.target)) hideContextMenu();
+    });
+    window.addEventListener("keydown", event => {
+      if (event.key === "Meta" || event.metaKey) setCommandKeyHeld(true);
+      const filter = shortcutFilters[event.key];
+      if (event.metaKey && filter && !event.shiftKey && !event.altKey && !event.ctrlKey) {
+        event.preventDefault();
+        switchToFilter(filter);
+      }
+      if (event.key === "Escape" && !removeDialog.hidden) closeRemoveDialog();
+      if (event.key === "Escape" && !relinkMismatchDialog.hidden) closeMismatchDialog();
+      if (event.key === "Escape" && !videoContextMenu.hidden) hideContextMenu();
+    });
+    window.addEventListener("keyup", event => {
+      if (event.key === "Meta" || !event.metaKey) setCommandKeyHeld(false);
+    });
+    window.addEventListener("blur", () => setCommandKeyHeld(false));
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) setCommandKeyHeld(false);
+    });
+    window.addEventListener("resize", hideContextMenu);
+    document.querySelector(".grid-scroll").addEventListener("scroll", hideContextMenu);
 
     render();
   </script>

@@ -4,11 +4,17 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+### Added
+
+- Added a unified Unavailable Videos category for temporarily offline and inaccessible videos, with `Command-1` through `Command-4` shortcuts for the four preset library categories.
+- Inaccessible videos can now be relinked to an original file or removed from FileFacet while retaining their tags, cached thumbnail, and media information until the user decides.
+
 ### Changed
 
-- Completed imports now offer a direct action to open Recent Imports and continue reviewing the imported videos.
-- Recently added videos now default to newest-first import ordering.
+- Completed imports now select and reveal every video handled by the batch: new-only batches open Recently Added, while batches containing existing records open All Videos.
+- Recently Added now uses a fixed newest-first system ordering without changing user sorting in other categories; manually changing categories also starts at the top with no video selected.
 - Finished notifications now include a close control, and removal undo expires when the browsing context changes, a new import begins, or the notification is dismissed.
+- Videos confirmed outside their known location or moved to the Trash now leave active library results and remain available for recovery; relinking only proceeds automatically when the complete content fingerprint matches.
 
 ## [1.0.5] - 2026-07-31
 

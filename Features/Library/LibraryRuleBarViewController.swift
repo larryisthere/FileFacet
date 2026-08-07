@@ -4,6 +4,7 @@ struct LibraryRuleBarContext {
     let scopeTitle: String?
     let temporarySearch: String
     var rule: LibraryQueryRule
+    let presetSort: LibraryVideoSort?
     let tags: [TagRecord]
     let smartCollection: SmartCollectionRecord?
     let isDirty: Bool
@@ -24,6 +25,7 @@ final class LibraryRuleBarViewController: NSViewController, NSPopoverDelegate {
         scopeTitle: nil,
         temporarySearch: "",
         rule: .standard,
+        presetSort: nil,
         tags: [],
         smartCollection: nil,
         isDirty: false,
@@ -212,7 +214,9 @@ final class LibraryRuleBarViewController: NSViewController, NSPopoverDelegate {
         divider.heightAnchor.constraint(equalToConstant: 22).isActive = true
         chipStack.addArrangedSubview(divider)
 
-        if context.rule.sort == .standard {
+        if let presetSort = context.presetSort {
+            chipStack.addArrangedSubview(staticChip(sortLabel(presetSort)))
+        } else if context.rule.sort == .standard {
             let addSortTitle = String(localized: "filter.addSort", defaultValue: "Add Sort")
             let addSort = chipButton(addSortTitle, style: .add)
             addSort.target = self
@@ -282,8 +286,8 @@ final class LibraryRuleBarViewController: NSViewController, NSPopoverDelegate {
             save.isEnabled = hasSavableRule && context.canSaveAsSmartCollection
             if context.canSaveAsSmartCollection == false {
                 save.toolTip = String(
-                    localized: "filter.offlineCannotSave",
-                    defaultValue: "Offline status is checked at runtime and cannot be saved as a smart collection."
+                    localized: "filter.unavailableCannotSave",
+                    defaultValue: "Unavailable status cannot be saved as a smart collection."
                 )
             }
             actionStack.addArrangedSubview(clear)
@@ -442,11 +446,15 @@ final class LibraryRuleBarViewController: NSViewController, NSPopoverDelegate {
     }
 
     private func sortLabel() -> String {
-        guard context.rule.sort != .standard else {
+        sortLabel(context.rule.sort)
+    }
+
+    private func sortLabel(_ sort: LibraryVideoSort) -> String {
+        guard sort != .standard else {
             return String(localized: "filter.addSort", defaultValue: "Add Sort")
         }
-        let key = sortKeyTitle(context.rule.sort.key)
-        let direction = sortDirectionTitle(context.rule.sort)
+        let key = sortKeyTitle(sort.key)
+        let direction = sortDirectionTitle(sort)
         return String(localized: "filter.sortSummary", defaultValue: "Sort: \(key) · \(direction)")
     }
 

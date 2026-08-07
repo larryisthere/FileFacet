@@ -1,6 +1,7 @@
 # 离线资料库设计
 
 - 状态：已完成，已授权发布
+- 后续扩展：[`unavailable-videos-design.md`](unavailable-videos-design.md)
 - 需求：[`offline-library-requirements.md`](offline-library-requirements.md)
 - 交互原型：[`../prototypes/offline-library/index.html`](../prototypes/offline-library/index.html)
 

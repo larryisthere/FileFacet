@@ -6,6 +6,19 @@ func fallbackPathKey(for fileURL: URL) -> Data {
     return Data(SHA256.hash(data: Data(normalizedURL.utf8)))
 }
 
+func contentFingerprint(for fileURL: URL) throws -> Data {
+    let handle = try FileHandle(forReadingFrom: fileURL)
+    defer { try? handle.close() }
+    var hasher = SHA256()
+    while true {
+        try Task.checkCancellation()
+        guard let chunk = try handle.read(upToCount: 4 * 1_024 * 1_024),
+              chunk.isEmpty == false else { break }
+        hasher.update(data: chunk)
+    }
+    return Data(hasher.finalize())
+}
+
 struct DiscoveredVideo: Equatable, Sendable {
     let relativePath: String
     let filename: String
@@ -15,8 +28,10 @@ struct DiscoveredVideo: Equatable, Sendable {
     let modificationDate: Date?
     let volumeIdentifier: Data?
     let fileResourceIdentifier: Data?
+    let contentFingerprint: Data?
     let finderTags: [String]
     let fallbackPathKey: Data?
+    let lastKnownPath: String?
 
     init(
         relativePath: String,
@@ -27,8 +42,10 @@ struct DiscoveredVideo: Equatable, Sendable {
         modificationDate: Date?,
         volumeIdentifier: Data?,
         fileResourceIdentifier: Data?,
+        contentFingerprint: Data? = nil,
         finderTags: [String],
-        fallbackPathKey: Data? = nil
+        fallbackPathKey: Data? = nil,
+        lastKnownPath: String? = nil
     ) {
         self.relativePath = relativePath
         self.filename = filename
@@ -38,7 +55,26 @@ struct DiscoveredVideo: Equatable, Sendable {
         self.modificationDate = modificationDate
         self.volumeIdentifier = volumeIdentifier
         self.fileResourceIdentifier = fileResourceIdentifier
+        self.contentFingerprint = contentFingerprint
         self.finderTags = finderTags
         self.fallbackPathKey = fallbackPathKey
+        self.lastKnownPath = lastKnownPath
+    }
+
+    func withContentFingerprint(_ fingerprint: Data) -> DiscoveredVideo {
+        DiscoveredVideo(
+            relativePath: relativePath,
+            filename: filename,
+            fileExtension: fileExtension,
+            fileSize: fileSize,
+            creationDate: creationDate,
+            modificationDate: modificationDate,
+            volumeIdentifier: volumeIdentifier,
+            fileResourceIdentifier: fileResourceIdentifier,
+            contentFingerprint: fingerprint,
+            finderTags: finderTags,
+            fallbackPathKey: fallbackPathKey,
+            lastKnownPath: lastKnownPath
+        )
     }
 }

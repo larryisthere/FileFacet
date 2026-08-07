@@ -31,6 +31,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var hasEditedInlineRenameName = false
     private var isResolvingInlineRename = false
     private var tagSortMode: TagSortMode
+    private var showsPresetShortcutHints = false
 
     init(
         onFilterChanged: @escaping (LibraryFilter) -> Void,
@@ -153,6 +154,21 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         refocusInlineRenameIfNeeded()
     }
 
+    func setPresetShortcutHintsVisible(_ visible: Bool) {
+        guard showsPresetShortcutHints != visible else { return }
+        showsPresetShortcutHints = visible
+        guard isViewLoaded else { return }
+        for row in 0..<outlineView.numberOfRows {
+            guard let filter = outlineView.item(atRow: row) as? SidebarFilterNode,
+                  let rowView = outlineView.rowView(atRow: row, makeIfNecessary: false)
+                    as? SidebarCountRowView else { continue }
+            rowView.configure(
+                count: filter.videoCount,
+                shortcutHint: visible ? filter.shortcutHint : nil
+            )
+        }
+    }
+
     func selectFilter(_ filter: LibraryFilter) {
         loadViewIfNeeded()
         guard let row = (0..<outlineView.numberOfRows).first(where: { row in
@@ -232,7 +248,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
         let rowView = SidebarCountRowView()
         if let filter = item as? SidebarFilterNode {
-            rowView.configure(count: filter.videoCount)
+            rowView.configure(
+                count: filter.videoCount,
+                shortcutHint: showsPresetShortcutHints ? filter.shortcutHint : nil
+            )
         } else if let smartCollection = item as? SmartCollectionNode {
             rowView.configure(count: smartCollection.collection.videoCount)
         } else if let tag = item as? TagNode {
@@ -318,10 +337,17 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         cell.smartCollectionActionButton.identifier = nil
         cell.smartCollectionActionButton.target = nil
         cell.smartCollectionActionButton.action = nil
+        cell.setAccessibilityHelp(nil)
 
         if let filter = item as? SidebarFilterNode {
             cell.textField?.stringValue = filter.title
             cell.imageView?.image = sidebarSymbol(named: filter.systemImageName, description: filter.title)
+            if let shortcutHint = filter.shortcutHint {
+                cell.setAccessibilityHelp(String(
+                    localized: "sidebar.presetShortcutHelp",
+                    defaultValue: "Keyboard shortcut: \(shortcutHint)"
+                ))
+            }
         } else if let smartCollection = item as? SmartCollectionNode {
             let name = smartCollection.collection.name
             if inlineRenameTarget == .smartCollection(smartCollection.collection.id) {
@@ -587,7 +613,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     private func rebuildNodes() {
-        var libraryChildren: [Any] = [
+        let libraryChildren: [Any] = [
             SidebarFilterNode(
                 title: String(localized: .libraryAllVideos),
                 systemImageName: "film",
@@ -595,28 +621,27 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 videoCount: filterCounts.all
             ),
             SidebarFilterNode(
+                title: String(localized: .libraryUntagged),
+                systemImageName: "tag.slash",
+                filter: .untagged,
+                videoCount: filterCounts.untagged
+            ),
+            SidebarFilterNode(
                 title: String(localized: .libraryRecent),
                 systemImageName: "clock",
                 filter: .recent,
                 videoCount: filterCounts.recent
             ),
-        ]
-        if filterCounts.offline > 0 {
-            libraryChildren.append(SidebarFilterNode(
-                title: String(localized: .libraryOffline),
-                systemImageName: "externaldrive.badge.xmark",
-                filter: .offline,
-                videoCount: filterCounts.offline
-            ))
-        }
-        libraryChildren.append(
             SidebarFilterNode(
-                title: String(localized: .libraryUntagged),
-                systemImageName: "tag.slash",
-                filter: .untagged,
-                videoCount: filterCounts.untagged
+                title: String(
+                    localized: "library.unavailable",
+                    defaultValue: "Unavailable Videos"
+                ),
+                systemImageName: "externaldrive.badge.xmark",
+                filter: .unavailable,
+                videoCount: filterCounts.unavailable
             )
-        )
+        ]
         let library = SidebarGroupNode(
             kind: .library,
             title: String(localized: .libraryGroup),
@@ -1055,9 +1080,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         guard let filter = item as? SidebarFilterNode else { return nil }
         return switch filter.filter {
         case .all: .all
-        case .offline: .offline
         case .untagged: .untagged
         case .recent: .recent
+        case .unavailable: .unavailable
         case .tag, .tags: nil
         }
     }
@@ -1233,9 +1258,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
 private enum SidebarSelectionKey: Hashable {
     case all
-    case offline
     case untagged
     case recent
+    case unavailable
     case smartCollection(String)
     case tag(String)
 }
@@ -1298,9 +1323,9 @@ private final class SidebarCountRowView: NSTableRowView {
         )
     }
 
-    func configure(count: Int?) {
-        countLabel.stringValue = count.map(String.init) ?? ""
-        countLabel.isHidden = count == nil
+    func configure(count: Int?, shortcutHint: String? = nil) {
+        countLabel.stringValue = shortcutHint ?? count.map(String.init) ?? ""
+        countLabel.isHidden = count == nil && shortcutHint == nil
     }
 
     private func updateTextColor() {
@@ -1309,7 +1334,7 @@ private final class SidebarCountRowView: NSTableRowView {
 }
 
 private final class SidebarTagGroupCellView: NSTableCellView {
-    static let trailingColumnWidth: CGFloat = 26
+    static let trailingColumnWidth: CGFloat = 28
     static let trailingInset: CGFloat = 9
 
     let toggleButton: NSButton = {

@@ -13,6 +13,7 @@ struct MediaProcessingResult: Sendable {
     let metadataStatus: VideoRecord.ProcessingStatus
     let thumbnailStatus: VideoRecord.ProcessingStatus
     let mediaSourceInfo: MediaSourceInfo?
+    let contentFingerprint: Data?
 
     init(
         duration: Double?,
@@ -21,7 +22,8 @@ struct MediaProcessingResult: Sendable {
         thumbnailID: String?,
         metadataStatus: VideoRecord.ProcessingStatus,
         thumbnailStatus: VideoRecord.ProcessingStatus,
-        mediaSourceInfo: MediaSourceInfo? = nil
+        mediaSourceInfo: MediaSourceInfo? = nil,
+        contentFingerprint: Data? = nil
     ) {
         self.duration = duration
         self.width = width
@@ -30,7 +32,14 @@ struct MediaProcessingResult: Sendable {
         self.metadataStatus = metadataStatus
         self.thumbnailStatus = thumbnailStatus
         self.mediaSourceInfo = mediaSourceInfo
+        self.contentFingerprint = contentFingerprint
     }
+}
+
+struct VideoMediaInspection: Sendable {
+    let duration: Double?
+    let width: Int?
+    let height: Int?
 }
 
 actor MediaProcessingService {
@@ -58,6 +67,7 @@ actor MediaProcessingService {
 
     func process(video: VideoRecord, fileURL: URL) async -> MediaProcessingResult {
         let asset = AVURLAsset(url: fileURL)
+        let fingerprint = try? contentFingerprint(for: fileURL)
         var duration: Double?
         var width: Int?
         var height: Int?
@@ -125,7 +135,8 @@ actor MediaProcessingService {
                 thumbnailID: thumbnailID,
                 metadataStatus: metadataStatus,
                 thumbnailStatus: .completed,
-                mediaSourceInfo: mediaSourceInfo
+                mediaSourceInfo: mediaSourceInfo,
+                contentFingerprint: fingerprint
             )
         } catch {
             return MediaProcessingResult(
@@ -135,9 +146,33 @@ actor MediaProcessingService {
                 thumbnailID: nil,
                 metadataStatus: metadataStatus,
                 thumbnailStatus: .failed,
-                mediaSourceInfo: mediaSourceInfo
+                mediaSourceInfo: mediaSourceInfo,
+                contentFingerprint: fingerprint
             )
         }
+    }
+
+    func inspectVideo(fileURL: URL) async throws -> VideoMediaInspection {
+        let asset = AVURLAsset(url: fileURL)
+        guard try await asset.load(.isPlayable),
+              let track = try await asset.loadTracks(withMediaType: .video).first else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let durationValue = try await asset.load(.duration)
+        let duration = durationValue.isNumeric ? max(0, durationValue.seconds) : nil
+        let naturalSize = try await track.load(.naturalSize)
+        let transform = try await track.load(.preferredTransform)
+        let transformedSize = naturalSize.applying(transform)
+        let width = Int(abs(transformedSize.width).rounded())
+        let height = Int(abs(transformedSize.height).rounded())
+        guard width > 0, height > 0 else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        return VideoMediaInspection(
+            duration: duration,
+            width: width,
+            height: height
+        )
     }
 
     private func loadMediaSourceInfo(asset: AVAsset, fileURL: URL) async -> MediaSourceInfo {
