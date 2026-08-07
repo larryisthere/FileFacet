@@ -162,10 +162,11 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             guard let filter = outlineView.item(atRow: row) as? SidebarFilterNode,
                   let rowView = outlineView.rowView(atRow: row, makeIfNecessary: false)
                     as? SidebarCountRowView else { continue }
-            rowView.configure(
-                count: filter.videoCount,
-                shortcutHint: visible ? filter.shortcutHint : nil
-            )
+            let trailingText = trailingText(for: filter)
+            rowView.configure(text: trailingText)
+            let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                as? SidebarItemCellView
+            cell?.configureTrailingLayout(text: trailingText, showsActionButton: false)
         }
     }
 
@@ -247,18 +248,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
         let rowView = SidebarCountRowView()
-        if let filter = item as? SidebarFilterNode {
-            rowView.configure(
-                count: filter.videoCount,
-                shortcutHint: showsPresetShortcutHints ? filter.shortcutHint : nil
-            )
-        } else if let smartCollection = item as? SmartCollectionNode {
-            rowView.configure(count: smartCollection.collection.videoCount)
-        } else if let tag = item as? TagNode {
-            rowView.configure(count: tag.tag.videoCount)
-        } else {
-            rowView.configure(count: nil)
-        }
+        rowView.configure(text: trailingText(for: item))
         return rowView
     }
 
@@ -338,6 +328,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         cell.smartCollectionActionButton.target = nil
         cell.smartCollectionActionButton.action = nil
         cell.setAccessibilityHelp(nil)
+        let showsActionButton: Bool
+        if let smartCollection = item as? SmartCollectionNode {
+            showsActionButton = inlineRenameTarget != .smartCollection(smartCollection.collection.id)
+        } else {
+            showsActionButton = false
+        }
+        cell.configureTrailingLayout(
+            text: trailingText(for: item),
+            showsActionButton: showsActionButton
+        )
 
         if let filter = item as? SidebarFilterNode {
             cell.textField?.stringValue = filter.title
@@ -403,6 +403,22 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.imageView?.isHidden = true
         }
         return cell
+    }
+
+    private func trailingText(for item: Any) -> String? {
+        if let filter = item as? SidebarFilterNode {
+            if showsPresetShortcutHints, let shortcutHint = filter.shortcutHint {
+                return shortcutHint
+            }
+            return String(filter.videoCount)
+        }
+        if let smartCollection = item as? SmartCollectionNode {
+            return smartCollection.collection.videoCount.map(String.init)
+        }
+        if let tag = item as? TagNode {
+            return String(tag.tag.videoCount)
+        }
+        return nil
     }
 
     func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
@@ -1233,6 +1249,13 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         textField.isEditable = false; textField.isSelectable = false; textField.isBordered = false; textField.drawsBackground = false
         cell.addSubview(imageView); cell.addSubview(textField); cell.addSubview(cell.smartCollectionActionButton)
         cell.imageView = imageView; cell.textField = textField
+        let actionButtonTrailingConstraint = cell.smartCollectionActionButton.trailingAnchor.constraint(
+            equalTo: cell.trailingAnchor,
+            constant: -SidebarTagGroupCellView.trailingInset
+        )
+        let actionButtonWidthConstraint = cell.smartCollectionActionButton.widthAnchor.constraint(equalToConstant: 0)
+        cell.actionButtonTrailingConstraint = actionButtonTrailingConstraint
+        cell.actionButtonWidthConstraint = actionButtonWidthConstraint
         NSLayoutConstraint.activate([
             imageView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: -6),
             imageView.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
@@ -1244,12 +1267,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 lessThanOrEqualTo: cell.smartCollectionActionButton.leadingAnchor,
                 constant: -4
             ),
-            cell.smartCollectionActionButton.trailingAnchor.constraint(
-                equalTo: cell.trailingAnchor,
-                constant: -(SidebarTagGroupCellView.trailingInset + SidebarTagGroupCellView.trailingColumnWidth)
-            ),
+            actionButtonTrailingConstraint,
             cell.smartCollectionActionButton.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            cell.smartCollectionActionButton.widthAnchor.constraint(equalToConstant: 22),
+            actionButtonWidthConstraint,
             cell.smartCollectionActionButton.heightAnchor.constraint(equalToConstant: 22),
         ])
         return cell
@@ -1271,6 +1291,9 @@ private enum SidebarInlineRenameTarget: Equatable {
 }
 
 private final class SidebarItemCellView: NSTableCellView {
+    fileprivate var actionButtonTrailingConstraint: NSLayoutConstraint?
+    fileprivate var actionButtonWidthConstraint: NSLayoutConstraint?
+
     let smartCollectionActionButton: NSButton = {
         let description = String(
             localized: "smartCollection.actions",
@@ -1292,10 +1315,20 @@ private final class SidebarItemCellView: NSTableCellView {
         button.isHidden = true
         return button
     }()
+
+    func configureTrailingLayout(text: String?, showsActionButton: Bool) {
+        actionButtonTrailingConstraint?.constant = -(
+            SidebarCountRowView.trailingInset(for: text) + SidebarCountRowView.width(for: text)
+        )
+        actionButtonWidthConstraint?.constant = showsActionButton ? 22 : 0
+    }
 }
 
 private final class SidebarCountRowView: NSTableRowView {
+    private static let selectedBackgroundClearance: CGFloat = 7
+
     private let countLabel = NSTextField(labelWithString: "")
+    private var countLabelWidth: CGFloat = 0
 
     override var isSelected: Bool {
         didSet { updateTextColor() }
@@ -1304,7 +1337,7 @@ private final class SidebarCountRowView: NSTableRowView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         countLabel.font = .systemFont(ofSize: 11)
-        countLabel.alignment = .center
+        countLabel.alignment = .right
         addSubview(countLabel)
         updateTextColor()
     }
@@ -1314,18 +1347,33 @@ private final class SidebarCountRowView: NSTableRowView {
 
     override func layout() {
         super.layout()
-        let width = SidebarTagGroupCellView.trailingColumnWidth
         countLabel.frame = NSRect(
-            x: bounds.maxX - SidebarTagGroupCellView.trailingInset - width,
+            x: bounds.maxX - Self.trailingInset(for: countLabel.stringValue) - countLabelWidth,
             y: floor((bounds.height - 16) / 2),
-            width: width,
+            width: countLabelWidth,
             height: 16
         )
     }
 
-    func configure(count: Int?, shortcutHint: String? = nil) {
-        countLabel.stringValue = shortcutHint ?? count.map(String.init) ?? ""
-        countLabel.isHidden = count == nil && shortcutHint == nil
+    func configure(text: String?) {
+        countLabel.stringValue = text ?? ""
+        countLabel.isHidden = text == nil
+        countLabelWidth = Self.width(for: text)
+        needsLayout = true
+    }
+
+    static func width(for text: String?) -> CGFloat {
+        guard let text, text.isEmpty == false else { return 0 }
+        let measurementField = NSTextField(labelWithString: text)
+        measurementField.font = .systemFont(ofSize: 11)
+        return ceil(measurementField.fittingSize.width) + 1
+    }
+
+    static func trailingInset(for text: String?) -> CGFloat {
+        guard let text, text.isEmpty == false else {
+            return SidebarTagGroupCellView.trailingInset
+        }
+        return SidebarTagGroupCellView.trailingInset + selectedBackgroundClearance
     }
 
     private func updateTextColor() {

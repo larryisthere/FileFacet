@@ -4,6 +4,10 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+### Fixed
+
+- Sidebar names now use the available space up to their right-aligned counts, while counts remain fully visible in both selected and unselected rows.
+
 ## [1.0.6] - 2026-08-07
 
 ### Added
