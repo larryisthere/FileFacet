@@ -4,6 +4,11 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+### Added
+
+- Added video-grid grouping by added, created, or modified date, duration, file size, and resolution, with independent group ordering, counts, collapsible sticky headers, and a direct clear control.
+- Recently Added now temporarily groups videos by newest added date and restores the previous grouping preference when leaving the category.
+
 ### Fixed
 
 - Sidebar names now use the available space up to their right-aligned counts, while counts remain fully visible in both selected and unselected rows.

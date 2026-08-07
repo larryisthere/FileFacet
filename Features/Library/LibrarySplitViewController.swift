@@ -52,6 +52,8 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private var currentBaseFilter: LibraryFilter = .all
     private var temporaryFilenameSearch = ""
     private var currentRule = LibraryQueryRule.standard
+    private var currentGrouping = VideoGroupingPreference.persisted()
+    private var groupingBeforeRecent: VideoGroupingPreference?
     private var selectedSmartCollection: SmartCollectionRecord?
     private var pendingNavigationTarget: NavigationTarget?
     private var isPresentingSmartCollectionAlert = false
@@ -250,6 +252,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        videoGridViewController.setGrouping(currentGrouping)
 
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarViewController)
         sidebarItem.minimumThickness = 190
@@ -389,6 +392,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             onEndVideoRemovalUndo()
             resetBrowsingStateForNextVideoUpdate = true
         }
+        transitionGrouping(to: .filter(filter))
         currentBaseFilter = filter
         selectedSmartCollection = nil
         sidebarViewController.selectFilter(filter)
@@ -457,6 +461,15 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         ruleBarViewController.onUpdate = { [weak self] in
             self?.updateCurrentSmartCollection()
         }
+        ruleBarViewController.onGroupingChanged = { [weak self] grouping in
+            guard let self else { return }
+            currentGrouping = grouping
+            if isBrowsingRecent == false {
+                grouping.persist()
+            }
+            videoGridViewController.setGrouping(grouping)
+            refreshRuleBar()
+        }
     }
 
     private func refreshRuleBar() {
@@ -469,7 +482,8 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             smartCollection: selectedSmartCollection,
             isDirty: smartCollectionIsDirty,
             hasPersistableBaseScope: hasPersistableBaseScope,
-            canSaveAsSmartCollection: canSaveCurrentContext
+            canSaveAsSmartCollection: canSaveCurrentContext,
+            grouping: currentGrouping
         ))
     }
 
@@ -564,6 +578,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private func performNavigation(to target: NavigationTarget) {
         pendingNavigationTarget = nil
         onEndVideoRemovalUndo()
+        transitionGrouping(to: target)
         let isPendingVideoRevealTarget: Bool
         switch target {
         case let .filter(filter):
@@ -598,6 +613,30 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         updateInspectorBrowsingContext()
         refreshRuleBar()
         applyCurrentQuery()
+    }
+
+    private var isBrowsingRecent: Bool {
+        selectedSmartCollection == nil && currentBaseFilter == .recent
+    }
+
+    private func transitionGrouping(to target: NavigationTarget) {
+        let willBrowseRecent: Bool
+        switch target {
+        case let .filter(filter):
+            willBrowseRecent = filter == .recent
+        case .smartCollection:
+            willBrowseRecent = false
+        }
+        guard willBrowseRecent != isBrowsingRecent else { return }
+
+        if willBrowseRecent {
+            groupingBeforeRecent = currentGrouping
+            currentGrouping = VideoGroupingPreference(key: .addedDate, direction: .descending)
+        } else {
+            currentGrouping = groupingBeforeRecent ?? VideoGroupingPreference.persisted()
+            groupingBeforeRecent = nil
+        }
+        videoGridViewController.setGrouping(currentGrouping)
     }
 
     private func updateInspectorBrowsingContext() {

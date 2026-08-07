@@ -10,6 +10,7 @@ struct LibraryRuleBarContext {
     let isDirty: Bool
     let hasPersistableBaseScope: Bool
     let canSaveAsSmartCollection: Bool
+    var grouping: VideoGroupingPreference
 }
 
 @MainActor
@@ -20,6 +21,7 @@ final class LibraryRuleBarViewController: NSViewController, NSPopoverDelegate {
     var onSaveAs: (() -> Void)?
     var onRevert: (() -> Void)?
     var onUpdate: (() -> Void)?
+    var onGroupingChanged: ((VideoGroupingPreference) -> Void)?
 
     private var context = LibraryRuleBarContext(
         scopeTitle: nil,
@@ -30,7 +32,8 @@ final class LibraryRuleBarViewController: NSViewController, NSPopoverDelegate {
         smartCollection: nil,
         isDirty: false,
         hasPersistableBaseScope: false,
-        canSaveAsSmartCollection: true
+        canSaveAsSmartCollection: true,
+        grouping: .standard
     )
     private let chipStack = NSStackView()
     private let actionStack = NSStackView()
@@ -234,6 +237,32 @@ final class LibraryRuleBarViewController: NSViewController, NSPopoverDelegate {
             ))
         }
 
+        let groupingDivider = NSBox()
+        groupingDivider.boxType = .separator
+        groupingDivider.translatesAutoresizingMaskIntoConstraints = false
+        groupingDivider.widthAnchor.constraint(equalToConstant: 1).isActive = true
+        groupingDivider.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        chipStack.addArrangedSubview(groupingDivider)
+
+        let groupingButton = chipButton(
+            groupingLabel(),
+            style: context.grouping.key == .none ? .add : .plain
+        )
+        groupingButton.target = self
+        groupingButton.action = #selector(showGroupingMenu(_:))
+        groupingButton.toolTip = groupingTooltip()
+        groupingButton.setAccessibilityLabel(groupingTooltip())
+        if context.grouping.key == .none {
+            chipStack.addArrangedSubview(groupingButton)
+        } else {
+            chipStack.addArrangedSubview(removableChipView(
+                mainButton: groupingButton,
+                removeAction: #selector(removeGrouping),
+                appearance: .accent,
+                removeTitle: String(localized: "grouping.clear", defaultValue: "Clear Grouping")
+            ))
+        }
+
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -364,17 +393,20 @@ final class LibraryRuleBarViewController: NSViewController, NSPopoverDelegate {
         mainButton: NSButton,
         removeAction: Selector,
         tag: Int? = nil,
-        appearance: RuleBarChipContainer.Appearance = .neutral
+        appearance: RuleBarChipContainer.Appearance = .neutral,
+        removeTitle: String = String(localized: "filter.remove", defaultValue: "Remove")
     ) -> NSView {
         let remove = RuleBarIconButton(
             image: NSImage(
                 systemSymbolName: "xmark",
-                accessibilityDescription: String(localized: "filter.remove", defaultValue: "Remove")
+                accessibilityDescription: removeTitle
             ) ?? NSImage()
         )
         if let tag { remove.tag = tag }
         remove.target = self
         remove.action = removeAction
+        remove.toolTip = removeTitle
+        remove.setAccessibilityLabel(removeTitle)
         let stack = NSStackView(views: [mainButton, remove])
         stack.orientation = .horizontal
         stack.alignment = .centerY
@@ -486,6 +518,54 @@ final class LibraryRuleBarViewController: NSViewController, NSPopoverDelegate {
             : String(localized: "filter.sort.largest", defaultValue: "Largest First")
     }
 
+    private func groupingLabel() -> String {
+        guard context.grouping.key != .none else {
+            return String(localized: "grouping.add", defaultValue: "Add Grouping")
+        }
+        let key = groupingKeyTitle(context.grouping.key)
+        return String(localized: "grouping.summary", defaultValue: "Group: \(key)")
+    }
+
+    private func groupingTooltip() -> String {
+        guard context.grouping.key != .none else {
+            return String(localized: "grouping.add", defaultValue: "Add Grouping")
+        }
+        let key = groupingKeyTitle(context.grouping.key)
+        let direction = groupingDirectionTitle(context.grouping)
+        return String(localized: "grouping.tooltip", defaultValue: "Group by \(key), \(direction)")
+    }
+
+    private func groupingKeyTitle(_ key: VideoGroupingKey) -> String {
+        switch key {
+        case .none:
+            String(localized: "grouping.none", defaultValue: "No Grouping")
+        case .addedDate:
+            String(localized: "filter.sort.added", defaultValue: "Date Added")
+        case .createdDate:
+            String(localized: "filter.sort.created", defaultValue: "Date Created")
+        case .modifiedDate:
+            String(localized: "filter.sort.modified", defaultValue: "Date Modified")
+        case .duration:
+            String(localized: "filter.sort.duration", defaultValue: "Duration")
+        case .fileSize:
+            String(localized: "filter.sort.fileSize", defaultValue: "File Size")
+        case .resolution:
+            String(localized: "filter.sort.resolution", defaultValue: "Resolution")
+        }
+    }
+
+    private func groupingDirectionTitle(_ grouping: VideoGroupingPreference) -> String {
+        let usesDateDirection = [.addedDate, .createdDate, .modifiedDate].contains(grouping.key)
+        if usesDateDirection {
+            return grouping.direction == .descending
+                ? String(localized: "filter.sort.newest", defaultValue: "Newest First")
+                : String(localized: "filter.sort.oldest", defaultValue: "Oldest First")
+        }
+        return grouping.direction == .descending
+            ? String(localized: "filter.sort.largest", defaultValue: "Largest First")
+            : String(localized: "filter.sort.smallest", defaultValue: "Smallest First")
+    }
+
     private func mutateRule(_ mutation: (inout LibraryQueryRule) -> Void) {
         activePopover?.close()
         mutation(&context.rule)
@@ -536,6 +616,63 @@ final class LibraryRuleBarViewController: NSViewController, NSPopoverDelegate {
 
     @objc private func removeSort() {
         mutateRule { $0.sort = .standard }
+    }
+
+    @objc private func removeGrouping() {
+        context.grouping.key = .none
+        onGroupingChanged?(context.grouping)
+        render()
+    }
+
+    @objc private func showGroupingMenu(_ sender: NSButton) {
+        activePopover?.close()
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for key in VideoGroupingKey.allCases {
+            let item = NSMenuItem(
+                title: groupingKeyTitle(key),
+                action: #selector(selectGroupingKey(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = key.rawValue
+            item.state = context.grouping.key == key ? .on : .off
+            item.isEnabled = true
+            menu.addItem(item)
+            if key == .none { menu.addItem(.separator()) }
+        }
+
+        menu.addItem(.separator())
+        for direction in VideoGroupingDirection.allCases.reversed() {
+            let candidate = VideoGroupingPreference(key: context.grouping.key, direction: direction)
+            let item = NSMenuItem(
+                title: groupingDirectionTitle(candidate),
+                action: #selector(selectGroupingDirection(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = direction.rawValue
+            item.state = context.grouping.direction == direction ? .on : .off
+            item.isEnabled = context.grouping.key != .none
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
+    }
+
+    @objc private func selectGroupingKey(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let key = VideoGroupingKey(rawValue: rawValue) else { return }
+        context.grouping.key = key
+        onGroupingChanged?(context.grouping)
+        render()
+    }
+
+    @objc private func selectGroupingDirection(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let direction = VideoGroupingDirection(rawValue: rawValue) else { return }
+        context.grouping.direction = direction
+        onGroupingChanged?(context.grouping)
+        render()
     }
 
     @objc private func showAddFilterMenu(_ sender: NSButton) {

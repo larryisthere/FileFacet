@@ -1,5 +1,43 @@
 import AppKit
 
+enum VideoGroupingKey: String, CaseIterable, Sendable {
+    case none
+    case addedDate
+    case createdDate
+    case modifiedDate
+    case duration
+    case fileSize
+    case resolution
+}
+
+enum VideoGroupingDirection: String, CaseIterable, Sendable {
+    case ascending
+    case descending
+}
+
+struct VideoGroupingPreference: Equatable, Sendable {
+    private static let keyDefaultsKey = "VideoGroupingKey"
+    private static let directionDefaultsKey = "VideoGroupingDirection"
+
+    var key: VideoGroupingKey
+    var direction: VideoGroupingDirection
+
+    static let standard = VideoGroupingPreference(key: .none, direction: .descending)
+
+    static func persisted(defaults: UserDefaults = .standard) -> VideoGroupingPreference {
+        let key = defaults.string(forKey: keyDefaultsKey)
+            .flatMap(VideoGroupingKey.init(rawValue:)) ?? .none
+        let direction = defaults.string(forKey: directionDefaultsKey)
+            .flatMap(VideoGroupingDirection.init(rawValue:)) ?? .descending
+        return VideoGroupingPreference(key: key, direction: direction)
+    }
+
+    func persist(defaults: UserDefaults = .standard) {
+        defaults.set(key.rawValue, forKey: Self.keyDefaultsKey)
+        defaults.set(direction.rawValue, forKey: Self.directionDefaultsKey)
+    }
+}
+
 struct VideoRevealRequest: Equatable, Sendable {
     let videoIDs: [String]
     let destination: LibraryFilter
@@ -14,12 +52,31 @@ struct VideoRevealRequest: Equatable, Sendable {
 @MainActor
 final class VideoGridViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegate {
     private static let itemIdentifier = NSUserInterfaceItemIdentifier("VideoCollectionViewItem")
+    private static let groupHeaderIdentifier = NSUserInterfaceItemIdentifier("VideoGroupHeaderView")
     private static let gridItemWidthDefaultsKey = "VideoGridItemWidth"
     static let defaultGridItemWidth = 180.0
     static let minimumGridItemWidth = 150.0
     static let maximumGridItemWidth = 280.0
     private static let thumbnailHeightRatio = 0.55
     private static let gridItemChromeHeight = 64.0
+
+    private struct GroupSection {
+        let id: String
+        let title: String?
+        let videos: [VideoRecord]
+    }
+
+    private struct GroupBucket {
+        let id: String
+        let title: String
+        let rank: Int
+        let isUnknown: Bool
+    }
+
+    private enum SelectionGestureMode {
+        case replacing
+        case extending
+    }
 
     private let collectionView = VideoCollectionView()
     private let scrollView = NSScrollView()
@@ -46,7 +103,13 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     private var relinkBrowsingContextRevision: Int?
     private var browsingContextRevision = 0
     private var videos: [VideoRecord] = []
+    private var sections: [GroupSection] = []
+    private var grouping = VideoGroupingPreference.standard
+    private var collapsedGroupIDs = Set<String>()
+    private var selectedVideoIDs = Set<String>()
     private var selectionAnchorVideoID: String?
+    private var selectionGestureMode: SelectionGestureMode = .replacing
+    private var isSynchronizingSelection = false
 
     private let emptyState = NSStackView()
     private let emptyTitleLabel = NSTextField(labelWithString: String(localized: .importEmptyTitle))
@@ -107,6 +170,11 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         collectionView.allowsMultipleSelection = true
         collectionView.backgroundColors = [.clear]
         collectionView.register(VideoCollectionViewItem.self, forItemWithIdentifier: Self.itemIdentifier)
+        collectionView.register(
+            VideoGroupHeaderView.self,
+            forSupplementaryViewOfKind: NSCollectionView.elementKindSectionHeader,
+            withIdentifier: Self.groupHeaderIdentifier
+        )
         collectionView.registerForDraggedTypes([SidebarViewController.tagPasteboardType])
         collectionView.onDoubleClickItem = { [weak self] indexPath in
             self?.openVideo(at: indexPath)
@@ -184,7 +252,275 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         ])
         importStatusView.isHidden = true
         view = container
+        rebuildSections()
         updateEmptyState()
+    }
+
+    func setGrouping(_ preference: VideoGroupingPreference) {
+        loadViewIfNeeded()
+        guard grouping != preference else { return }
+        let wasGrouped = grouping.key != .none
+        grouping = preference
+        collapsedGroupIDs.removeAll()
+        rebuildSections()
+        reloadCollectionDataPreservingSelection()
+
+        if preference.key == .none, wasGrouped,
+           let selectedID = videos.first(where: { selectedVideoIDs.contains($0.id) })?.id,
+           let selectedIndexPath = indexPath(forVideoID: selectedID) {
+            collectionView.scrollToItems(at: [selectedIndexPath], scrollPosition: .nearestVerticalEdge)
+        } else {
+            scrollView.contentView.scroll(to: .zero)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+    }
+
+    private func rebuildSections() {
+        guard grouping.key != .none else {
+            sections = [GroupSection(id: "all", title: nil, videos: videos)]
+            collapsedGroupIDs.removeAll()
+            updateCollectionLayoutForGrouping()
+            return
+        }
+
+        var buckets: [String: (bucket: GroupBucket, videos: [VideoRecord])] = [:]
+        for video in videos {
+            let bucket = groupBucket(for: video)
+            buckets[bucket.id, default: (bucket, [])].videos.append(video)
+        }
+        sections = buckets.values
+            .sorted { left, right in
+                if left.bucket.isUnknown != right.bucket.isUnknown {
+                    return right.bucket.isUnknown
+                }
+                if grouping.direction == .descending {
+                    return left.bucket.rank > right.bucket.rank
+                }
+                return left.bucket.rank < right.bucket.rank
+            }
+            .map { value in
+                GroupSection(
+                    id: "\(grouping.key.rawValue).\(value.bucket.id)",
+                    title: value.bucket.title,
+                    videos: value.videos
+                )
+            }
+        collapsedGroupIDs.formIntersection(sections.map(\.id))
+        updateCollectionLayoutForGrouping()
+    }
+
+    private func groupBucket(for video: VideoRecord) -> GroupBucket {
+        switch grouping.key {
+        case .none:
+            return GroupBucket(id: "all", title: "", rank: 0, isUnknown: false)
+        case .addedDate:
+            return dateBucket(for: video.firstIndexedAt)
+        case .createdDate:
+            return dateBucket(for: video.creationDate)
+        case .modifiedDate:
+            return dateBucket(for: video.modificationDate)
+        case .duration:
+            guard let duration = video.duration, duration.isFinite, duration > 0 else {
+                return unknownBucket(
+                    id: "duration-unknown",
+                    title: String(localized: "grouping.section.durationUnknown", defaultValue: "Duration Unknown")
+                )
+            }
+            if duration < 60 {
+                return GroupBucket(
+                    id: "duration-under-1",
+                    title: String(localized: "grouping.section.durationUnder1", defaultValue: "Under 1 Minute"),
+                    rank: 0,
+                    isUnknown: false
+                )
+            }
+            if duration < 180 {
+                return GroupBucket(
+                    id: "duration-1-3",
+                    title: String(localized: "grouping.section.duration1To3", defaultValue: "1–3 Minutes"),
+                    rank: 1,
+                    isUnknown: false
+                )
+            }
+            return GroupBucket(
+                id: "duration-over-3",
+                title: String(localized: "grouping.section.durationOver3", defaultValue: "3 Minutes or More"),
+                rank: 2,
+                isUnknown: false
+            )
+        case .fileSize:
+            guard video.fileSize > 0 else {
+                return unknownBucket(
+                    id: "size-unknown",
+                    title: String(localized: "grouping.section.sizeUnknown", defaultValue: "Size Unknown")
+                )
+            }
+            let gigabyte = Int64(1_000_000_000)
+            if video.fileSize < gigabyte {
+                return GroupBucket(
+                    id: "size-under-1",
+                    title: String(localized: "grouping.section.sizeUnder1GB", defaultValue: "Under 1 GB"),
+                    rank: 0,
+                    isUnknown: false
+                )
+            }
+            if video.fileSize < gigabyte * 2 {
+                return GroupBucket(
+                    id: "size-1-2",
+                    title: String(localized: "grouping.section.size1To2GB", defaultValue: "1–2 GB"),
+                    rank: 1,
+                    isUnknown: false
+                )
+            }
+            return GroupBucket(
+                id: "size-over-2",
+                title: String(localized: "grouping.section.sizeOver2GB", defaultValue: "2 GB or More"),
+                rank: 2,
+                isUnknown: false
+            )
+        case .resolution:
+            guard let width = video.width, width > 0 else {
+                return unknownBucket(
+                    id: "resolution-unknown",
+                    title: String(localized: "grouping.section.resolutionUnknown", defaultValue: "Resolution Unknown")
+                )
+            }
+            if width >= 3840 {
+                return GroupBucket(
+                    id: "resolution-4k",
+                    title: String(localized: "grouping.section.resolution4K", defaultValue: "4K or Higher"),
+                    rank: 2,
+                    isUnknown: false
+                )
+            }
+            if width >= 1920 {
+                return GroupBucket(
+                    id: "resolution-full-hd",
+                    title: String(localized: "grouping.section.resolutionFullHD", defaultValue: "Full HD"),
+                    rank: 1,
+                    isUnknown: false
+                )
+            }
+            return GroupBucket(
+                id: "resolution-720",
+                title: String(localized: "grouping.section.resolution720", defaultValue: "720p or Lower"),
+                rank: 0,
+                isUnknown: false
+            )
+        }
+    }
+
+    private func dateBucket(for date: Date?) -> GroupBucket {
+        guard let date else {
+            return unknownBucket(
+                id: "date-unknown",
+                title: String(localized: "grouping.section.dateUnknown", defaultValue: "Date Unknown")
+            )
+        }
+        let calendar = Calendar.autoupdatingCurrent
+        let today = calendar.startOfDay(for: Date())
+        let valueDay = calendar.startOfDay(for: date)
+        let elapsedDays = max(0, calendar.dateComponents([.day], from: valueDay, to: today).day ?? 0)
+        if elapsedDays == 0 {
+            return GroupBucket(
+                id: "today",
+                title: String(localized: "grouping.section.today", defaultValue: "Today"),
+                rank: 3,
+                isUnknown: false
+            )
+        }
+        if elapsedDays <= 7 {
+            return GroupBucket(
+                id: "last-7-days",
+                title: String(localized: "grouping.section.last7Days", defaultValue: "Last 7 Days"),
+                rank: 2,
+                isUnknown: false
+            )
+        }
+        if elapsedDays <= 30 {
+            return GroupBucket(
+                id: "last-30-days",
+                title: String(localized: "grouping.section.last30Days", defaultValue: "Last 30 Days"),
+                rank: 1,
+                isUnknown: false
+            )
+        }
+        return GroupBucket(
+            id: "older",
+            title: String(localized: "grouping.section.older", defaultValue: "Older"),
+            rank: 0,
+            isUnknown: false
+        )
+    }
+
+    private func unknownBucket(id: String, title: String) -> GroupBucket {
+        GroupBucket(id: id, title: title, rank: Int.min, isUnknown: true)
+    }
+
+    private func updateCollectionLayoutForGrouping() {
+        guard let layout = collectionView.collectionViewLayout as? NSCollectionViewFlowLayout else { return }
+        let isGrouped = grouping.key != .none
+        layout.headerReferenceSize = isGrouped ? NSSize(width: 0, height: 34) : .zero
+        layout.sectionHeadersPinToVisibleBounds = isGrouped
+        layout.sectionInset = NSEdgeInsets(
+            top: isGrouped ? 8 : 20,
+            left: 20,
+            bottom: 20,
+            right: 20
+        )
+        layout.invalidateLayout()
+    }
+
+    private func toggleGroup(_ groupID: String) {
+        if collapsedGroupIDs.contains(groupID) {
+            collapsedGroupIDs.remove(groupID)
+        } else {
+            collapsedGroupIDs.insert(groupID)
+        }
+        reloadCollectionDataPreservingSelection()
+        notifySelectionChanged()
+    }
+
+    private func video(at indexPath: IndexPath) -> VideoRecord? {
+        guard sections.indices.contains(indexPath.section),
+              sections[indexPath.section].videos.indices.contains(indexPath.item),
+              collapsedGroupIDs.contains(sections[indexPath.section].id) == false else {
+            return nil
+        }
+        return sections[indexPath.section].videos[indexPath.item]
+    }
+
+    private func indexPath(forVideoID videoID: String) -> IndexPath? {
+        for (sectionIndex, section) in sections.enumerated() where collapsedGroupIDs.contains(section.id) == false {
+            if let itemIndex = section.videos.firstIndex(where: { $0.id == videoID }) {
+                return IndexPath(item: itemIndex, section: sectionIndex)
+            }
+        }
+        return nil
+    }
+
+    private func visibleItemIndexPaths() -> [IndexPath] {
+        var indexPaths: [IndexPath] = []
+        for (sectionIndex, section) in sections.enumerated()
+            where collapsedGroupIDs.contains(section.id) == false {
+            indexPaths.append(contentsOf: section.videos.indices.map {
+                IndexPath(item: $0, section: sectionIndex)
+            })
+        }
+        return indexPaths
+    }
+
+    private func syncCollectionSelectionFromIDs() {
+        isSynchronizingSelection = true
+        collectionView.selectionIndexPaths = Set(selectedVideoIDs.compactMap(indexPath(forVideoID:)))
+        isSynchronizingSelection = false
+    }
+
+    private func reloadCollectionDataPreservingSelection() {
+        isSynchronizingSelection = true
+        collectionView.reloadData()
+        collectionView.selectionIndexPaths = Set(selectedVideoIDs.compactMap(indexPath(forVideoID:)))
+        isSynchronizingSelection = false
     }
 
     func setImportState(_ state: LibraryImportState) {
@@ -398,26 +734,17 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
 
     func setVideos(_ videos: [VideoRecord], resetBrowsingState: Bool = false) {
         loadViewIfNeeded()
-        let selectedVideoIDs: Set<String> = resetBrowsingState
-            ? []
-            : Set(
-                collectionView.selectionIndexPaths.compactMap { indexPath in
-                    self.videos.indices.contains(indexPath.item) ? self.videos[indexPath.item].id : nil
-                }
-            )
+        selectedVideoIDs = resetBrowsingState ? [] : selectedVideoIDs.intersection(videos.map(\.id))
         self.videos = videos
         if resetBrowsingState {
             selectionAnchorVideoID = nil
+            collapsedGroupIDs.removeAll()
         } else if let selectionAnchorVideoID,
            videos.contains(where: { $0.id == selectionAnchorVideoID }) == false {
             self.selectionAnchorVideoID = nil
         }
-        collectionView.reloadData()
-        collectionView.selectionIndexPaths = Set(
-            videos.indices.compactMap { index in
-                selectedVideoIDs.contains(videos[index].id) ? IndexPath(item: index, section: 0) : nil
-            }
-        )
+        rebuildSections()
+        reloadCollectionDataPreservingSelection()
         if resetBrowsingState {
             scrollView.contentView.scroll(to: .zero)
             scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -430,24 +757,19 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     func updateVideo(_ video: VideoRecord) {
         guard let index = videos.firstIndex(where: { $0.id == video.id }) else { return }
         videos[index] = video
-        collectionView.reloadItems(at: [IndexPath(item: index, section: 0)])
+        rebuildSections()
+        reloadCollectionDataPreservingSelection()
         notifySelectionChanged()
     }
 
     func selectedVideos() -> [VideoRecord] {
-        collectionView.selectionIndexPaths
-            .sorted()
-            .compactMap { indexPath in videos.indices.contains(indexPath.item) ? videos[indexPath.item] : nil }
+        videos.filter { selectedVideoIDs.contains($0.id) }
     }
 
     func setSelectedVideoIDs(_ videoIDs: [String], notify: Bool = true) {
         loadViewIfNeeded()
-        let identifiers = Set(videoIDs)
-        collectionView.selectionIndexPaths = Set(
-            videos.indices.compactMap { index in
-                identifiers.contains(videos[index].id) ? IndexPath(item: index, section: 0) : nil
-            }
-        )
+        selectedVideoIDs = Set(videoIDs).intersection(videos.map(\.id))
+        syncCollectionSelectionFromIDs()
         if notify { notifySelectionChanged() }
     }
 
@@ -456,14 +778,21 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         loadViewIfNeeded()
         var seen = Set<String>()
         let uniqueVideoIDs = videoIDs.filter { seen.insert($0).inserted }
-        let indexes = uniqueVideoIDs.compactMap { videoID in
-            videos.firstIndex(where: { $0.id == videoID })
+        guard uniqueVideoIDs.isEmpty == false,
+              uniqueVideoIDs.allSatisfy({ id in videos.contains(where: { $0.id == id }) }) else {
+            return false
         }
-        guard uniqueVideoIDs.isEmpty == false, indexes.count == uniqueVideoIDs.count else { return false }
-        let indexPaths = Set(indexes.map { IndexPath(item: $0, section: 0) })
-        let firstIndexPath = IndexPath(item: indexes[0], section: 0)
+        let targetGroupIDs = Set(sections.compactMap { section in
+            section.videos.contains(where: { uniqueVideoIDs.contains($0.id) }) ? section.id : nil
+        })
+        if collapsedGroupIDs.isDisjoint(with: targetGroupIDs) == false {
+            collapsedGroupIDs.subtract(targetGroupIDs)
+            reloadCollectionDataPreservingSelection()
+        }
+        selectedVideoIDs = Set(uniqueVideoIDs)
         selectionAnchorVideoID = uniqueVideoIDs[0]
-        collectionView.selectionIndexPaths = indexPaths
+        syncCollectionSelectionFromIDs()
+        guard let firstIndexPath = indexPath(forVideoID: uniqueVideoIDs[0]) else { return false }
         collectionView.scrollToItems(at: [firstIndexPath], scrollPosition: .centeredVertically)
         notifySelectionChanged()
         return true
@@ -478,8 +807,15 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         showImportStatus()
     }
 
+    func numberOfSections(in collectionView: NSCollectionView) -> Int {
+        sections.count
+    }
+
     func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
-        videos.count
+        guard sections.indices.contains(section), collapsedGroupIDs.contains(sections[section].id) == false else {
+            return 0
+        }
+        return sections[section].videos.count
     }
 
     func collectionView(
@@ -492,15 +828,48 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         ) as? VideoCollectionViewItem else {
             return NSCollectionViewItem()
         }
-        let video = videos[indexPath.item]
+        guard let video = video(at: indexPath) else { return item }
         item.configure(with: video, thumbnailURL: thumbnailURL(video))
         return item
     }
 
     func collectionView(
         _ collectionView: NSCollectionView,
+        viewForSupplementaryElementOfKind kind: NSCollectionView.SupplementaryElementKind,
+        at indexPath: IndexPath
+    ) -> NSView {
+        guard kind == NSCollectionView.elementKindSectionHeader,
+              grouping.key != .none,
+              sections.indices.contains(indexPath.section),
+              let header = collectionView.makeSupplementaryView(
+                ofKind: kind,
+                withIdentifier: Self.groupHeaderIdentifier,
+                for: indexPath
+              ) as? VideoGroupHeaderView else {
+            return NSView()
+        }
+        let section = sections[indexPath.section]
+        header.configure(
+            title: section.title ?? "",
+            count: section.videos.count,
+            isExpanded: collapsedGroupIDs.contains(section.id) == false
+        ) { [weak self] in
+            self?.toggleGroup(section.id)
+        }
+        return header
+    }
+
+    func collectionView(
+        _ collectionView: NSCollectionView,
         didSelectItemsAt indexPaths: Set<IndexPath>
     ) {
+        guard isSynchronizingSelection == false else { return }
+        let visibleIDs = Set(collectionView.selectionIndexPaths.compactMap { video(at: $0)?.id })
+        if selectionGestureMode == .replacing {
+            selectedVideoIDs = visibleIDs
+        } else {
+            selectedVideoIDs.formUnion(indexPaths.compactMap { video(at: $0)?.id })
+        }
         notifySelectionChanged()
     }
 
@@ -508,13 +877,16 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         _ collectionView: NSCollectionView,
         didDeselectItemsAt indexPaths: Set<IndexPath>
     ) {
+        guard isSynchronizingSelection == false else { return }
+        selectedVideoIDs.subtract(indexPaths.compactMap { video(at: $0)?.id })
         notifySelectionChanged()
     }
 
     func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> NSPasteboardWriting? {
         let selectedIDs = collectionView.selectionIndexPaths.contains(indexPath)
-            ? collectionView.selectionIndexPaths.sorted().map { videos[$0.item].id }
-            : [videos[indexPath.item].id]
+            ? selectedVideos().map(\.id)
+            : video(at: indexPath).map { [$0.id] } ?? []
+        guard selectedIDs.isEmpty == false else { return nil }
         let item = NSPasteboardItem()
         item.setString(selectedIDs.joined(separator: "\n"), forType: SidebarViewController.videoPasteboardType)
         return item
@@ -536,10 +908,10 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         dropOperation: NSCollectionView.DropOperation
     ) -> Bool {
         guard let tagID = draggingInfo.draggingPasteboard.string(forType: SidebarViewController.tagPasteboardType),
-              videos.indices.contains(indexPath.item) else { return false }
+              let targetVideo = video(at: indexPath) else { return false }
         let videoIDs = collectionView.selectionIndexPaths.contains(indexPath)
-            ? collectionView.selectionIndexPaths.sorted().map { videos[$0.item].id }
-            : [videos[indexPath.item].id]
+            ? selectedVideos().map(\.id)
+            : [targetVideo.id]
         onAssignTagID(tagID, videoIDs)
         return true
     }
@@ -551,31 +923,25 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     }
 
     private func openVideo(at indexPath: IndexPath) {
-        guard videos.indices.contains(indexPath.item) else { return }
-        onOpenVideo(videos[indexPath.item])
+        guard let video = video(at: indexPath) else { return }
+        onOpenVideo(video)
     }
 
     private func previewSelection() {
-        let selectedVideos: [VideoRecord] = collectionView.selectionIndexPaths
-            .sorted()
-            .compactMap { indexPath -> VideoRecord? in
-                guard videos.indices.contains(indexPath.item) else { return nil }
-                let video = videos[indexPath.item]
-                return video.availability == .available ? video : nil
-            }
+        let selectedVideos = selectedVideos().filter { $0.availability == .available }
         guard selectedVideos.isEmpty == false else { return }
         onPreviewVideos(selectedVideos)
     }
 
     private func contextMenu(for indexPath: IndexPath) -> NSMenu? {
-        guard videos.indices.contains(indexPath.item) else { return nil }
-        selectionAnchorVideoID = videos[indexPath.item].id
+        guard let video = video(at: indexPath) else { return nil }
+        selectionAnchorVideoID = video.id
         if collectionView.selectionIndexPaths.contains(indexPath) == false {
-            collectionView.selectionIndexPaths = [indexPath]
+            selectedVideoIDs = [video.id]
+            syncCollectionSelectionFromIDs()
             notifySelectionChanged()
         }
 
-        let video = videos[indexPath.item]
         let selected = selectedVideos()
         if selected.isEmpty == false,
            selected.allSatisfy({ $0.availability != .available }) {
@@ -599,7 +965,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
             video: video
         ))
         menu.addItem(.separator())
-        let selectedCount = collectionView.selectionIndexPaths.count
+        let selectedCount = selectedVideoIDs.count
         let removeItem = NSMenuItem(
             title: selectedCount > 1
                 ? String(localized: .videoRemoveMenuMultiple(selectedCount))
@@ -720,33 +1086,41 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         modifiers: NSEvent.ModifierFlags
     ) -> Bool {
         let modifiers = modifiers.intersection(.deviceIndependentFlagsMask)
-        guard let indexPath, videos.indices.contains(indexPath.item) else {
+        selectionGestureMode = modifiers.contains(.command) || modifiers.contains(.shift)
+            ? .extending
+            : .replacing
+        guard let indexPath, let selectedVideo = video(at: indexPath) else {
             if modifiers.contains(.shift) == false {
                 selectionAnchorVideoID = nil
+                selectedVideoIDs.removeAll()
+                syncCollectionSelectionFromIDs()
+                notifySelectionChanged()
+                return true
             }
             return false
         }
 
         guard modifiers.contains(.shift) else {
-            selectionAnchorVideoID = videos[indexPath.item].id
+            selectionAnchorVideoID = selectedVideo.id
             return false
         }
 
-        let anchorIndex = selectionAnchorVideoID.flatMap { anchorID in
-            videos.firstIndex(where: { $0.id == anchorID })
-        } ?? indexPath.item
-        selectionAnchorVideoID = videos[anchorIndex].id
+        let visibleIndexPaths = visibleItemIndexPaths()
+        guard let targetPosition = visibleIndexPaths.firstIndex(of: indexPath) else { return false }
+        let anchorPosition = selectionAnchorVideoID
+            .flatMap(indexPath(forVideoID:))
+            .flatMap { visibleIndexPaths.firstIndex(of: $0) } ?? targetPosition
+        selectionAnchorVideoID = video(at: visibleIndexPaths[anchorPosition])?.id
 
-        let lowerBound = min(anchorIndex, indexPath.item)
-        let upperBound = max(anchorIndex, indexPath.item)
-        let rangeSelection = Set(
-            (lowerBound...upperBound).map { IndexPath(item: $0, section: 0) }
-        )
+        let lowerBound = min(anchorPosition, targetPosition)
+        let upperBound = max(anchorPosition, targetPosition)
+        let rangeSelection = Set(visibleIndexPaths[lowerBound...upperBound])
         if modifiers.contains(.command) {
-            collectionView.selectionIndexPaths.formUnion(rangeSelection)
+            selectedVideoIDs.formUnion(rangeSelection.compactMap { video(at: $0)?.id })
         } else {
-            collectionView.selectionIndexPaths = rangeSelection
+            selectedVideoIDs = Set(rangeSelection.compactMap { video(at: $0)?.id })
         }
+        syncCollectionSelectionFromIDs()
         notifySelectionChanged()
         return true
     }
@@ -809,10 +1183,95 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     }
 
     private func notifySelectionChanged() {
-        let selected = collectionView.selectionIndexPaths
-            .sorted()
-            .compactMap { indexPath in videos.indices.contains(indexPath.item) ? videos[indexPath.item] : nil }
-        onSelectionChanged(selected)
+        onSelectionChanged(selectedVideos())
+    }
+}
+
+@MainActor
+private final class VideoGroupHeaderView: NSView {
+    private let disclosureButton = NSButton()
+    private let titleButton = NSButton()
+    private let countLabel = NSTextField(labelWithString: "")
+    private let separator = NSBox()
+    private var onToggle: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+
+        disclosureButton.translatesAutoresizingMaskIntoConstraints = false
+        disclosureButton.title = ""
+        disclosureButton.imagePosition = .imageOnly
+        disclosureButton.isBordered = false
+        disclosureButton.bezelStyle = .inline
+        disclosureButton.controlSize = .small
+        disclosureButton.contentTintColor = .secondaryLabelColor
+        disclosureButton.target = self
+        disclosureButton.action = #selector(toggle)
+
+        titleButton.translatesAutoresizingMaskIntoConstraints = false
+        titleButton.isBordered = false
+        titleButton.bezelStyle = .inline
+        titleButton.alignment = .left
+        titleButton.font = .systemFont(ofSize: 12, weight: .semibold)
+        titleButton.target = self
+        titleButton.action = #selector(toggle)
+
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
+        countLabel.font = .systemFont(ofSize: 11)
+        countLabel.textColor = .secondaryLabelColor
+
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.boxType = .separator
+
+        addSubview(disclosureButton)
+        addSubview(titleButton)
+        addSubview(countLabel)
+        addSubview(separator)
+        NSLayoutConstraint.activate([
+            disclosureButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            disclosureButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            disclosureButton.widthAnchor.constraint(equalToConstant: 16),
+            disclosureButton.heightAnchor.constraint(equalToConstant: 22),
+            titleButton.leadingAnchor.constraint(equalTo: disclosureButton.trailingAnchor, constant: 2),
+            titleButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            countLabel.leadingAnchor.constraint(equalTo: titleButton.trailingAnchor, constant: 6),
+            countLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            countLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -20),
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            separator.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.94).cgColor
+    }
+
+    func configure(title: String, count: Int, isExpanded: Bool, onToggle: @escaping () -> Void) {
+        self.onToggle = onToggle
+        disclosureButton.image = NSImage(
+            systemSymbolName: isExpanded ? "chevron.down" : "chevron.right",
+            accessibilityDescription: nil
+        )
+        disclosureButton.symbolConfiguration = .init(pointSize: 9, weight: .semibold)
+        titleButton.title = title
+        countLabel.stringValue = NumberFormatter.localizedString(from: NSNumber(value: count), number: .decimal)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(title)
+        setAccessibilityExpanded(isExpanded)
+    }
+
+    @objc private func toggle() {
+        onToggle?()
     }
 }
 

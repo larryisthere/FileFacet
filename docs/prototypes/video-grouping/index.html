@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FileFacet · 视频分组展示原型</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --desktop: #d9dde3;
+      --window: rgba(246, 246, 246, .97);
+      --toolbar: rgba(246, 246, 246, .92);
+      --sidebar: rgba(232, 232, 232, .96);
+      --content: #fff;
+      --inspector: #f7f7f7;
+      --panel: rgba(250, 250, 251, .98);
+      --line: rgba(60, 60, 67, .18);
+      --line-strong: rgba(60, 60, 67, .28);
+      --text: #202124;
+      --secondary: #6e6e73;
+      --tertiary: #8e8e93;
+      --accent: #0a84ff;
+      --accent-soft: rgba(10, 132, 255, .13);
+      --selection: rgba(10, 132, 255, .18);
+      --shadow: 0 24px 70px rgba(20, 24, 31, .28), 0 2px 10px rgba(20, 24, 31, .14);
+      --panel-shadow: 0 18px 50px rgba(0, 0, 0, .24), 0 2px 10px rgba(0, 0, 0, .12);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --desktop: #17191d;
+        --window: rgba(42, 42, 44, .98);
+        --toolbar: rgba(42, 42, 44, .94);
+        --sidebar: rgba(37, 37, 39, .98);
+        --content: #1f1f21;
+        --inspector: #252527;
+        --panel: rgba(49, 49, 52, .98);
+        --line: rgba(235, 235, 245, .13);
+        --line-strong: rgba(235, 235, 245, .24);
+        --text: #f2f2f7;
+        --secondary: #aeaeb2;
+        --tertiary: #8e8e93;
+        --accent-soft: rgba(10, 132, 255, .2);
+        --selection: rgba(10, 132, 255, .27);
+        --shadow: 0 26px 80px rgba(0, 0, 0, .56), 0 2px 12px rgba(0, 0, 0, .4);
+        --panel-shadow: 0 20px 58px rgba(0, 0, 0, .58), 0 2px 10px rgba(0, 0, 0, .4);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { color: var(--text); background: var(--desktop); font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+    button, input { color: inherit; font: inherit; }
+    button { border: 0; cursor: default; }
+
+    .desktop {
+      height: 100%;
+      padding: 44px 24px 70px;
+      background: radial-gradient(circle at 18% 15%, rgba(255,255,255,.55), transparent 32%), linear-gradient(135deg, rgba(200,213,227,.56), rgba(224,226,230,.2));
+    }
+    .window {
+      position: relative;
+      display: grid;
+      width: 100%;
+      height: 100%;
+      min-width: 1050px;
+      grid-template-columns: 224px minmax(530px, 1fr) 292px;
+      grid-template-rows: 52px minmax(0, 1fr);
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.5);
+      border-radius: 15px;
+      background: var(--window);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(26px) saturate(1.35);
+    }
+    .titlebar {
+      grid-column: 1 / 4;
+      display: grid;
+      grid-template-columns: 224px minmax(530px, 1fr) 292px;
+      border-bottom: 1px solid var(--line);
+      background: var(--toolbar);
+    }
+    .title-part { display: flex; min-width: 0; align-items: center; gap: 7px; padding: 0 12px; }
+    .title-part + .title-part { border-left: 1px solid var(--line); }
+    .traffic { display: flex; gap: 8px; margin-right: 14px; }
+    .traffic span { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.16); }
+    .traffic span:nth-child(1) { background: #ff5f57; }
+    .traffic span:nth-child(2) { background: #febc2e; }
+    .traffic span:nth-child(3) { background: #28c840; }
+    .title-name { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .title-count { color: var(--secondary); font-size: 11px; white-space: nowrap; }
+    .spacer { flex: 1; }
+
+    .zoom-control { display: flex; height: 28px; align-items: center; gap: 6px; padding: 0 7px; border: 1px solid var(--line); border-radius: 6px; color: var(--secondary); font-size: 11px; }
+    .zoom-track { width: 40px; height: 3px; border-radius: 999px; background: var(--line-strong); }
+    .zoom-thumb { width: 8px; height: 8px; margin: -2px 0 0 19px; border-radius: 50%; background: var(--secondary); }
+    .search { display: flex; width: min(180px, 20vw); height: 28px; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; background: rgba(127,127,127,.1); }
+    .search-mark { color: var(--secondary); font-size: 12px; }
+    .search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--text); background: transparent; }
+
+    .sidebar { grid-column: 1; grid-row: 2; min-height: 0; overflow: auto; padding: 9px 8px; border-right: 1px solid var(--line); background: var(--sidebar); }
+    .section-label { padding: 12px 9px 5px; color: var(--secondary); font-size: 11px; font-weight: 600; }
+    .nav-row { display: flex; width: 100%; min-height: 29px; align-items: center; gap: 8px; padding: 0 9px; border-radius: 6px; background: transparent; text-align: left; }
+    .nav-row:hover { background: rgba(127,127,127,.08); }
+    .nav-row.selected { background: var(--selection); }
+    .nav-dot { width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--dot, var(--secondary)); }
+    .nav-label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .nav-count { color: var(--secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+    .content { grid-column: 2; grid-row: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: var(--content); }
+    .operation-bar { position: relative; z-index: 8; display: flex; height: 44px; flex: 0 0 44px; align-items: center; gap: 6px; padding: 0 8px 0 10px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--content) 94%, var(--window)); }
+    .rule-heading { color: var(--secondary); font-size: 11px; font-weight: 650; }
+    .rule-chip { min-height: 28px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--content) 96%, var(--text) 3%); font-size: 11px; white-space: nowrap; }
+    .rule-chip:hover { background: rgba(127,127,127,.1); }
+    .rule-chip.static { color: var(--secondary); background: color-mix(in srgb, var(--content) 92%, var(--sidebar)); }
+    .rule-chip.grouping.active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 38%, var(--line)); background: var(--accent-soft); }
+    .group-chip { display: flex; align-items: stretch; }
+    .group-chip .rule-chip { border-radius: 7px 0 0 7px; }
+    .group-clear { width: 25px; border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line)); border-left: 0; border-radius: 0 7px 7px 0; color: var(--accent); background: var(--accent-soft); font-size: 13px; }
+    .group-clear:hover { background: color-mix(in srgb, var(--accent-soft) 72%, var(--accent)); }
+    .rule-divider { width: 1px; height: 22px; margin: 0 1px; background: var(--line); }
+    .operation-action { min-height: 28px; padding: 3px 7px; border-radius: 5px; color: var(--accent); background: transparent; font-size: 11px; }
+    .operation-action:hover { background: var(--accent-soft); }
+    .operation-action:disabled { color: var(--tertiary); opacity: .55; }
+    .group-control { position: relative; }
+    .grid-scroll { min-height: 0; flex: 1; overflow: auto; padding: 14px 20px 22px; }
+    .group-section + .group-section { margin-top: 18px; }
+    .group-header { position: sticky; top: -14px; z-index: 2; display: flex; width: 100%; min-height: 34px; align-items: center; gap: 7px; padding: 4px 2px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--content) 94%, transparent); text-align: left; backdrop-filter: blur(14px); }
+    .disclosure { width: 13px; color: var(--secondary); font-size: 10px; transform: rotate(90deg); transition: transform .12s ease; }
+    .group-section.collapsed .disclosure { transform: rotate(0); }
+    .group-title { font-weight: 650; }
+    .group-count { color: var(--secondary); font-size: 11px; }
+    .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 180px)); gap: 16px; align-content: start; padding-top: 14px; }
+    .group-section.collapsed .video-grid { display: none; }
+    .video-card { min-width: 0; min-height: 151px; padding: 7px; border-radius: 8px; background: transparent; text-align: center; }
+    .video-card:hover { background: rgba(127,127,127,.1); }
+    .video-card.selected { background: var(--selection); }
+    .thumb { aspect-ratio: 1.66 / 1; overflow: hidden; border-radius: 6px; background: #d1d1d6; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+    .thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .filename { margin-top: 10px; overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+    .metadata { margin-top: 3px; color: var(--secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .empty-state { width: min(410px, 82%); margin: 18vh auto 0; color: var(--secondary); text-align: center; }
+    .empty-state strong { display: block; margin-bottom: 6px; color: var(--text); font-size: 15px; }
+    .empty-state button { margin-top: 13px; padding: 5px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: color-mix(in srgb, var(--window) 82%, var(--text) 4%); }
+
+    .inspector { grid-column: 3; grid-row: 2; min-height: 0; overflow: auto; padding: 14px 15px; border-left: 1px solid var(--line); background: var(--inspector); }
+    .inspector h2 { margin: 0 0 12px; font-size: 13px; }
+    .selection-summary { margin-bottom: 15px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: color-mix(in srgb, var(--content) 88%, transparent); }
+    .selection-summary strong { display: block; margin-bottom: 3px; }
+    .selection-summary span { color: var(--secondary); font-size: 11px; }
+    .detail-row { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 9px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 11px; }
+    .detail-row span:first-child { color: var(--secondary); }
+    .detail-row span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+
+    .group-menu { position: absolute; z-index: 20; top: 34px; left: 0; width: 218px; padding: 5px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); box-shadow: var(--panel-shadow); }
+    .menu-title { padding: 4px 8px 3px; color: var(--secondary); font-size: 10px; font-weight: 650; text-transform: uppercase; }
+    .menu-item { display: grid; width: 100%; min-height: 27px; grid-template-columns: 17px 1fr; align-items: center; padding: 3px 8px; border-radius: 5px; background: transparent; text-align: left; }
+    .menu-item:hover { color: #fff; background: var(--accent); }
+    .menu-check { text-align: center; }
+    .menu-separator { height: 1px; margin: 5px 4px; background: var(--line); }
+    .prototype-hint { position: absolute; right: 12px; bottom: 10px; color: var(--secondary); font-size: 10px; }
+
+    @media (max-width: 1160px) {
+      .desktop { padding-right: 10px; padding-left: 10px; }
+      .window { grid-template-columns: 208px minmax(500px, 1fr) 270px; }
+      .titlebar { grid-template-columns: 208px minmax(500px, 1fr) 270px; }
+    }
+  </style>
+  <link rel="stylesheet" href="../prototype-shell.css">
+</head>
+<body data-prototype-page="video-grouping" data-prototype-subtitle="视频分组展示">
+  <template id="prototypePageActions">
+    <section class="prototype-group" aria-labelledby="prototypeStatesTitle">
+      <div class="prototype-group-title" id="prototypeStatesTitle">页面状态</div>
+      <button class="prototype-action demo-button" data-demo-state="flat"><span class="prototype-action-mark"></span>未分组</button>
+      <button class="prototype-action demo-button" data-demo-state="menu"><span class="prototype-action-mark"></span>分组菜单</button>
+      <button class="prototype-action demo-button active" data-demo-state="added"><span class="prototype-action-mark"></span>按加入日期</button>
+      <button class="prototype-action demo-button" data-demo-state="resolution"><span class="prototype-action-mark"></span>按分辨率</button>
+      <button class="prototype-action demo-button" data-demo-state="collapsed"><span class="prototype-action-mark"></span>折叠一个分组</button>
+      <button class="prototype-action demo-button" data-demo-state="multiple"><span class="prototype-action-mark"></span>跨组多选</button>
+      <button class="prototype-action demo-button" data-demo-state="empty"><span class="prototype-action-mark"></span>无结果</button>
+    </section>
+  </template>
+
+  <main class="desktop prototype-content prototype-app-surface">
+    <section class="window" id="appWindow" aria-label="FileFacet 视频分组展示原型">
+      <header class="titlebar">
+        <div class="title-part">
+          <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="title-name">资料库</div>
+        </div>
+        <div class="title-part">
+          <div class="title-name" id="viewTitle">所有视频</div>
+          <div class="title-count" id="viewCount">12 个视频</div>
+          <div class="spacer"></div>
+          <div class="zoom-control" title="调整缩略图大小"><span>小</span><div class="zoom-track"><div class="zoom-thumb"></div></div><span>大</span></div>
+          <label class="search" title="搜索文件名（⌘F）"><span class="search-mark">搜索</span><input id="searchInput" type="search" placeholder="文件名"></label>
+        </div>
+        <div class="title-part"><div class="spacer"></div></div>
+      </header>
+
+      <aside class="sidebar" aria-label="资料库侧栏">
+        <div class="section-label">资料库</div>
+        <button class="nav-row selected" data-scope="all"><span class="nav-dot"></span><span class="nav-label">所有视频</span><span class="nav-count">12</span></button>
+        <button class="nav-row" data-scope="untagged"><span class="nav-dot"></span><span class="nav-label">未打标签</span><span class="nav-count">1</span></button>
+        <button class="nav-row" data-scope="recent"><span class="nav-dot"></span><span class="nav-label">最近添加</span><span class="nav-count">4</span></button>
+        <div class="section-label">智能分类</div>
+        <button class="nav-row" data-scope="smart"><span class="nav-dot" style="--dot:#af52de"></span><span class="nav-label">4K 旅行长片</span><span class="nav-count">4</span></button>
+        <div class="section-label">标签</div>
+        <button class="nav-row" data-scope="travel"><span class="nav-dot" style="--dot:#ff9f0a"></span><span class="nav-label">旅行</span><span class="nav-count">6</span></button>
+        <button class="nav-row" data-scope="work"><span class="nav-dot" style="--dot:#64d2ff"></span><span class="nav-label">工作</span><span class="nav-count">4</span></button>
+        <button class="nav-row" data-scope="todo"><span class="nav-dot" style="--dot:#30d158"></span><span class="nav-label">待整理</span><span class="nav-count">3</span></button>
+      </aside>
+
+      <section class="content">
+        <div class="operation-bar" aria-label="筛选、排序与分组操作">
+          <span class="rule-heading">筛选</span>
+          <button class="rule-chip static" id="scopeChip" type="button">范围：所有视频</button>
+          <button class="rule-chip" type="button">添加筛选条件</button>
+          <span class="rule-divider" aria-hidden="true"></span>
+          <button class="rule-chip" type="button">添加排序</button>
+          <span class="rule-divider" aria-hidden="true"></span>
+          <div class="group-control">
+            <div class="group-chip">
+              <button class="rule-chip grouping active" id="groupButton" type="button" aria-haspopup="menu" aria-expanded="false">分组：加入日期</button>
+              <button class="group-clear" id="groupClearButton" type="button" aria-label="清除分组" title="清除分组">×</button>
+            </div>
+            <section class="group-menu" id="groupMenu" role="menu" aria-label="视频分组菜单" hidden>
+              <div class="menu-title">分组依据</div>
+              <button class="menu-item" data-group-key="none" role="menuitemradio"><span class="menu-check"></span><span>不分组</span></button>
+              <button class="menu-item" data-group-key="added" role="menuitemradio"><span class="menu-check"></span><span>加入日期</span></button>
+              <button class="menu-item" data-group-key="created" role="menuitemradio"><span class="menu-check"></span><span>创建日期</span></button>
+              <button class="menu-item" data-group-key="modified" role="menuitemradio"><span class="menu-check"></span><span>修改日期</span></button>
+              <button class="menu-item" data-group-key="duration" role="menuitemradio"><span class="menu-check"></span><span>时长</span></button>
+              <button class="menu-item" data-group-key="size" role="menuitemradio"><span class="menu-check"></span><span>文件大小</span></button>
+              <button class="menu-item" data-group-key="resolution" role="menuitemradio"><span class="menu-check"></span><span>分辨率</span></button>
+              <div class="menu-separator"></div>
+              <div class="menu-title">分组顺序</div>
+              <button class="menu-item" data-group-direction="descending" role="menuitemradio"><span class="menu-check"></span><span id="descendingLabel">由新到旧</span></button>
+              <button class="menu-item" data-group-direction="ascending" role="menuitemradio"><span class="menu-check"></span><span id="ascendingLabel">由旧到新</span></button>
+            </section>
+          </div>
+          <div class="spacer"></div>
+          <button class="operation-action" type="button" disabled>清除</button>
+          <button class="operation-action" type="button">保存</button>
+        </div>
+        <div class="grid-scroll" id="gridScroll">
+          <div id="groupedContent"></div>
+          <div class="empty-state" id="emptyState" hidden><strong>没有符合当前条件的视频</strong><span>可以调整文件名搜索或当前筛选条件。</span><br><button id="clearSearchButton" type="button">清除搜索</button></div>
+        </div>
+      </section>
+
+      <aside class="inspector" aria-label="视频检查器">
+        <h2>检查器</h2>
+        <div class="selection-summary"><strong id="selectionTitle">城市晨光.mp4</strong><span id="selectionNote">已选择 1 个视频</span></div>
+        <div class="detail-row"><span>当前分组</span><span id="detailGroup">今天</span></div>
+        <div class="detail-row"><span>时长</span><span id="detailDuration">01:18</span></div>
+        <div class="detail-row"><span>大小</span><span id="detailSize">1.8 GB</span></div>
+        <div class="detail-row"><span>分辨率</span><span id="detailResolution">3840 × 2160</span></div>
+        <div class="detail-row"><span>加入时间</span><span id="detailAdded">今天</span></div>
+      </aside>
+
+      <div class="prototype-hint">点击分组标题可折叠；按住 Command 点击可跨组多选</div>
+    </section>
+  </main>
+
+  <script src="../prototype-shell.js"></script>
+  <script>
+    const videos = [
+      { id: 1, name: "城市晨光.mp4", image: "../../assets/readme/fictional-posters/02-sci-fi-allegory.png", duration: 78, width: 3840, height: 2160, size: 1840, added: 0, created: 28, modified: 1, tags: ["工作", "城市"] },
+      { id: 2, name: "雨夜电车.mov", image: "../../assets/readme/fictional-posters/04-romantic-drama.png", duration: 42, width: 1920, height: 1080, size: 842, added: 4, created: 42, modified: 4, tags: ["旅行", "城市"] },
+      { id: 3, name: "山间列车.mp4", image: "../../assets/readme/fictional-posters/12-action-adventure.png", duration: 126, width: 3840, height: 2160, size: 2458, added: 14, created: 67, modified: 5, tags: ["旅行"] },
+      { id: 4, name: "产品概念片.mov", image: "../../assets/readme/fictional-posters/09-retro-sci-fi.png", duration: 58, width: 1920, height: 1080, size: 615, added: 1, created: 12, modified: 1, tags: ["工作", "待整理"] },
+      { id: 5, name: "古堡外景.m4v", image: "../../assets/readme/fictional-posters/06-castle-thriller.png", duration: 192, width: 3840, height: 2160, size: 3174, added: 33, created: 110, modified: 22, tags: ["旅行"] },
+      { id: 6, name: "深夜访谈.mp4", image: "../../assets/readme/fictional-posters/07-mystery-crime.png", duration: 271, width: 1920, height: 1080, size: 1228, added: 10, created: 21, modified: 8, tags: ["工作"] },
+      { id: 7, name: "荒野公路.mov", image: "../../assets/readme/fictional-posters/01-zombie-horror.png", duration: 106, width: 3840, height: 2160, size: 2048, added: 24, created: 80, modified: 10, tags: ["旅行", "待整理"] },
+      { id: 8, name: "创意工作坊.mp4", image: "../../assets/readme/fictional-posters/05-social-drama.png", duration: 144, width: 1920, height: 1080, size: 936, added: 3, created: 9, modified: 3, tags: ["工作"] },
+      { id: 9, name: "海岸日落.mov", image: "../../assets/readme/fictional-posters/08-absurdist-cult.png", duration: 88, width: 3840, height: 2160, size: 1690, added: 5, created: 48, modified: 2, tags: ["旅行"] },
+      { id: 10, name: "街角咖啡店.mp4", image: "../../assets/readme/fictional-posters/03-physical-comedy.png", duration: 35, width: 1920, height: 1080, size: 530, added: 4, created: 4, modified: 4, tags: ["城市"] },
+      { id: 11, name: "旧片扫描.mov", image: "../../assets/readme/fictional-posters/10-psychological-thriller.png", duration: 324, width: 1280, height: 720, size: 2600, added: 91, created: 900, modified: 74, tags: [] },
+      { id: 12, name: "森林雾气.mp4", image: "../../assets/readme/fictional-posters/11-fantasy-horror.png", duration: 64, width: 0, height: 0, size: 1410, added: 45, created: 53, modified: 18, tags: ["待整理"] }
+    ];
+
+    const groupKeyLabels = { none: "", added: "加入日期", created: "创建日期", modified: "修改日期", duration: "时长", size: "文件大小", resolution: "分辨率" };
+    let groupKey = "added";
+    let groupDirection = "descending";
+    let selectedIDs = new Set([1]);
+    let collapsedGroupIDs = new Set();
+    let currentScope = "all";
+    let groupingBeforeRecent = { key: groupKey, direction: groupDirection };
+
+    const groupedContent = document.getElementById("groupedContent");
+    const emptyState = document.getElementById("emptyState");
+    const searchInput = document.getElementById("searchInput");
+    const groupMenu = document.getElementById("groupMenu");
+    const groupButton = document.getElementById("groupButton");
+    const groupClearButton = document.getElementById("groupClearButton");
+
+    function formatDuration(seconds) {
+      const minutes = Math.floor(seconds / 60);
+      const rest = seconds % 60;
+      return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+    }
+
+    function formatSize(megabytes) {
+      return megabytes >= 1024 ? `${(megabytes / 1024).toFixed(1)} GB` : `${megabytes} MB`;
+    }
+
+    function scopedVideos() {
+      const query = searchInput.value.trim().toLocaleLowerCase();
+      return videos.filter(video => {
+        if (currentScope === "untagged" && video.tags.length) return false;
+        if (currentScope === "recent" && video.added > 7) return false;
+        if (currentScope === "smart" && !(video.width >= 3840 && video.duration >= 60 && video.tags.includes("旅行"))) return false;
+        if (currentScope === "travel" && !video.tags.includes("旅行")) return false;
+        if (currentScope === "work" && !video.tags.includes("工作")) return false;
+        if (currentScope === "todo" && !video.tags.includes("待整理")) return false;
+        return !query || video.name.toLocaleLowerCase().includes(query);
+      }).sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
+    }
+
+    function dateBucket(days) {
+      if (days === null || days === undefined) return { id: "unknown", label: "日期未知", order: 99 };
+      if (days === 0) return { id: "today", label: "今天", order: 0 };
+      if (days <= 7) return { id: "week", label: "最近 7 天", order: 1 };
+      if (days <= 30) return { id: "month", label: "最近 30 天", order: 2 };
+      return { id: "older", label: "更早", order: 3 };
+    }
+
+    function bucketFor(video) {
+      if (["added", "created", "modified"].includes(groupKey)) return dateBucket(video[groupKey]);
+      if (groupKey === "duration") {
+        if (!video.duration) return { id: "unknown", label: "时长未知", order: 99 };
+        if (video.duration < 60) return { id: "short", label: "1 分钟内", order: 0 };
+        if (video.duration <= 180) return { id: "medium", label: "1–3 分钟", order: 1 };
+        return { id: "long", label: "3 分钟以上", order: 2 };
+      }
+      if (groupKey === "size") {
+        if (!video.size) return { id: "unknown", label: "大小未知", order: 99 };
+        if (video.size < 1024) return { id: "small", label: "1 GB 以下", order: 0 };
+        if (video.size < 2048) return { id: "medium", label: "1–2 GB", order: 1 };
+        return { id: "large", label: "2 GB 以上", order: 2 };
+      }
+      if (groupKey === "resolution") {
+        if (!video.width) return { id: "unknown", label: "分辨率未知", order: 99 };
+        if (video.width >= 3840) return { id: "4k", label: "4K 及以上", order: 2 };
+        if (video.width >= 1920) return { id: "full-hd", label: "Full HD", order: 1 };
+        return { id: "hd", label: "720p 及以下", order: 0 };
+      }
+      return { id: "all", label: "全部视频", order: 0 };
+    }
+
+    function grouping(items) {
+      if (groupKey === "none") return [{ id: "all", label: "", order: 0, items }];
+      const map = new Map();
+      items.forEach(video => {
+        const bucket = bucketFor(video);
+        if (!map.has(bucket.id)) map.set(bucket.id, { ...bucket, items: [] });
+        map.get(bucket.id).items.push(video);
+      });
+      return [...map.values()].sort((left, right) => {
+        if (left.order === 99) return 1;
+        if (right.order === 99) return -1;
+        const dateKey = ["added", "created", "modified"].includes(groupKey);
+        const descendingOrder = dateKey ? left.order - right.order : right.order - left.order;
+        return groupDirection === "descending" ? descendingOrder : -descendingOrder;
+      });
+    }
+
+    function cardMarkup(video) {
+      return `<button class="video-card${selectedIDs.has(video.id) ? " selected" : ""}" data-video-id="${video.id}" type="button">
+        <div class="thumb"><img src="${video.image}" alt=""></div>
+        <div class="filename">${video.name}</div>
+        <div class="metadata">${formatDuration(video.duration)} · ${video.width ? `${video.width} × ${video.height}` : "信息未知"}</div>
+      </button>`;
+    }
+
+    function updateInspector(groups) {
+      const selected = videos.filter(video => selectedIDs.has(video.id));
+      const first = selected[0];
+      document.getElementById("selectionTitle").textContent = selected.length > 1 ? `${selected.length} 个视频` : (first?.name ?? "未选择视频");
+      document.getElementById("selectionNote").textContent = selected.length ? `已选择 ${selected.length} 个视频` : "选择视频后显示详细信息";
+      const firstGroup = first ? groups.find(group => group.items.some(video => video.id === first.id)) : null;
+      document.getElementById("detailGroup").textContent = groupKey === "none" ? "未分组" : (firstGroup?.label ?? "—");
+      document.getElementById("detailDuration").textContent = first ? formatDuration(first.duration) : "—";
+      document.getElementById("detailSize").textContent = first ? formatSize(first.size) : "—";
+      document.getElementById("detailResolution").textContent = first ? (first.width ? `${first.width} × ${first.height}` : "未知") : "—";
+      document.getElementById("detailAdded").textContent = first ? dateBucket(first.added).label : "—";
+    }
+
+    function renderMenuState() {
+      document.querySelectorAll("[data-group-key]").forEach(button => {
+        button.querySelector(".menu-check").textContent = button.dataset.groupKey === groupKey ? "✓" : "";
+        button.setAttribute("aria-checked", String(button.dataset.groupKey === groupKey));
+      });
+      document.querySelectorAll("[data-group-direction]").forEach(button => {
+        button.querySelector(".menu-check").textContent = button.dataset.groupDirection === groupDirection ? "✓" : "";
+        button.disabled = groupKey === "none";
+        button.setAttribute("aria-checked", String(button.dataset.groupDirection === groupDirection));
+      });
+      const dateKey = ["added", "created", "modified"].includes(groupKey);
+      document.getElementById("descendingLabel").textContent = dateKey ? "由新到旧" : "由大到小";
+      document.getElementById("ascendingLabel").textContent = dateKey ? "由旧到新" : "由小到大";
+    }
+
+    function render() {
+      const items = scopedVideos();
+      const visibleIDs = new Set(items.map(video => video.id));
+      selectedIDs = new Set([...selectedIDs].filter(id => visibleIDs.has(id)));
+      const groups = grouping(items);
+      document.getElementById("viewCount").textContent = `${items.length} 个视频`;
+      groupButton.classList.toggle("active", groupKey !== "none");
+      groupClearButton.hidden = groupKey === "none";
+      groupButton.textContent = groupKey === "none" ? "添加分组" : `分组：${groupKeyLabels[groupKey]}`;
+      groupButton.title = groupKey === "none" ? "视频未分组" : `当前按${groupKeyLabels[groupKey]}分组`;
+      groupedContent.hidden = items.length === 0;
+      emptyState.hidden = items.length !== 0;
+      groupedContent.innerHTML = groups.map(group => {
+        if (groupKey === "none") return `<div class="video-grid">${group.items.map(cardMarkup).join("")}</div>`;
+        const collapsed = collapsedGroupIDs.has(group.id);
+        return `<section class="group-section${collapsed ? " collapsed" : ""}" data-group-id="${group.id}">
+          <button class="group-header" data-toggle-group="${group.id}" type="button" aria-expanded="${!collapsed}">
+            <span class="disclosure">›</span><span class="group-title">${group.label}</span><span class="group-count">${group.items.length}</span>
+          </button>
+          <div class="video-grid">${group.items.map(cardMarkup).join("")}</div>
+        </section>`;
+      }).join("");
+      groupedContent.querySelectorAll("[data-toggle-group]").forEach(button => {
+        button.addEventListener("click", () => {
+          const id = button.dataset.toggleGroup;
+          collapsedGroupIDs.has(id) ? collapsedGroupIDs.delete(id) : collapsedGroupIDs.add(id);
+          render();
+        });
+      });
+      groupedContent.querySelectorAll("[data-video-id]").forEach(card => {
+        card.addEventListener("click", event => {
+          const id = Number(card.dataset.videoId);
+          if (event.metaKey) selectedIDs.has(id) ? selectedIDs.delete(id) : selectedIDs.add(id);
+          else selectedIDs = new Set([id]);
+          render();
+        });
+      });
+      updateInspector(groups);
+      renderMenuState();
+    }
+
+    function setMenuOpen(open) {
+      groupMenu.hidden = !open;
+      groupButton.setAttribute("aria-expanded", String(open));
+    }
+
+    groupButton.addEventListener("click", event => {
+      event.stopPropagation();
+      setMenuOpen(groupMenu.hidden);
+    });
+    groupClearButton.addEventListener("click", () => {
+      groupKey = "none";
+      collapsedGroupIDs.clear();
+      setMenuOpen(false);
+      render();
+    });
+    document.querySelectorAll("[data-group-key]").forEach(button => {
+      button.addEventListener("click", () => {
+        groupKey = button.dataset.groupKey;
+        collapsedGroupIDs.clear();
+        setMenuOpen(false);
+        render();
+        if (groupKey === "none" && selectedIDs.size) {
+          const firstSelected = groupedContent.querySelector(".video-card.selected");
+          firstSelected?.scrollIntoView({ block: "nearest" });
+        } else {
+          document.getElementById("gridScroll").scrollTop = 0;
+        }
+      });
+    });
+    document.querySelectorAll("[data-group-direction]").forEach(button => {
+      button.addEventListener("click", () => {
+        groupDirection = button.dataset.groupDirection;
+        setMenuOpen(false);
+        document.getElementById("gridScroll").scrollTop = 0;
+        render();
+      });
+    });
+    document.querySelectorAll("[data-scope]").forEach(button => {
+      button.addEventListener("click", () => {
+        const nextScope = button.dataset.scope;
+        if (currentScope !== "recent" && nextScope === "recent") {
+          groupingBeforeRecent.key = groupKey;
+          groupingBeforeRecent.direction = groupDirection;
+          groupKey = "added";
+          groupDirection = "descending";
+        } else if (currentScope === "recent" && nextScope !== "recent") {
+          groupKey = groupingBeforeRecent.key;
+          groupDirection = groupingBeforeRecent.direction;
+        }
+        currentScope = nextScope;
+        selectedIDs.clear();
+        collapsedGroupIDs.clear();
+        document.querySelectorAll("[data-scope]").forEach(row => row.classList.toggle("selected", row === button));
+        const scopeTitle = button.querySelector(".nav-label").textContent;
+        document.getElementById("viewTitle").textContent = scopeTitle;
+        document.getElementById("scopeChip").textContent = `范围：${scopeTitle}`;
+        document.getElementById("gridScroll").scrollTop = 0;
+        render();
+      });
+    });
+    searchInput.addEventListener("input", render);
+    document.getElementById("clearSearchButton").addEventListener("click", () => { searchInput.value = ""; render(); });
+    document.addEventListener("click", event => { if (!event.target.closest("#groupMenu, #groupButton")) setMenuOpen(false); });
+
+    document.querySelectorAll("[data-demo-state]").forEach(button => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll("[data-demo-state]").forEach(item => item.classList.toggle("active", item === button));
+        searchInput.value = "";
+        currentScope = "all";
+        document.querySelectorAll("[data-scope]").forEach(row => row.classList.toggle("selected", row.dataset.scope === "all"));
+        document.getElementById("viewTitle").textContent = "所有视频";
+        document.getElementById("scopeChip").textContent = "范围：所有视频";
+        collapsedGroupIDs.clear();
+        selectedIDs = new Set([1]);
+        groupDirection = "descending";
+        const state = button.dataset.demoState;
+        if (state === "flat") groupKey = "none";
+        if (["menu", "added", "collapsed", "multiple", "empty"].includes(state)) groupKey = "added";
+        if (state === "resolution") groupKey = "resolution";
+        if (state === "collapsed") collapsedGroupIDs.add("week");
+        if (state === "multiple") selectedIDs = new Set([1, 3]);
+        if (state === "empty") searchInput.value = "不存在的视频";
+        setMenuOpen(state === "menu");
+        document.getElementById("gridScroll").scrollTop = 0;
+        render();
+      });
+    });
+
+    render();
+  </script>
+</body>
+</html>
