@@ -125,6 +125,9 @@ final class InspectorViewController: NSViewController {
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
+        // The scroll document is frame-sized below; an autoresizing height constraint
+        // would make fitting-size measurement compress long tag lists into the old frame.
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
         contentStack.spacing = 9
@@ -934,12 +937,15 @@ final class InspectorViewController: NSViewController {
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let pathLabel = NSTextField(labelWithString: parentName(for: creation.parentID))
-        pathLabel.font = .systemFont(ofSize: 10)
+        pathLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         pathLabel.textColor = .tertiaryLabelColor
         pathLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         let pendingLabel = NSTextField(labelWithString: String(localized: .tagPending))
-        pendingLabel.font = .systemFont(ofSize: 9, weight: .medium)
+        pendingLabel.font = .systemFont(
+            ofSize: NSFont.smallSystemFontSize,
+            weight: .semibold
+        )
         pendingLabel.textColor = .controlAccentColor
         pendingLabel.setContentHuggingPriority(.required, for: .horizontal)
 
@@ -1217,8 +1223,10 @@ final class InspectorViewController: NSViewController {
         actionContainer.addArrangedSubview(draftStatusLabel)
         draftStatusLabel.widthAnchor.constraint(equalTo: actionContainer.widthAnchor).isActive = true
 
-        discardButton.controlSize = .small
-        applyButton.controlSize = .small
+        discardButton.controlSize = .regular
+        discardButton.font = .systemFont(ofSize: NSFont.systemFontSize)
+        applyButton.controlSize = .regular
+        applyButton.font = .systemFont(ofSize: NSFont.systemFontSize)
         applyButton.keyEquivalent = "\r"
         applyButton.keyEquivalentModifierMask = [.command]
         let spacer = NSView()
@@ -1286,11 +1294,9 @@ final class InspectorViewController: NSViewController {
         let width = contentScrollView.contentSize.width
         guard width > 0 else { return }
         contentStack.setFrameSize(NSSize(width: width, height: contentStack.frame.height))
+        let fittingHeight = max(1, contentStack.fittingSize.height)
+        contentStack.setFrameSize(NSSize(width: width, height: fittingHeight))
         contentStack.layoutSubtreeIfNeeded()
-        contentStack.setFrameSize(NSSize(
-            width: width,
-            height: max(1, contentStack.fittingSize.height)
-        ))
     }
 
 }

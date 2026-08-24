@@ -1266,7 +1266,7 @@ private final class LibraryRuleEditorViewController: NSViewController, NSTextFie
         }
 
         let validation = NSTextField(wrappingLabelWithString: "")
-        validation.font = .systemFont(ofSize: 10)
+        validation.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         validation.textColor = .secondaryLabelColor
         validation.isHidden = true
         validation.widthAnchor.constraint(equalToConstant: Self.fieldWidth).isActive = true
@@ -1294,7 +1294,8 @@ private final class LibraryRuleEditorViewController: NSViewController, NSTextFie
                 action: #selector(deleteRule)
             )
             delete.bezelStyle = .roundRect
-            delete.controlSize = .small
+            delete.controlSize = .regular
+            delete.font = .systemFont(ofSize: NSFont.systemFontSize)
             actionRow.addArrangedSubview(delete)
         }
         let spacer = NSView()
@@ -1306,7 +1307,8 @@ private final class LibraryRuleEditorViewController: NSViewController, NSTextFie
             action: #selector(cancelEditor)
         )
         cancel.bezelStyle = .roundRect
-        cancel.controlSize = .small
+        cancel.controlSize = .regular
+        cancel.font = .systemFont(ofSize: NSFont.systemFontSize)
         cancel.keyEquivalent = "\u{1b}"
         actionRow.addArrangedSubview(cancel)
         let done = NSButton(
@@ -1315,7 +1317,8 @@ private final class LibraryRuleEditorViewController: NSViewController, NSTextFie
             action: #selector(commitEditor)
         )
         done.bezelStyle = .roundRect
-        done.controlSize = .small
+        done.controlSize = .regular
+        done.font = .systemFont(ofSize: NSFont.systemFontSize)
         done.keyEquivalent = "\r"
         actionRow.addArrangedSubview(done)
         doneButton = done
@@ -1621,9 +1624,13 @@ private final class LibraryRuleEditorViewController: NSViewController, NSTextFie
         field.alignment = .leading
         field.spacing = 4
         let label = NSTextField(labelWithString: title)
-        label.font = .systemFont(ofSize: 10, weight: .medium)
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         label.textColor = .secondaryLabelColor
         field.addArrangedSubview(label)
+        if let nativeControl = control as? NSControl {
+            nativeControl.controlSize = .small
+            nativeControl.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        }
         control.widthAnchor.constraint(equalToConstant: Self.fieldWidth).isActive = true
         field.addArrangedSubview(control)
         field.widthAnchor.constraint(equalToConstant: Self.fieldWidth).isActive = true

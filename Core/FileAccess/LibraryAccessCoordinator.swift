@@ -201,7 +201,7 @@ final class LibraryAccessCoordinator {
     }
 
     func restoreLibrary() {
-        Task {
+        Task { [self] in
             do {
                 let previousCleanupTask = artifactCleanupTask
                 let cleanupTask = Task { [weak self] in

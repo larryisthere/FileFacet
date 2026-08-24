@@ -4,6 +4,14 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+### Changed
+
+- Aligned tag-draft metadata, filter fields, and related action buttons with the native macOS text hierarchy.
+
+### Fixed
+
+- Fixed long Inspector tag lists briefly compressing their row spacing while calculating the scrollable content size.
+
 ## [1.0.7] - 2026-08-07
 
 ### Added
