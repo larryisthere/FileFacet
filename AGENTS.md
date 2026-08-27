@@ -20,10 +20,13 @@
 
 ## 开发、验证与提交
 
-- 完成实现后默认只验证构建成功，保留改动交给用户验收；发现偏差后修正并重新交付。
-- 未经用户明确要求，禁止启动或操作 App、打开预览、截图检查、执行交互验收或运行自动化测试；Skill 和其他工作流同样受此限制。
+- 默认只进行源代码、现有文件和既有日志的只读检查，以及不会触发构建、依赖安装、测试宿主、预览或 App 运行的文本级检查；保留改动交给用户验收。
+- 构建、编译、链接、依赖安装或更新、自动化测试、预览、截图检查、交互验收、App 启动或操作都需要用户当前轮明确授权相应操作类别；所有 `xcodebuild` 操作均受此门禁约束，包括 `build`、`build-for-testing`、`test`、`test-without-building` 和 `-showBuildSettings`。
+- “实现”“修复”“继续”“验证”“回归检查”“收尾”“review”“提交前检查”等请求不产生上述执行授权；较早轮次的用户批准、已保存的命令批准、沙箱批准、工具审批或提权批准也不产生用户授权。
+- 授权只覆盖用户说明的类别、scheme、configuration、目标和范围；构建授权不扩展到测试、预览或 App 启动。Skill 和其他工作流同样受此限制。
+- 已授权命令在目标逻辑开始前因测试宿主、Xcode 服务、权限、签名、环境或工具审批失败时立即停止。禁止自行更换 project/workspace、destination、DerivedData、Xcode 路径、命令类型或参数重试；任何重试需要用户当前轮重新明确授权。
 - 产品逻辑、交互和 UI 由用户验收，构建、测试和代理检查不能代替用户验收。
-- 用户验收通过后，按需为高频主路径、核心状态转换、数据完整性、不可逆操作和高影响故障补充自动化测试；禁止固化未经验收的行为或纯理论场景。
+- 用户验收通过且用户当前轮明确授权测试代码变更后，才可按授权范围为高频主路径、核心状态转换、数据完整性、不可逆操作和高影响故障补充自动化测试；禁止固化未经验收的行为或纯理论场景。
 - 用户明确验收通过后才能提交；未经验收的改动不得提交，也不得与已验收改动混入同一次提交。
 
 ## 交互与 UI 原型
@@ -51,17 +54,19 @@
 - 所有扫描、媒体解析和缩略图任务都在后台执行，UI 更新回到 MainActor。
 - 用户视频只读访问；不得移动、重命名、修改或删除原始视频。
 
-## 验证命令
+## 参考验证命令
 
-默认仅运行：
+以下命令仅供选择验证范围，不构成执行授权。获得用户当前轮构建授权后，可以运行：
 
 ```bash
 xcodebuild -project VideoTagManager.xcodeproj -scheme VideoTagManager -configuration Debug -derivedDataPath .build/DerivedData build
 ```
 
-仅在用户明确要求时运行：
+获得用户当前轮测试或 App 启动授权后，按授权类别运行：
 
 ```bash
 xcodebuild -project VideoTagManager.xcodeproj -scheme VideoTagManager -configuration Debug -derivedDataPath .build/DerivedData test
 ./script/build_and_run.sh
 ```
+
+未授权或因执行失败停止的项目记录为延期验证，汇报拟议命令、未执行原因和剩余风险。
