@@ -237,6 +237,7 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
 
         installMainMenu()
         installModifierFlagsMonitor()
+        quickLookCoordinator.install(in: windowController.window)
         render(lockState: lockCoordinator.state)
         windowController.window?.center()
         windowController.window?.makeKeyAndOrderFront(nil)
@@ -698,29 +699,78 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
 }
 
 @MainActor
-private final class QuickLookPreviewCoordinator: NSObject, @preconcurrency QLPreviewPanelDataSource {
+private final class QuickLookPreviewCoordinator: NSResponder,
+    @preconcurrency QLPreviewPanelDataSource {
     private var previewURLs: [URL] = []
     private weak var activePanel: QLPreviewPanel?
+    private weak var hostWindow: NSWindow?
+    private var escapeMonitor: Any?
+
+    func install(in window: NSWindow?) {
+        guard let window,
+              hostWindow !== window else { return }
+        if let hostWindow, hostWindow.nextResponder === self {
+            hostWindow.nextResponder = nextResponder
+        }
+        hostWindow = window
+        nextResponder = window.nextResponder
+        window.nextResponder = self
+        if escapeMonitor == nil {
+            escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+                [weak self] event in
+                guard event.keyCode == 53,
+                      self?.activePanel?.isVisible == true else { return event }
+                self?.close()
+                return nil
+            }
+        }
+    }
 
     func toggle(urls: [URL]) {
         guard urls.isEmpty == false, let panel = QLPreviewPanel.shared() else { return }
         if panel.isVisible {
-            panel.orderOut(nil)
+            close()
             return
         }
 
         previewURLs = urls
         activePanel = panel
-        panel.dataSource = self
-        panel.currentPreviewItemIndex = 0
-        panel.reloadData()
+        panel.updateController()
         panel.makeKeyAndOrderFront(nil)
     }
 
     func close() {
-        activePanel?.orderOut(nil)
+        guard let panel = activePanel else {
+            previewURLs = []
+            return
+        }
+        panel.orderOut(nil)
+        if panel.dataSource === self {
+            panel.dataSource = nil
+        }
         activePanel = nil
         previewURLs = []
+    }
+
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool {
+        previewURLs.isEmpty == false
+    }
+
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        activePanel = panel
+        panel.dataSource = self
+        panel.currentPreviewItemIndex = 0
+        panel.reloadData()
+    }
+
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        if panel.dataSource === self {
+            panel.dataSource = nil
+        }
+        if activePanel === panel {
+            activePanel = nil
+            previewURLs = []
+        }
     }
 
     func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {

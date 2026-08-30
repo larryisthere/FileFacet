@@ -15,6 +15,7 @@ This file records the user-visible changes in FileFacet releases.
 
 ### Fixed
 
+- Fixed the Quick Look panel remaining visible with an empty selection after video playback ended and the user pressed Escape.
 - Fixed scan results remaining onscreen when the user selected the already-active library category, compressed folder-import choices, and inconsistent singular scan feedback.
 - Fixed long Inspector tag lists briefly compressing their row spacing while calculating the scrollable content size.
 
