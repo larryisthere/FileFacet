@@ -33,6 +33,33 @@ struct LibraryImportSummary: Equatable, Sendable {
     let createdFolderTagCount: Int
 }
 
+struct LibraryScanNotice: Equatable, Sendable {
+    let title: String
+    let detail: String
+}
+
+struct LibraryScanResults: Equatable, Sendable {
+    let candidates: [ScannedVideoCandidate]
+    let checkedFolderCount: Int
+    let uncheckedFolderCount: Int
+    let failedFolderCount: Int
+    let notice: LibraryScanNotice?
+}
+
+struct LibraryScanCompletion: Equatable, Sendable {
+    let addedVideoIDs: [String]
+    let existingVideoIDs: [String]
+}
+
+enum LibraryScanState: Equatable, Sendable {
+    case idle
+    case scanning(title: String, detail: String)
+    case results(LibraryScanResults)
+    case importing(title: String, detail: String, results: LibraryScanResults)
+    case completed(LibraryScanCompletion)
+    case failed(message: String)
+}
+
 private struct LibraryImportRequest {
     let roots: [VideoImportRoot]
     let title: String
@@ -127,6 +154,7 @@ final class LibraryAccessCoordinator {
     private var knownSourceURLs: [String: URL] = [:]
     private var sourceBookmarks: [String: Data] = [:]
     private var sourceDisplayNames: [String: String] = [:]
+    private var sourceScansDescendants: [String: Bool] = [:]
     private var watchersByPath: [String: FSEventsWatcher] = [:]
     private var sourceWatchPaths: [String: String] = [:]
     private var resolvedVideoURLs: [String: URL] = [:]
@@ -135,6 +163,11 @@ final class LibraryAccessCoordinator {
     private var accessLostSourceNameByVideoID: [String: String] = [:]
     private var reachableSourceIDs = Set<String>()
     private var importTask: Task<Void, Never>?
+    private var scanTask: Task<Void, Never>?
+    private var scanRevision = 0
+    private var scanResults: LibraryScanResults?
+    private var scanSessionAddedVideoIDs: [String] = []
+    private var scanSessionExistingVideoIDs: [String] = []
     private var relinkTask: Task<Void, Never>?
     private var relinkingVideoID: String?
     private var importRevision = 0
@@ -162,6 +195,7 @@ final class LibraryAccessCoordinator {
     var onFilterChangedBySystem: ((LibraryFilter) -> Void)?
     var onVideoChanged: ((VideoRecord) -> Void)?
     var onImportStateChanged: ((LibraryImportState) -> Void)?
+    var onScanStateChanged: ((LibraryScanState) -> Void)?
     var onTagsChanged: (([TagRecord]) -> Void)?
     var onSmartCollectionsChanged: (([SmartCollectionRecord]) -> Void)?
     var onTagAssignmentsChanged: (() -> Void)?
@@ -226,6 +260,7 @@ final class LibraryAccessCoordinator {
                 for source in sources {
                     sourceBookmarks[source.id] = source.rootBookmarkData
                     sourceDisplayNames[source.id] = source.displayName
+                    sourceScansDescendants[source.id] = source.scansDescendants
                     do {
                         var isStale = false
                         let url = try URL(
@@ -236,8 +271,13 @@ final class LibraryAccessCoordinator {
                         )
                         knownSourceURLs[source.id] = url
                         try connect(sourceID: source.id, url: url)
-                        if isStale {
-                            let refreshedBookmark = try makeBookmark(for: url)
+                        let isDirectory = Self.isDirectoryURL(url)
+                        let scansDescendants = source.scansDescendants || isDirectory
+                        sourceScansDescendants[source.id] = scansDescendants
+                        if isStale || scansDescendants != source.scansDescendants {
+                            let refreshedBookmark = isStale
+                                ? try makeBookmark(for: url)
+                                : source.rootBookmarkData
                             sourceBookmarks[source.id] = refreshedBookmark
                             sourceDisplayNames[source.id] = url.lastPathComponent
                             try await database.saveSourceAuthorization(SourceAuthorizationRecord(
@@ -245,7 +285,8 @@ final class LibraryAccessCoordinator {
                                 libraryID: source.libraryID,
                                 displayName: url.lastPathComponent,
                                 rootBookmarkData: refreshedBookmark,
-                                createdAt: source.createdAt
+                                createdAt: source.createdAt,
+                                scansDescendants: scansDescendants
                             ))
                         }
                     } catch {
@@ -278,6 +319,262 @@ final class LibraryAccessCoordinator {
         }
     }
 
+    func scanForNewVideos() {
+        guard importTask == nil else { return }
+        beginScanForNewVideos(resetImportedHistory: true)
+    }
+
+    func clearScanResults() {
+        guard importTask == nil else { return }
+        scanTask?.cancel()
+        scanTask = nil
+        scanRevision += 1
+        scanResults = nil
+        scanSessionAddedVideoIDs = []
+        scanSessionExistingVideoIDs = []
+        onScanStateChanged?(.idle)
+    }
+
+    func chooseAdditionalScanFolders() {
+        guard importTask == nil,
+              let urls = picker.chooseScanFolders() else { return }
+        let roots = VideoFileDiscovery.importPlan(for: urls).roots.filter {
+            $0.kind == .directory
+        }
+        guard roots.isEmpty == false else { return }
+        scanTask?.cancel()
+        scanRevision += 1
+        let revision = scanRevision
+        onScanStateChanged?(.scanning(
+            title: String(
+                localized: "scan.progress.addingFolders",
+                defaultValue: "Adding folders to scan"
+            ),
+            detail: String(
+                localized: "scan.progress.preparingFolders",
+                defaultValue: "Preparing the selected folders…"
+            )
+        ))
+        scanTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if scanRevision == revision { scanTask = nil }
+            }
+            var addedFolderCount = 0
+            for (index, root) in roots.enumerated() {
+                var preparedSource: PendingImportSource?
+                do {
+                    try Task.checkCancellation()
+                    let source = try prepareImportSource(for: root, requestIndex: index)
+                    preparedSource = source
+                    try await database.saveSourceAuthorization(SourceAuthorizationRecord(
+                        id: source.id,
+                        libraryID: LibraryRecord.primaryID,
+                        displayName: source.url.lastPathComponent,
+                        rootBookmarkData: source.bookmark,
+                        createdAt: Date(),
+                        scansDescendants: true
+                    ))
+                    sourceDisplayNames[source.id] = source.url.lastPathComponent
+                    sourceScansDescendants[source.id] = true
+                    addedFolderCount += 1
+                } catch is CancellationError {
+                    if let preparedSource, preparedSource.isNew {
+                        disconnectSource(preparedSource.id)
+                    }
+                    return
+                } catch {
+                    if let preparedSource, preparedSource.isNew {
+                        disconnectSource(preparedSource.id)
+                    }
+                    AppLogger.library.error(
+                        "Scan folder setup failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                    )
+                }
+            }
+            guard scanRevision == revision, importTask == nil else { return }
+            guard addedFolderCount > 0 else {
+                if let scanResults {
+                    let restoredResults = LibraryScanResults(
+                        candidates: scanResults.candidates,
+                        checkedFolderCount: scanResults.checkedFolderCount,
+                        uncheckedFolderCount: scanResults.uncheckedFolderCount,
+                        failedFolderCount: scanResults.failedFolderCount,
+                        notice: LibraryScanNotice(
+                            title: String(
+                                localized: "scan.folderSetup.failed.title",
+                                defaultValue: "Could Not Add Selected Folders"
+                            ),
+                            detail: String(
+                                localized: "scan.folderSetup.failed.detail",
+                                defaultValue: "The previous scan results are unchanged."
+                            )
+                        )
+                    )
+                    self.scanResults = restoredResults
+                    onScanStateChanged?(.results(restoredResults))
+                } else {
+                    onScanStateChanged?(.failed(message: String(
+                        localized: "scan.error.noFolderAccess",
+                        defaultValue: "The selected folders could not be checked."
+                    )))
+                }
+                return
+            }
+            scanTask = nil
+            beginScanForNewVideos(resetImportedHistory: false)
+        }
+    }
+
+    func importScannedVideos(ids: [String]) {
+        guard importTask == nil,
+              let scanResults else { return }
+        let requestedIDs = Set(ids)
+        let candidates = scanResults.candidates.filter { requestedIDs.contains($0.id) }
+        guard candidates.isEmpty == false else { return }
+        let expectedRevision = scanRevision
+        Task { [weak self] in
+            guard let self,
+                  let method = await resolveFolderImportMethod(),
+                  scanRevision == expectedRevision else { return }
+            runScannedVideoImport(candidates: candidates, method: method)
+        }
+    }
+
+    private func beginScanForNewVideos(resetImportedHistory: Bool) {
+        scanTask?.cancel()
+        scanRevision += 1
+        let revision = scanRevision
+        scanResults = nil
+        if resetImportedHistory {
+            scanSessionAddedVideoIDs = []
+            scanSessionExistingVideoIDs = []
+        }
+        discardVideoRemovalUndo()
+        onScanStateChanged?(.scanning(
+            title: String(localized: "scan.progress.title", defaultValue: "Scanning for New Videos"),
+            detail: String(
+                localized: "scan.progress.detail",
+                defaultValue: "Checking folders that contain imported videos…"
+            )
+        ))
+        let discovery = self.discovery
+        let database = self.database
+        scanTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            defer {
+                if scanRevision == revision { scanTask = nil }
+            }
+            do {
+                await refreshSourceURLsFromBookmarks()
+                try await refreshResolvedVideoURLs()
+                try Task.checkCancellation()
+                let accessibleDirectorySources = sourceURLs.filter {
+                    sourceScansDescendants[$0.key] == true
+                        && Self.isDirectoryURL($0.value)
+                        && FileManager.default.fileExists(atPath: $0.value.path)
+                }
+                let directorySources = Self.collapsedDirectorySources(
+                    accessibleDirectorySources
+                )
+                let configuredDirectoryCount = sourceScansDescendants.values.filter { $0 }.count
+                let uncheckedFolderCount = Self.uncoveredFileParentCount(
+                    sourceURLs: knownSourceURLs,
+                    scansDescendants: sourceScansDescendants
+                )
+                var failedFolderCount = max(
+                    0,
+                    configuredDirectoryCount - accessibleDirectorySources.count
+                )
+                var checkedFolderCount = 0
+                var candidatesByID: [String: ScannedVideoCandidate] = [:]
+
+                for (sourceID, sourceURL) in directorySources {
+                    try Task.checkCancellation()
+                    do {
+                        let discoveryTask = Task.detached(priority: .utility) {
+                            try discovery.discoverVideoResult(at: sourceURL)
+                        }
+                        let result = try await withTaskCancellationHandler {
+                            try await discoveryTask.value
+                        } onCancel: {
+                            discoveryTask.cancel()
+                        }
+                        let unimported = try await database.unimportedVideos(
+                            sourceID: sourceID,
+                            discoveredVideos: result.videos
+                        )
+                        checkedFolderCount += 1
+                        if result.failedCount > 0 { failedFolderCount += 1 }
+                        for video in unimported {
+                            guard let fileURL = Self.fileURL(
+                                sourceURL: sourceURL,
+                                relativePath: video.relativePath
+                            ) else { continue }
+                            let candidate = ScannedVideoCandidate(
+                                sourceID: sourceID,
+                                sourceName: sourceDisplayNames[sourceID]
+                                    ?? sourceURL.lastPathComponent,
+                                video: video,
+                                fileURL: fileURL
+                            )
+                            if candidatesByID[candidate.id] == nil {
+                                candidatesByID[candidate.id] = candidate
+                            }
+                        }
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        failedFolderCount += 1
+                        AppLogger.library.error(
+                            "Scan folder discovery failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                        )
+                    }
+                }
+
+                try Task.checkCancellation()
+                guard scanRevision == revision else { return }
+                if configuredDirectoryCount > 0,
+                   checkedFolderCount == 0,
+                   uncheckedFolderCount == 0 {
+                    onScanStateChanged?(.failed(message: String(
+                        localized: "scan.error.failed",
+                        defaultValue: "The folders could not be scanned."
+                    )))
+                    return
+                }
+                let candidates = candidatesByID.values.sorted {
+                    let filenameOrder = $0.video.filename.localizedStandardCompare($1.video.filename)
+                    if filenameOrder != .orderedSame { return filenameOrder == .orderedAscending }
+                    return $0.fileURL.path.localizedStandardCompare($1.fileURL.path) == .orderedAscending
+                }
+                let results = LibraryScanResults(
+                    candidates: candidates,
+                    checkedFolderCount: checkedFolderCount,
+                    uncheckedFolderCount: uncheckedFolderCount,
+                    failedFolderCount: failedFolderCount,
+                    notice: nil
+                )
+                scanResults = results
+                onScanStateChanged?(.results(results))
+                AppLogger.library.notice(
+                    "New video scan completed with \(candidates.count, privacy: .public) candidates"
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                guard scanRevision == revision else { return }
+                AppLogger.library.error(
+                    "New video scan failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                )
+                onScanStateChanged?(.failed(message: String(
+                    localized: "scan.error.failed",
+                    defaultValue: "The folders could not be scanned."
+                )))
+            }
+        }
+    }
+
     private func importItems(_ urls: [URL], entryPoint: LibraryImportEntryPoint) async {
         let plan = VideoFileDiscovery.importPlan(for: urls)
         guard plan.roots.isEmpty == false else {
@@ -292,6 +589,7 @@ final class LibraryAccessCoordinator {
         } else {
             method = .direct
         }
+        endScanSessionForManualImport()
         let initialDetail: String
         if plan.collapsedInputCount > 0 {
             initialDetail = plan.collapsedInputCount == 1
@@ -319,6 +617,223 @@ final class LibraryAccessCoordinator {
             folderCount: plan.roots.filter { $0.kind == .directory }.count,
             method: method
         ))
+    }
+
+    private func endScanSessionForManualImport() {
+        scanTask?.cancel()
+        scanTask = nil
+        scanRevision += 1
+        scanResults = nil
+        scanSessionAddedVideoIDs = []
+        scanSessionExistingVideoIDs = []
+        onScanStateChanged?(.idle)
+    }
+
+    private func runScannedVideoImport(
+        candidates: [ScannedVideoCandidate],
+        method: FolderImportMethod
+    ) {
+        guard let currentResults = scanResults else { return }
+        scanTask?.cancel()
+        scanRevision += 1
+        let revision = scanRevision
+        let previousMutationTask = tagMutationTask
+        let previousCleanupTask = artifactCleanupTask
+        discardVideoRemovalUndo()
+        let title = String(
+            localized: "scan.import.progress.title",
+            defaultValue: "Importing Selected Videos"
+        )
+        let detail = String(
+            localized: "scan.import.progress.detail",
+            defaultValue: "Saving the selected videos to FileFacet…"
+        )
+        onScanStateChanged?(.importing(title: title, detail: detail, results: currentResults))
+        onImportStateChanged?(.importing(title: title, detail: detail, progress: nil))
+        let database = self.database
+        let grouped = Dictionary(grouping: candidates, by: \.sourceID)
+        importTask = Task { [weak self] in
+            _ = await previousMutationTask?.value
+            _ = await previousCleanupTask?.value
+            guard let self else { return }
+            discardVideoRemovalUndo()
+            defer {
+                if scanRevision == revision { importTask = nil }
+            }
+            var addedCount = 0
+            var existingCount = 0
+            var failedInputCount = 0
+            var importedVideos: [VideoRecord] = []
+            var addedVideoIDs: [String] = []
+            var existingVideoIDs: [String] = []
+            var completedCandidateIDs = Set<String>()
+            var createdFolderTagIDs = Set<String>()
+
+            for sourceID in grouped.keys.sorted() {
+                guard let sourceCandidates = grouped[sourceID] else { continue }
+                do {
+                    try Task.checkCancellation()
+                    let folderTagOptions: FolderTagImportOptions?
+                    if case let .folderTags(includeSelectedRoot) = method {
+                        folderTagOptions = FolderTagImportOptions(
+                            selectedRootName: includeSelectedRoot
+                                ? sourceDisplayNames[sourceID]
+                                : nil
+                        )
+                    } else {
+                        folderTagOptions = nil
+                    }
+                    let result = try await database.importVideos(
+                        sourceID: sourceID,
+                        discoveredVideos: sourceCandidates.map(\.video),
+                        folderTagOptions: folderTagOptions
+                    )
+                    addedCount += result.addedCount
+                    existingCount += result.existingCount
+                    addedVideoIDs.append(contentsOf: result.addedVideoIDs)
+                    existingVideoIDs.append(contentsOf: result.existingVideoIDs)
+                    importedVideos.append(contentsOf: result.importedVideos)
+                    createdFolderTagIDs.formUnion(result.createdFolderTagIDs)
+                    completedCandidateIDs.formUnion(sourceCandidates.map(\.id))
+                } catch is CancellationError {
+                    await refreshAfterInterruptedImportInFreshTask()
+                    guard scanRevision == revision else { return }
+                    onImportStateChanged?(.cancelled)
+                    return
+                } catch {
+                    failedInputCount += 1
+                    AppLogger.library.error(
+                        "Scanned video import failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                    )
+                }
+            }
+
+            do {
+                try await refreshTags(libraryID: LibraryRecord.primaryID)
+                try await refreshResolvedVideoURLs()
+                try await refreshVisibleVideosNow()
+                onTagAssignmentsChanged?()
+                tagStateRevision += 1
+                invalidateUndoHistoryUnlessVideoRemoval()
+                startMediaProcessing(videos: importedVideos)
+            } catch {
+                AppLogger.database.error(
+                    "Scanned video import refresh failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                )
+            }
+            guard scanRevision == revision else { return }
+            let remaining = currentResults.candidates.filter {
+                completedCandidateIDs.contains($0.id) == false
+            }
+            if completedCandidateIDs.isEmpty, failedInputCount > 0 {
+                let failedNotice = LibraryScanNotice(
+                    title: String(
+                        localized: "scan.import.failed.title",
+                        defaultValue: "Could Not Import Selected Videos"
+                    ),
+                    detail: String(
+                        localized: "scan.import.failed.detail",
+                        defaultValue: "The selected videos remain in the scan results."
+                    )
+                )
+                let failedResults = LibraryScanResults(
+                    candidates: currentResults.candidates,
+                    checkedFolderCount: currentResults.checkedFolderCount,
+                    uncheckedFolderCount: currentResults.uncheckedFolderCount,
+                    failedFolderCount: currentResults.failedFolderCount,
+                    notice: failedNotice
+                )
+                scanResults = failedResults
+                onScanStateChanged?(.results(failedResults))
+                onImportStateChanged?(.failed(message: failedNotice.detail))
+                return
+            }
+            let uniqueAddedIDs = stableUniqueVideoIDs(addedVideoIDs)
+            let addedIDSet = Set(uniqueAddedIDs)
+            let uniqueExistingIDs = stableUniqueVideoIDs(existingVideoIDs).filter {
+                addedIDSet.contains($0) == false
+            }
+            scanSessionAddedVideoIDs = stableUniqueVideoIDs(
+                scanSessionAddedVideoIDs + uniqueAddedIDs
+            )
+            let sessionAddedIDSet = Set(scanSessionAddedVideoIDs)
+            scanSessionExistingVideoIDs = stableUniqueVideoIDs(
+                scanSessionExistingVideoIDs + uniqueExistingIDs
+            ).filter {
+                sessionAddedIDSet.contains($0) == false
+            }
+            let scanScopeIsComplete = currentResults.uncheckedFolderCount == 0
+                && currentResults.failedFolderCount == 0
+            if remaining.isEmpty, failedInputCount == 0, scanScopeIsComplete {
+                let completion = LibraryScanCompletion(
+                    addedVideoIDs: scanSessionAddedVideoIDs,
+                    existingVideoIDs: scanSessionExistingVideoIDs
+                )
+                scanResults = nil
+                scanSessionAddedVideoIDs = []
+                scanSessionExistingVideoIDs = []
+                onImportStateChanged?(.idle)
+                onScanStateChanged?(.completed(completion))
+                return
+            }
+            let completedCount = completedCandidateIDs.count
+            let notice = LibraryScanNotice(
+                title: existingCount == 0
+                    ? addedCount == 1
+                        ? String(
+                            localized: "scan.import.completed.title.one",
+                            defaultValue: "Imported 1 Video"
+                        )
+                        : String(
+                            localized: "scan.import.completed.title.many",
+                            defaultValue: "Imported \(addedCount) Videos"
+                        )
+                    : completedCount == 1
+                        ? String(
+                            localized: "scan.import.completed.processed.one",
+                            defaultValue: "Processed 1 Video"
+                        )
+                        : String(
+                            localized: "scan.import.completed.processed.many",
+                            defaultValue: "Processed \(completedCount) Videos"
+                        ),
+                detail: remaining.isEmpty
+                    ? String(
+                        localized: "scan.import.completed.scopeIncomplete",
+                        defaultValue: "All discovered videos were processed."
+                    )
+                    : remaining.count == 1
+                        ? String(
+                            localized: "scan.import.completed.remaining.one",
+                            defaultValue: "1 video remains to be imported."
+                        )
+                        : String(
+                            localized: "scan.import.completed.remaining.many",
+                            defaultValue: "\(remaining.count) videos remain to be imported."
+                        )
+            )
+            let updatedResults = LibraryScanResults(
+                candidates: remaining,
+                checkedFolderCount: currentResults.checkedFolderCount,
+                uncheckedFolderCount: currentResults.uncheckedFolderCount,
+                failedFolderCount: currentResults.failedFolderCount,
+                notice: notice
+            )
+            scanResults = updatedResults
+            onScanStateChanged?(.results(updatedResults))
+            onImportStateChanged?(.completed(LibraryImportSummary(
+                title: notice.title,
+                addedCount: addedCount,
+                existingCount: existingCount,
+                failedVideoCount: 0,
+                failedInputCount: failedInputCount,
+                addedVideoIDs: uniqueAddedIDs,
+                existingVideoIDs: uniqueExistingIDs,
+                checkedInputCount: candidates.count,
+                checkedFolderCount: grouped.count,
+                createdFolderTagCount: createdFolderTagIDs.count
+            )))
+        }
     }
 
     private func runImport(_ request: LibraryImportRequest) {
@@ -419,8 +934,10 @@ final class LibraryAccessCoordinator {
                             libraryID: LibraryRecord.primaryID,
                             displayName: source.url.lastPathComponent,
                             rootBookmarkData: source.bookmark,
-                            createdAt: Date()
+                            createdAt: Date(),
+                            scansDescendants: source.kind == .directory
                         ))
+                        sourceScansDescendants[source.id] = source.kind == .directory
                         sourceDisplayNames[source.id] = source.url.lastPathComponent
                         persistedSourceIDs.insert(source.id)
                         let folderTagOptions: FolderTagImportOptions?
@@ -976,10 +1493,12 @@ final class LibraryAccessCoordinator {
                     libraryID: LibraryRecord.primaryID,
                     displayName: source.url.lastPathComponent,
                     rootBookmarkData: source.bookmark,
-                    createdAt: Date()
+                    createdAt: Date(),
+                    scansDescendants: false
                 ))
                 sourceWasPersisted = true
                 sourceDisplayNames[source.id] = source.url.lastPathComponent
+                sourceScansDescendants[source.id] = false
                 let restored = try await database.relinkVideo(
                     id: video.id,
                     sourceID: source.id,
@@ -1366,6 +1885,7 @@ final class LibraryAccessCoordinator {
         knownSourceURLs.removeValue(forKey: sourceID)
         sourceBookmarks.removeValue(forKey: sourceID)
         sourceDisplayNames.removeValue(forKey: sourceID)
+        sourceScansDescendants.removeValue(forKey: sourceID)
         guard let watchPath = sourceWatchPaths.removeValue(forKey: sourceID),
               sourceWatchPaths.values.contains(watchPath) == false else { return }
         watchersByPath.removeValue(forKey: watchPath)?.stop()
@@ -1551,7 +2071,8 @@ final class LibraryAccessCoordinator {
                     libraryID: LibraryRecord.primaryID,
                     displayName: resolvedURL.lastPathComponent,
                     rootBookmarkData: refreshedBookmark,
-                    createdAt: Date()
+                    createdAt: Date(),
+                    scansDescendants: sourceScansDescendants[sourceID] ?? false
                 ))
             } catch {
                 AppLogger.library.error(
@@ -1799,6 +2320,66 @@ final class LibraryAccessCoordinator {
         let directoryComponents = directory.pathComponents
         guard candidateComponents.count >= directoryComponents.count else { return false }
         return Array(candidateComponents.prefix(directoryComponents.count)) == directoryComponents
+    }
+
+    nonisolated private static func isDirectoryURL(_ url: URL) -> Bool {
+        if let values = try? url.resourceValues(forKeys: [.isDirectoryKey]),
+           let isDirectory = values.isDirectory {
+            return isDirectory
+        }
+        return url.hasDirectoryPath
+    }
+
+    nonisolated private static func collapsedDirectorySources(
+        _ sources: [String: URL]
+    ) -> [(String, URL)] {
+        let ordered = sources.sorted {
+            let leftCount = $0.value.standardizedFileURL.pathComponents.count
+            let rightCount = $1.value.standardizedFileURL.pathComponents.count
+            if leftCount != rightCount { return leftCount < rightCount }
+            return $0.value.path.localizedStandardCompare($1.value.path) == .orderedAscending
+        }
+        var result: [(String, URL)] = []
+        for (sourceID, sourceURL) in ordered {
+            let standardizedURL = sourceURL.standardizedFileURL
+            if result.contains(where: { isURL(standardizedURL, inside: $0.1) }) {
+                continue
+            }
+            result.append((sourceID, standardizedURL))
+        }
+        return result
+    }
+
+    nonisolated private static func uncoveredFileParentCount(
+        sourceURLs: [String: URL],
+        scansDescendants: [String: Bool]
+    ) -> Int {
+        let directoryURLs = sourceURLs.compactMap { sourceID, sourceURL in
+            scansDescendants[sourceID] == true && isDirectoryURL(sourceURL)
+                ? sourceURL.standardizedFileURL
+                : nil
+        }
+        let parents = sourceURLs.compactMap { sourceID, sourceURL -> URL? in
+            guard scansDescendants[sourceID] != true,
+                  isDirectoryURL(sourceURL) == false else { return nil }
+            let parent = sourceURL.deletingLastPathComponent().standardizedFileURL
+            guard directoryURLs.contains(where: { isURL(parent, inside: $0) }) == false else {
+                return nil
+            }
+            return parent
+        }
+        return Set(parents.map(\.path)).count
+    }
+
+    nonisolated private static func fileURL(
+        sourceURL: URL,
+        relativePath: String
+    ) -> URL? {
+        let components = relativePath.split(separator: "/").map(String.init)
+        guard components.contains("..") == false else { return nil }
+        return components.reduce(sourceURL.standardizedFileURL) { url, component in
+            url.appendingPathComponent(component)
+        }.standardizedFileURL
     }
 
     private func startMediaProcessing(videos: [VideoRecord]) {

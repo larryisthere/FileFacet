@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FileFacet · 扫描新视频原型</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --desktop: #d9dde3;
+      --window: rgba(246, 246, 246, .95);
+      --toolbar: rgba(246, 246, 246, .88);
+      --sidebar: rgba(232, 232, 232, .92);
+      --content: #fff;
+      --inspector: #f7f7f7;
+      --line: rgba(60, 60, 67, .18);
+      --text: #202124;
+      --secondary: #6e6e73;
+      --tertiary: #8e8e93;
+      --accent: #0a84ff;
+      --selection: rgba(10, 132, 255, .18);
+      --warning-bg: rgba(255, 159, 10, .13);
+      --warning: #8a4b00;
+      --shadow: 0 24px 70px rgba(20, 24, 31, .28), 0 2px 10px rgba(20, 24, 31, .14);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --desktop: #17191d;
+        --window: rgba(42, 42, 44, .96);
+        --toolbar: rgba(42, 42, 44, .92);
+        --sidebar: rgba(37, 37, 39, .95);
+        --content: #1f1f21;
+        --inspector: #252527;
+        --line: rgba(235, 235, 245, .14);
+        --text: #f2f2f7;
+        --secondary: #aeaeb2;
+        --tertiary: #8e8e93;
+        --selection: rgba(10, 132, 255, .27);
+        --warning-bg: rgba(255, 159, 10, .16);
+        --warning: #ffd28a;
+        --shadow: 0 26px 80px rgba(0, 0, 0, .55), 0 2px 12px rgba(0, 0, 0, .4);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; color: var(--text); background: var(--desktop); font-size: 13px; }
+    button, input { font: inherit; color: inherit; }
+    button { border: 0; cursor: default; }
+    svg { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
+
+    .desktop {
+      height: 100%;
+      padding: 44px 24px 24px;
+      background: radial-gradient(circle at 18% 15%, rgba(255,255,255,.55), transparent 32%), linear-gradient(135deg, rgba(200,213,227,.56), rgba(224,226,230,.2));
+    }
+
+    .window {
+      display: grid;
+      grid-template-columns: 224px minmax(500px, 1fr) 258px;
+      grid-template-rows: 52px minmax(0, 1fr);
+      width: 100%; height: 100%; min-width: 950px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.5);
+      border-radius: 15px;
+      background: var(--window);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(26px) saturate(1.35);
+    }
+
+    .titlebar { grid-column: 1 / 4; display: grid; grid-template-columns: 224px minmax(500px, 1fr) 258px; border-bottom: 1px solid var(--line); background: var(--toolbar); -webkit-app-region: drag; }
+    .titlebar > div { display: flex; align-items: center; min-width: 0; padding: 0 12px; }
+    .titlebar-left { border-right: 1px solid var(--line); }
+    .titlebar-center { gap: 8px; }
+    .titlebar-right { justify-content: flex-end; border-left: 1px solid var(--line); }
+    .traffic { display: flex; gap: 8px; margin-right: 16px; }
+    .traffic span { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.16); }
+    .traffic .red { background: #ff5f57; } .traffic .yellow { background: #febc2e; } .traffic .green { background: #28c840; }
+    .icon-button { display: inline-grid; width: 30px; height: 28px; place-items: center; border-radius: 6px; background: transparent; }
+    .icon-button:hover { background: rgba(127,127,127,.14); }
+    .icon-button:active { background: rgba(127,127,127,.23); }
+    .icon-button svg { width: 17px; height: 17px; stroke-width: 1.7; }
+    .scan-button.active { color: var(--accent); background: rgba(10,132,255,.13); }
+    .view-title { min-width: 112px; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .view-count { color: var(--secondary); font-size: 12px; white-space: nowrap; }
+    .toolbar-spacer { flex: 1; }
+    .search { display: flex; align-items: center; gap: 6px; width: min(170px, 22vw); height: 28px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; background: rgba(127,127,127,.1); color: var(--secondary); }
+    .search svg { width: 14px; height: 14px; stroke-width: 1.8; }
+    .search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--text); background: transparent; }
+
+    .sidebar { grid-column: 1; grid-row: 2; min-height: 0; border-right: 1px solid var(--line); background: var(--sidebar); }
+    .sidebar-scroll { height: 100%; overflow: auto; padding: 9px 8px; }
+    .section-label { display: flex; align-items: center; min-height: 29px; padding: 8px 9px 4px; color: var(--secondary); font-size: 11px; font-weight: 600; }
+    .section-label span { flex: 1; }
+    .section-close { display: inline-grid; width: 22px; height: 20px; place-items: center; border-radius: 5px; background: transparent; color: var(--secondary); }
+    .section-close:hover { background: rgba(127,127,127,.14); color: var(--text); }
+    .section-close svg { width: 11px; height: 11px; stroke-width: 1.8; }
+    .scan-section { margin-bottom: 4px; }
+    .nav-row { display: flex; height: 28px; align-items: center; gap: 8px; padding: 0 9px; border-radius: 6px; background: transparent; }
+    button.nav-row { width: 100%; text-align: left; }
+    .nav-row.selected { background: var(--selection); }
+    .nav-row svg { width: 15px; height: 15px; stroke-width: 1.7; }
+    .nav-row .label { flex: 1; }
+    .nav-row .count { color: var(--secondary); font-size: 11px; }
+    .nav-row.indent { padding-left: 25px; }
+    .tag-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff9f0a; }
+    .tag-dot.blue { background: #64d2ff; } .tag-dot.green { background: #30d158; }
+
+    .content { grid-column: 2; grid-row: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--content); }
+    .inline-status { display: flex; min-height: 48px; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--content) 95%, var(--accent)); }
+    .status-spinner { width: 16px; height: 16px; border: 2px solid rgba(10,132,255,.25); border-top-color: var(--accent); border-radius: 50%; animation: spin .75s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .status-copy { min-width: 0; flex: 1; }
+    .status-title { font-weight: 600; }
+    .status-detail { margin-top: 2px; color: var(--secondary); font-size: 11px; }
+    .small-button { min-width: 62px; height: 27px; padding: 0 11px; border: 1px solid var(--line); border-radius: 6px; background: rgba(127,127,127,.11); }
+    .small-button:hover { background: rgba(127,127,127,.18); }
+    .small-button.accent { border-color: var(--accent); background: var(--accent); color: #fff; }
+    .small-button:disabled { opacity: .45; }
+
+    .access-notice { display: flex; align-items: center; gap: 10px; margin: 12px 14px 0; padding: 9px 11px; border-radius: 8px; background: var(--warning-bg); color: var(--warning); }
+    .access-notice svg { width: 17px; height: 17px; stroke-width: 1.8; }
+    .access-notice span { min-width: 0; flex: 1; }
+    .access-notice .small-button { background: rgba(255,255,255,.3); color: inherit; }
+
+    .selection-bar { display: flex; min-height: 44px; align-items: center; gap: 8px; padding: 7px 14px; border-bottom: 1px solid var(--line); }
+    .selection-summary { color: var(--secondary); }
+    .selection-spacer { flex: 1; }
+    .grid-scroll { min-height: 0; flex: 1; overflow: auto; padding: 16px; }
+    .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px 13px; align-content: start; }
+    .video-card { min-width: 0; padding: 4px; border: 2px solid transparent; border-radius: 9px; background: transparent; text-align: left; }
+    .video-card:hover { background: rgba(127,127,127,.08); }
+    .video-card.selected { border-color: var(--accent); background: rgba(10,132,255,.08); }
+    .thumbnail { position: relative; overflow: hidden; aspect-ratio: 16 / 9; border-radius: 6px; background: #34363b; box-shadow: inset 0 0 0 1px rgba(0,0,0,.1); }
+    .thumbnail img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .candidate-check { position: absolute; top: 7px; left: 7px; display: grid; width: 20px; height: 20px; place-items: center; border: 1px solid rgba(255,255,255,.9); border-radius: 50%; background: rgba(25,25,27,.45); color: transparent; box-shadow: 0 1px 4px rgba(0,0,0,.28); }
+    .video-card.selected .candidate-check { border-color: var(--accent); background: var(--accent); color: #fff; }
+    .candidate-check svg { width: 12px; height: 12px; stroke-width: 2.4; }
+    .duration { position: absolute; right: 6px; bottom: 6px; padding: 2px 5px; border-radius: 4px; background: rgba(0,0,0,.7); color: #fff; font-size: 10px; }
+    .card-name { margin: 8px 2px 2px; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+    .card-path { margin: 0 2px; overflow: hidden; color: var(--secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .empty-state { display: grid; height: 100%; min-height: 300px; place-content: center; justify-items: center; padding: 32px; text-align: center; }
+    .empty-state svg { width: 42px; height: 42px; color: var(--secondary); stroke-width: 1.35; }
+    .empty-state h2 { margin: 14px 0 6px; font-size: 18px; }
+    .empty-state p { max-width: 410px; margin: 0 0 16px; color: var(--secondary); line-height: 1.55; }
+
+    .inspector { grid-column: 3; grid-row: 2; min-height: 0; overflow: auto; border-left: 1px solid var(--line); background: var(--inspector); }
+    .inspector-head { padding: 17px 16px 14px; border-bottom: 1px solid var(--line); }
+    .inspector-head h3 { margin: 0 0 5px; overflow-wrap: anywhere; font-size: 13px; }
+    .inspector-head p { margin: 0; color: var(--secondary); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+    .inspector-section { padding: 15px 16px; border-bottom: 1px solid var(--line); }
+    .inspector-label { margin-bottom: 10px; color: var(--secondary); font-size: 11px; font-weight: 600; }
+    .info-row { display: flex; gap: 12px; margin: 8px 0; }
+    .info-row span:first-child { min-width: 54px; color: var(--secondary); }
+    .info-row span:last-child { flex: 1; text-align: right; }
+    .candidate-state { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); }
+    .candidate-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+
+    .modal-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding-left: var(--prototype-panel-width, 0); background: rgba(0,0,0,.26); backdrop-filter: blur(2px); }
+    .sheet { width: min(500px, calc(100vw - 80px)); overflow: hidden; border: 1px solid rgba(255,255,255,.42); border-radius: 12px; background: var(--window); box-shadow: 0 24px 65px rgba(0,0,0,.38); }
+    .sheet-copy { padding: 20px 22px 14px; }
+    .sheet-copy h2 { margin: 0 0 7px; font-size: 16px; }
+    .sheet-copy p { margin: 0; color: var(--secondary); line-height: 1.5; }
+    .folder-list { margin: 0 14px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
+    .folder-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+    .folder-row:last-child { border-bottom: 0; }
+    .folder-row svg { width: 20px; height: 20px; color: var(--accent); stroke-width: 1.6; }
+    .folder-row div { flex: 1; }
+    .folder-row strong, .folder-row span { display: block; }
+    .folder-row span { margin-top: 2px; color: var(--secondary); font-size: 11px; }
+    .folder-row input { width: 15px; height: 15px; accent-color: var(--accent); }
+    .sheet-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 22px 18px; }
+
+    @media (max-width: 1120px) {
+      .window { grid-template-columns: 205px minmax(430px, 1fr) 230px; }
+      .titlebar { grid-template-columns: 205px minmax(430px, 1fr) 230px; }
+      .search { width: 125px; }
+    }
+  </style>
+  <link rel="stylesheet" href="../prototype-shell.css">
+</head>
+<body data-prototype-page="scan-new-videos" data-prototype-subtitle="扫描新视频与临时结果" data-prototype-file-menu="import">
+  <template id="prototypePageActions">
+    <section class="prototype-group" aria-labelledby="scanStatesTitle">
+      <div class="prototype-group-title" id="scanStatesTitle">页面状态</div>
+      <button class="prototype-action" id="demoBefore"><span class="prototype-action-mark"></span>扫描前</button>
+      <button class="prototype-action active" id="demoResults"><span class="prototype-action-mark"></span>发现 6 个新视频</button>
+      <button class="prototype-action" id="demoEmpty"><span class="prototype-action-mark"></span>未发现新视频</button>
+      <button class="prototype-action" id="demoPartial"><span class="prototype-action-mark"></span>部分文件夹未检查</button>
+      <button class="prototype-action" id="demoFolderFailure"><span class="prototype-action-mark"></span>文件夹加入失败</button>
+    </section>
+    <section class="prototype-group" aria-labelledby="scanFlowTitle">
+      <div class="prototype-group-title" id="scanFlowTitle">操作路径</div>
+      <button class="prototype-action" id="demoSelectAll">选择全部</button>
+      <button class="prototype-action" id="demoImportSelected">导入已选视频</button>
+      <button class="prototype-action" id="demoCloseResults">关闭扫描结果</button>
+    </section>
+  </template>
+  <template id="prototypePanelFooter">
+    <button class="prototype-action" id="resetDemo">重置当前原型</button>
+  </template>
+
+  <main class="desktop prototype-content prototype-app-surface">
+    <section class="window" aria-label="FileFacet 扫描新视频原型窗口">
+      <header class="titlebar">
+        <div class="titlebar-left">
+          <div class="traffic" aria-hidden="true"><span class="red"></span><span class="yellow"></span><span class="green"></span></div>
+          <button class="icon-button" title="隐藏侧边栏" aria-label="隐藏侧边栏"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M8 4v16"></path></svg></button>
+        </div>
+        <div class="titlebar-center">
+          <span class="view-title" id="viewTitle">待导入视频</span>
+          <span class="view-count" id="viewCount">6 个视频</span>
+          <span class="toolbar-spacer"></span>
+          <button class="icon-button scan-button active" id="scanButton" title="扫描新视频" aria-label="扫描新视频"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66"></path><path d="M20 5v6h-6"></path></svg></button>
+          <label class="search" aria-label="搜索视频"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m16.5 16.5 4 4"></path></svg><input id="searchInput" type="search" placeholder="搜索"></label>
+        </div>
+        <div class="titlebar-right"><button class="icon-button" title="隐藏检查器" aria-label="隐藏检查器"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M16 4v16"></path></svg></button></div>
+      </header>
+
+      <aside class="sidebar">
+        <div class="sidebar-scroll">
+          <section class="scan-section" id="scanSection">
+            <div class="section-label"><span>扫描结果</span><button class="section-close" id="closeScanResults" title="关闭扫描结果" aria-label="关闭扫描结果"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"></path></svg></button></div>
+            <button class="nav-row selected" id="scanResultsNav"><svg viewBox="0 0 24 24"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="M16 4v4M14 6h4"></path></svg><span class="label">待导入视频</span><span class="count" id="scanResultCount">6</span></button>
+          </section>
+
+          <div class="section-label"><span>资料库</span></div>
+          <button class="nav-row" id="allVideosNav"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m8 9 3 3-3 3M13 15h4"></path></svg><span class="label">全部视频</span><span class="count" id="libraryCount">24</span></button>
+          <button class="nav-row" id="recentVideosNav"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg><span class="label">最近添加</span><span class="count" id="recentCount">8</span></button>
+          <button class="nav-row"><svg viewBox="0 0 24 24"><path d="M20 13 13 20 4 11V4h7z"></path><circle cx="8.5" cy="8.5" r="1"></circle></svg><span class="label">未添加标签</span><span class="count">6</span></button>
+          <button class="nav-row"><svg viewBox="0 0 24 24"><path d="M5 19 19 5M5 5l14 14"></path></svg><span class="label">不可用视频</span><span class="count">2</span></button>
+
+          <div class="section-label"><span>标签</span></div>
+          <button class="nav-row"><span class="tag-dot"></span><span class="label">人物</span><span class="count">9</span></button>
+          <button class="nav-row indent"><span class="tag-dot green"></span><span class="label">朋友</span><span class="count">4</span></button>
+          <button class="nav-row"><span class="tag-dot blue"></span><span class="label">工作素材</span><span class="count">7</span></button>
+        </div>
+      </aside>
+
+      <section class="content">
+        <div class="inline-status" id="inlineStatus" hidden role="status" aria-live="polite">
+          <span class="status-spinner" id="statusSpinner"></span>
+          <div class="status-copy"><div class="status-title" id="statusTitle">正在扫描新视频</div><div class="status-detail" id="statusDetail">正在检查已导入视频所在的文件夹…</div></div>
+          <button class="small-button" id="dismissStatus" hidden>完成</button>
+        </div>
+
+        <div class="access-notice" id="accessNotice" hidden>
+          <svg viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4z"></path><path d="M12 9v5M12 17.5h.01"></path></svg>
+          <span>还有 2 个视频所在的文件夹尚未检查。</span>
+          <button class="small-button" id="chooseFolders">选择文件夹…</button>
+        </div>
+
+        <div class="selection-bar" id="selectionBar">
+          <span class="selection-summary" id="selectionSummary">已选择 3 个，共 6 个</span>
+          <span class="selection-spacer"></span>
+          <button class="small-button" id="selectAll">选择全部</button>
+          <button class="small-button accent" id="importSelected">导入 3 个视频</button>
+        </div>
+
+        <div class="grid-scroll" id="gridScroll">
+          <div class="video-grid" id="videoGrid"></div>
+          <div class="empty-state" id="emptyState" hidden>
+            <svg viewBox="0 0 24 24"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="m9 15 2 2 4-5"></path></svg>
+            <h2 id="emptyTitle">未发现新视频</h2>
+            <p id="emptyDetail">已检查的文件夹中没有待导入的视频。</p>
+            <button class="small-button" id="emptyAction">返回资料库</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="inspector" id="inspector">
+        <div class="inspector-head"><h3 id="inspectorName">城市清晨-02.mov</h3><p id="inspectorPath">项目素材 / 城市 / 城市清晨-02.mov</p></div>
+        <div class="inspector-section"><div class="inspector-label">状态</div><span class="candidate-state" id="inspectorState">待导入</span></div>
+        <div class="inspector-section"><div class="inspector-label">信息</div><div class="info-row"><span>时长</span><span id="inspectorDuration">00:38</span></div><div class="info-row"><span>尺寸</span><span id="inspectorSize">3840 × 2160</span></div><div class="info-row"><span>大小</span><span id="inspectorFileSize">412 MB</span></div><div class="info-row"><span>位置</span><span id="inspectorFolder">项目素材 / 城市</span></div></div>
+      </aside>
+
+      <div class="modal-backdrop" id="folderSheet" hidden role="dialog" aria-modal="true" aria-labelledby="folderSheetTitle">
+        <div class="sheet">
+          <div class="sheet-copy"><h2 id="folderSheetTitle">选择需要一起扫描的文件夹</h2><p>以下视频此前是单独导入的。选择其所在文件夹后，FileFacet 可以查找同一文件夹中的新视频。</p></div>
+          <div class="folder-list">
+            <label class="folder-row"><svg viewBox="0 0 24 24"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg><div><strong>客户访谈</strong><span>影片 / 工作 / 客户访谈</span></div><input type="checkbox" checked></label>
+            <label class="folder-row"><svg viewBox="0 0 24 24"><path d="M3 7.5h7l2 2h9v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg><div><strong>周末旅行</strong><span>外置磁盘 / 2026 / 周末旅行</span></div><input type="checkbox" checked></label>
+          </div>
+          <div class="sheet-footer"><button class="small-button" id="cancelFolderSheet">稍后</button><button class="small-button accent" id="confirmFolders">选择并继续</button></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="../prototype-shell.js"></script>
+  <script>
+    const allCandidates = [
+      { id: 1, name: "城市清晨-02.mov", path: "项目素材 / 城市 / 城市清晨-02.mov", folder: "项目素材 / 城市", duration: "00:38", size: "3840 × 2160", fileSize: "412 MB", poster: "../../assets/readme/fictional-posters/02-sci-fi-allegory.png" },
+      { id: 2, name: "车站空镜-07.mp4", path: "项目素材 / 城市 / 车站空镜-07.mp4", folder: "项目素材 / 城市", duration: "00:24", size: "1920 × 1080", fileSize: "146 MB", poster: "../../assets/readme/fictional-posters/04-romantic-drama.png" },
+      { id: 3, name: "展台搭建-04.mov", path: "工作素材 / 展会 / 展台搭建-04.mov", folder: "工作素材 / 展会", duration: "01:12", size: "3840 × 2160", fileSize: "860 MB", poster: "../../assets/readme/fictional-posters/09-retro-sci-fi.png" },
+      { id: 4, name: "海岸步道-03.mp4", path: "旅行素材 / 葡萄牙 / 海岸步道-03.mp4", folder: "旅行素材 / 葡萄牙", duration: "00:56", size: "3840 × 2160", fileSize: "624 MB", poster: "../../assets/readme/fictional-posters/08-absurdist-cult.png" },
+      { id: 5, name: "访谈花絮-01.mov", path: "客户访谈 / 花絮 / 访谈花絮-01.mov", folder: "客户访谈 / 花絮", duration: "02:18", size: "1920 × 1080", fileSize: "1.1 GB", poster: "../../assets/readme/fictional-posters/05-social-drama.png" },
+      { id: 6, name: "林间营地-05.mp4", path: "周末旅行 / 营地 / 林间营地-05.mp4", folder: "周末旅行 / 营地", duration: "00:47", size: "3840 × 2160", fileSize: "520 MB", poster: "../../assets/readme/fictional-posters/11-fantasy-horror.png" }
+    ];
+
+    let candidates = allCandidates.map(item => ({ ...item }));
+    let selected = new Set([1, 2, 3]);
+    let activeID = 1;
+    let libraryCount = 24;
+    let scanTimer = null;
+    let sessionImported = [];
+    let initialRecentCount = 8;
+    let currentView = "scan";
+    let scanScopeIncomplete = false;
+
+    const byID = id => document.getElementById(id);
+    const plural = count => `${count} 个视频`;
+
+    function setPrototypeAction(activeID) {
+      document.querySelectorAll(".prototype-action.active").forEach(button => button.classList.remove("active"));
+      byID(activeID)?.classList.add("active");
+    }
+
+    function renderInspector(visibleItems = null) {
+      const items = visibleItems ?? (currentView === "recent" ? sessionImported : candidates);
+      const item = items.find(candidate => candidate.id === activeID) || items[0];
+      byID("inspector").hidden = !item;
+      if (!item) return;
+      byID("inspectorName").textContent = item.name;
+      byID("inspectorPath").textContent = item.path;
+      byID("inspectorDuration").textContent = item.duration;
+      byID("inspectorSize").textContent = item.size;
+      byID("inspectorFileSize").textContent = item.fileSize;
+      byID("inspectorFolder").textContent = item.folder;
+      byID("inspectorState").textContent = currentView === "recent" ? "已导入" : "待导入";
+    }
+
+    function renderCandidates() {
+      const query = byID("searchInput").value.trim().toLocaleLowerCase();
+      const visible = candidates.filter(item => `${item.name} ${item.path}`.toLocaleLowerCase().includes(query));
+      byID("videoGrid").innerHTML = visible.map(item => `
+        <button class="video-card${selected.has(item.id) ? " selected" : ""}" data-id="${item.id}" aria-pressed="${selected.has(item.id)}">
+          <div class="thumbnail"><img src="${item.poster}" alt=""><span class="candidate-check"><svg viewBox="0 0 16 16"><path d="m3.5 8.5 3 3 6-7"></path></svg></span><span class="duration">${item.duration}</span></div>
+          <div class="card-name">${item.name}</div><div class="card-path">${item.path}</div>
+        </button>`).join("");
+      byID("videoGrid").hidden = candidates.length === 0;
+      byID("emptyState").hidden = candidates.length !== 0;
+      document.querySelectorAll(".video-card").forEach(card => card.addEventListener("click", () => {
+        const id = Number(card.dataset.id);
+        activeID = id;
+        if (selected.has(id)) selected.delete(id); else selected.add(id);
+        render();
+      }));
+      renderInspector(visible);
+    }
+
+    function render() {
+      const count = candidates.length;
+      byID("scanResultCount").textContent = count;
+      byID("viewCount").textContent = plural(count);
+      byID("selectionSummary").textContent = `已选择 ${selected.size} 个，共 ${count} 个`;
+      byID("selectAll").textContent = count > 0 && selected.size === count ? "取消全选" : "选择全部";
+      byID("importSelected").textContent = selected.size ? `导入 ${selected.size} 个视频` : "导入所选视频";
+      byID("importSelected").disabled = selected.size === 0;
+      byID("selectionBar").hidden = count === 0;
+      byID("libraryCount").textContent = libraryCount;
+      renderCandidates();
+    }
+
+    function showResults(items = allCandidates, selection = [1, 2, 3]) {
+      clearTimeout(scanTimer);
+      currentView = "scan";
+      candidates = items.map(item => ({ ...item }));
+      selected = new Set(selection.filter(id => candidates.some(item => item.id === id)));
+      activeID = candidates[0]?.id;
+      byID("scanSection").hidden = false;
+      byID("inlineStatus").hidden = true;
+      byID("accessNotice").hidden = true;
+      byID("scanResultsNav").classList.add("selected");
+      byID("allVideosNav").classList.remove("selected");
+      byID("recentVideosNav").classList.remove("selected");
+      byID("scanButton").classList.add("active");
+      byID("viewTitle").textContent = "待导入视频";
+      byID("emptyTitle").textContent = "未发现新视频";
+      byID("emptyDetail").textContent = "已检查的文件夹中没有待导入的视频。";
+      byID("emptyAction").textContent = "返回资料库";
+      render();
+    }
+
+    function showLibrary(preserveScanResults = false) {
+      clearTimeout(scanTimer);
+      currentView = "library";
+      byID("scanSection").hidden = !(preserveScanResults && (candidates.length || scanScopeIncomplete));
+      byID("inlineStatus").hidden = true;
+      byID("accessNotice").hidden = true;
+      byID("selectionBar").hidden = true;
+      byID("videoGrid").hidden = true;
+      byID("emptyState").hidden = false;
+      byID("inspector").hidden = true;
+      byID("scanButton").classList.remove("active");
+      byID("scanResultsNav").classList.remove("selected");
+      byID("recentVideosNav").classList.remove("selected");
+      byID("allVideosNav").classList.add("selected");
+      byID("viewTitle").textContent = "全部视频";
+      byID("viewCount").textContent = plural(libraryCount);
+      byID("emptyTitle").textContent = "扫描已导入视频所在的文件夹";
+      byID("emptyDetail").textContent = "点击工具栏中的扫描按钮，查找这些文件夹中尚未导入的视频。";
+      byID("emptyAction").textContent = "开始扫描";
+    }
+
+    function closeScanResultsDemo() {
+      candidates = [];
+      selected.clear();
+      scanScopeIncomplete = false;
+      showLibrary(false);
+    }
+
+    function showRecentImports() {
+      currentView = "recent";
+      byID("scanSection").hidden = true;
+      byID("inlineStatus").hidden = true;
+      byID("accessNotice").hidden = true;
+      byID("selectionBar").hidden = true;
+      byID("emptyState").hidden = true;
+      byID("videoGrid").hidden = false;
+      byID("scanButton").classList.remove("active");
+      byID("scanResultsNav").classList.remove("selected");
+      byID("allVideosNav").classList.remove("selected");
+      byID("recentVideosNav").classList.add("selected");
+      byID("recentCount").textContent = initialRecentCount + sessionImported.length;
+      byID("viewTitle").textContent = "最近添加";
+      byID("viewCount").textContent = plural(initialRecentCount + sessionImported.length);
+      const query = byID("searchInput").value.trim().toLocaleLowerCase();
+      const visible = sessionImported.filter(item =>
+        `${item.name} ${item.path}`.toLocaleLowerCase().includes(query)
+      );
+      byID("videoGrid").innerHTML = visible.map(item => `
+        <button class="video-card selected" data-id="${item.id}" aria-pressed="true">
+          <div class="thumbnail"><img src="${item.poster}" alt=""><span class="duration">${item.duration}</span></div>
+          <div class="card-name">${item.name}</div><div class="card-path">${item.path}</div>
+        </button>`).join("");
+      activeID = visible[0]?.id;
+      renderInspector(visible);
+    }
+
+    function showFolderSetupFailure() {
+      showResults(candidates.length ? candidates : allCandidates, [...selected]);
+      byID("inlineStatus").hidden = false;
+      byID("statusSpinner").hidden = true;
+      byID("dismissStatus").hidden = false;
+      byID("statusTitle").textContent = "无法加入所选文件夹";
+      byID("statusDetail").textContent = "原有扫描结果保持不变。";
+    }
+
+    function runScan(outcome = "results") {
+      clearTimeout(scanTimer);
+      sessionImported.length = 0;
+      scanScopeIncomplete = false;
+      byID("recentCount").textContent = initialRecentCount;
+      byID("inlineStatus").hidden = false;
+      byID("statusSpinner").hidden = false;
+      byID("dismissStatus").hidden = true;
+      byID("statusTitle").textContent = "正在扫描新视频";
+      byID("statusDetail").textContent = "正在检查已导入视频所在的文件夹…";
+      byID("scanButton").classList.add("active");
+      scanTimer = setTimeout(() => {
+        if (outcome === "empty") {
+          showLibrary(false);
+          byID("inlineStatus").hidden = false;
+          byID("statusSpinner").hidden = true;
+          byID("dismissStatus").hidden = false;
+          byID("statusTitle").textContent = "未发现新视频";
+          byID("statusDetail").textContent = "已检查 7 个文件夹。";
+          return;
+        }
+        scanScopeIncomplete = outcome === "partial";
+        showResults(scanScopeIncomplete ? allCandidates.slice(0, 4) : allCandidates, [1, 2, 3]);
+        if (scanScopeIncomplete) byID("accessNotice").hidden = false;
+      }, 700);
+    }
+
+    function importSelection() {
+      if (!selected.size) return;
+      const importedCount = selected.size;
+      byID("inlineStatus").hidden = false;
+      byID("statusSpinner").hidden = false;
+      byID("dismissStatus").hidden = true;
+      byID("statusTitle").textContent = `正在导入 ${importedCount} 个视频`;
+      byID("statusDetail").textContent = "正在保存到资料库…";
+      scanTimer = setTimeout(() => {
+        const importedItems = candidates.filter(item => selected.has(item.id));
+        importedItems.forEach(item => {
+          if (!sessionImported.some(imported => imported.id === item.id)) {
+            sessionImported.push({ ...item });
+          }
+        });
+        candidates = candidates.filter(item => !selected.has(item.id));
+        libraryCount += importedCount;
+        selected.clear();
+        activeID = candidates[0]?.id;
+        if (candidates.length === 0 && scanScopeIncomplete === false) {
+          showRecentImports();
+        } else {
+          byID("statusSpinner").hidden = true;
+          byID("dismissStatus").hidden = false;
+          byID("statusTitle").textContent = `已导入 ${importedCount} 个视频`;
+          byID("statusDetail").textContent = candidates.length
+            ? `还有 ${candidates.length} 个视频待导入。`
+            : "已处理全部发现的视频。";
+          if (candidates.length === 0) {
+            byID("emptyTitle").textContent = "没有待导入视频";
+            byID("emptyDetail").textContent = "查看上方文件夹状态后再次扫描，或关闭本次结果。";
+          }
+          render();
+        }
+      }, 650);
+    }
+
+    byID("scanButton").addEventListener("click", () => runScan("results"));
+    byID("scanMenuItem")?.addEventListener("click", () => runScan("results"));
+    byID("closeScanResults").addEventListener("click", closeScanResultsDemo);
+    byID("allVideosNav").addEventListener("click", () => showLibrary(true));
+    byID("recentVideosNav").addEventListener("click", () => sessionImported.length ? showRecentImports() : showLibrary(true));
+    byID("scanResultsNav").addEventListener("click", () => showResults(candidates, [...selected]));
+    byID("selectAll").addEventListener("click", () => { selected = selected.size === candidates.length ? new Set() : new Set(candidates.map(item => item.id)); render(); });
+    byID("importSelected").addEventListener("click", importSelection);
+    byID("dismissStatus").addEventListener("click", () => { byID("inlineStatus").hidden = true; });
+    byID("searchInput").addEventListener("input", () => currentView === "recent" ? showRecentImports() : renderCandidates());
+    byID("emptyAction").addEventListener("click", () => currentView === "library" ? runScan("results") : closeScanResultsDemo());
+    byID("chooseFolders").addEventListener("click", () => { byID("folderSheet").hidden = false; });
+    byID("cancelFolderSheet").addEventListener("click", () => { byID("folderSheet").hidden = true; });
+    byID("confirmFolders").addEventListener("click", () => { scanScopeIncomplete = false; byID("folderSheet").hidden = true; showResults(allCandidates, [1, 2, 3]); });
+    byID("demoBefore").addEventListener("click", () => { setPrototypeAction("demoBefore"); candidates = []; selected.clear(); showLibrary(false); });
+    byID("demoResults").addEventListener("click", () => { setPrototypeAction("demoResults"); showResults(); });
+    byID("demoEmpty").addEventListener("click", () => { setPrototypeAction("demoEmpty"); runScan("empty"); });
+    byID("demoPartial").addEventListener("click", () => { setPrototypeAction("demoPartial"); runScan("partial"); });
+    byID("demoFolderFailure").addEventListener("click", () => { setPrototypeAction("demoFolderFailure"); showFolderSetupFailure(); });
+    byID("demoSelectAll").addEventListener("click", () => { showResults(); selected = new Set(candidates.map(item => item.id)); render(); });
+    byID("demoImportSelected").addEventListener("click", importSelection);
+    byID("demoCloseResults").addEventListener("click", closeScanResultsDemo);
+    byID("resetDemo").addEventListener("click", () => { libraryCount = 24; sessionImported.length = 0; scanScopeIncomplete = false; byID("recentCount").textContent = initialRecentCount; byID("searchInput").value = ""; setPrototypeAction("demoResults"); showResults(); });
+    document.addEventListener("keydown", event => { if (event.key === "Escape" && !byID("folderSheet").hidden) byID("folderSheet").hidden = true; });
+
+    showResults();
+  </script>
+</body>
+</html>

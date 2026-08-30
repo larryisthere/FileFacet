@@ -8,6 +8,7 @@ struct InspectorTagDraftSnapshot {
 enum InspectorBrowsingContext: Equatable {
     case library
     case unavailable
+    case scanResults
 }
 
 @MainActor
@@ -79,6 +80,7 @@ final class InspectorViewController: NSViewController {
     private let onRemoveVideos: ([String], @escaping (Bool) -> Void) -> Void
     private var selectedVideo: VideoRecord?
     private var selectedVideos: [VideoRecord] = []
+    private var scannedCandidates: [ScannedVideoCandidate] = []
     private var tags: [TagRecord] = []
     private var tagStates: [String: TagAssignmentState] = [:]
     private var draftTagStates: [String: TagAssignmentState] = [:]
@@ -182,10 +184,16 @@ final class InspectorViewController: NSViewController {
         scheduleInitialTagStateLoadIfNeeded()
     }
 
+    func setScannedCandidates(_ candidates: [ScannedVideoCandidate]) {
+        scannedCandidates = candidates
+        renderSelection()
+    }
+
     func setBrowsingContext(_ context: InspectorBrowsingContext) {
         guard browsingContext != context else { return }
         browsingContext = context
         closeNewTagPopover()
+        sectionControl.isHidden = context == .scanResults
         sectionControl.setLabel(
             context == .unavailable
                 ? String(localized: "inspector.resolve", defaultValue: "Resolve")
@@ -247,6 +255,11 @@ final class InspectorViewController: NSViewController {
         }
         clearContent()
         contentStack.spacing = mode == .resolve ? 16 : 9
+        if browsingContext == .scanResults {
+            addScanCandidateDetails(scannedCandidates)
+            updateScrollDocumentSize()
+            return
+        }
         let videos = selectedVideos
 
         if mode == .resolve {
@@ -346,6 +359,63 @@ final class InspectorViewController: NSViewController {
     private var mode: Mode {
         if sectionControl.selectedSegment == 1 { return .details }
         return browsingContext == .unavailable ? .resolve : .tags
+    }
+
+    private func addScanCandidateDetails(_ candidates: [ScannedVideoCandidate]) {
+        guard candidates.isEmpty == false else {
+            addSecondaryText(String(
+                localized: "scan.inspector.empty",
+                defaultValue: "Select a video to view its file information."
+            ))
+            return
+        }
+        guard candidates.count == 1, let candidate = candidates.first else {
+            addPrimaryText(String(
+                localized: "scan.inspector.selection",
+                defaultValue: "\(candidates.count) Videos Selected"
+            ))
+            addField(
+                title: String(localized: .detailTotalSize),
+                value: ByteCountFormatter.string(
+                    fromByteCount: candidates.reduce(Int64(0)) { $0 + $1.video.fileSize },
+                    countStyle: .file
+                )
+            )
+            return
+        }
+        addPrimaryText(candidate.video.filename)
+        addField(
+            title: String(localized: "scan.inspector.status", defaultValue: "Status"),
+            value: String(localized: "scan.inspector.pending", defaultValue: "Waiting to Import")
+        )
+        let relativeFolder = (candidate.video.relativePath as NSString)
+            .deletingLastPathComponent
+        let location = relativeFolder.isEmpty
+            ? candidate.sourceName
+            : "\(candidate.sourceName) / \(relativeFolder)"
+        addField(
+            title: String(localized: .detailPath),
+            value: location
+        )
+        addField(
+            title: String(localized: .detailExtension),
+            value: candidate.video.fileExtension.uppercased()
+        )
+        addField(
+            title: String(localized: .detailSize),
+            value: ByteCountFormatter.string(
+                fromByteCount: candidate.video.fileSize,
+                countStyle: .file
+            )
+        )
+        addField(
+            title: String(localized: .detailCreated),
+            value: formattedDate(candidate.video.creationDate)
+        )
+        addField(
+            title: String(localized: .detailModified),
+            value: formattedDate(candidate.video.modificationDate)
+        )
     }
 
     private func addResolveControls(for videos: [VideoRecord]) {
@@ -1278,7 +1348,8 @@ final class InspectorViewController: NSViewController {
 
     private func updateTagSearchFieldVisibility() {
         guard isViewLoaded else { return }
-        tagSearchField.isHidden = mode != .tags
+        tagSearchField.isHidden = browsingContext == .scanResults
+            || mode != .tags
             || selectedVideos.isEmpty
     }
 

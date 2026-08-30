@@ -7,6 +7,23 @@ struct SourceAuthorizationRecord: Equatable, Sendable {
     let displayName: String
     let rootBookmarkData: Data
     let createdAt: Date
+    let scansDescendants: Bool
+
+    init(
+        id: String,
+        libraryID: String,
+        displayName: String,
+        rootBookmarkData: Data,
+        createdAt: Date,
+        scansDescendants: Bool = false
+    ) {
+        self.id = id
+        self.libraryID = libraryID
+        self.displayName = displayName
+        self.rootBookmarkData = rootBookmarkData
+        self.createdAt = createdAt
+        self.scansDescendants = scansDescendants
+    }
 }
 
 struct VideoLocationRecord: Equatable, Sendable {
@@ -85,7 +102,7 @@ enum VideoRelinkAssessment: Equatable, Sendable {
 }
 
 actor DatabaseStore {
-    static let currentSchemaVersion = 12
+    static let currentSchemaVersion = 13
 
     private let connection: SQLiteConnection
     private var isPrepared = false
@@ -190,12 +207,14 @@ actor DatabaseStore {
         let statement = try prepare(
             """
             INSERT INTO source_authorizations (
-                id, library_id, display_name, root_bookmark_data, created_at, health_status
-            ) VALUES (?, ?, ?, ?, ?, 'available')
+                id, library_id, display_name, root_bookmark_data, created_at,
+                health_status, scans_descendants
+            ) VALUES (?, ?, ?, ?, ?, 'available', ?)
             ON CONFLICT(id) DO UPDATE SET
                 display_name = excluded.display_name,
                 root_bookmark_data = excluded.root_bookmark_data,
-                health_status = 'available'
+                health_status = 'available',
+                scans_descendants = excluded.scans_descendants
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -204,6 +223,7 @@ actor DatabaseStore {
         bindText(record.displayName, to: 3, in: statement)
         bindData(record.rootBookmarkData, to: 4, in: statement)
         sqlite3_bind_double(statement, 5, record.createdAt.timeIntervalSince1970)
+        sqlite3_bind_int(statement, 6, record.scansDescendants ? 1 : 0)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw DatabaseError.statementFailed
         }
@@ -213,7 +233,8 @@ actor DatabaseStore {
         try prepareIfNeeded()
         let statement = try prepare(
             """
-            SELECT id, library_id, display_name, root_bookmark_data, created_at
+            SELECT id, library_id, display_name, root_bookmark_data, created_at,
+                   scans_descendants
             FROM source_authorizations
             WHERE library_id = ?
             ORDER BY created_at, id
@@ -234,7 +255,8 @@ actor DatabaseStore {
                 libraryID: storedLibraryID,
                 displayName: displayName,
                 rootBookmarkData: bookmark,
-                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
+                scansDescendants: sqlite3_column_int(statement, 5) != 0
             ))
         }
         return records
@@ -267,7 +289,8 @@ actor DatabaseStore {
             let lookup = try prepare(
                 """
                 SELECT id FROM source_authorizations
-                WHERE NOT EXISTS (
+                WHERE scans_descendants = 0
+                  AND NOT EXISTS (
                     SELECT 1 FROM video_locations
                     WHERE video_locations.source_id = source_authorizations.id
                 )
@@ -614,6 +637,22 @@ actor DatabaseStore {
             importedVideos: imported,
             createdFolderTagIDs: createdFolderTagIDs
         )
+    }
+
+    func unimportedVideos(
+        sourceID: String,
+        discoveredVideos: [DiscoveredVideo]
+    ) throws -> [DiscoveredVideo] {
+        try prepareIfNeeded()
+        var result: [DiscoveredVideo] = []
+        result.reserveCapacity(discoveredVideos.count)
+        for video in discoveredVideos {
+            try Task.checkCancellation()
+            if try existingVideoID(for: video, sourceID: sourceID) == nil {
+                result.append(video)
+            }
+        }
+        return result
     }
 
     private func updateImportRun(
@@ -2634,6 +2673,13 @@ actor DatabaseStore {
     }
 
     private func applyMigration(_ version: Int) throws {
+        if version == 13 {
+            try execute(
+                "ALTER TABLE source_authorizations "
+                    + "ADD COLUMN scans_descendants INTEGER NOT NULL DEFAULT 0"
+            )
+            return
+        }
         if version == 12 {
             try execute("ALTER TABLE videos ADD COLUMN content_fingerprint BLOB")
             return

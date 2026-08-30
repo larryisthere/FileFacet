@@ -82,17 +82,27 @@ final class FolderImportMethodPresenter: NSObject {
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 4
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        let accessoryWidth: CGFloat = 440
+        let detailWidth: CGFloat = 416
+        [directButton, folderTagsButton, includeRootButton, mappingLabel].forEach {
+            $0.widthAnchor.constraint(equalToConstant: accessoryWidth).isActive = true
+        }
+        [directDetail, folderTagsDetail, includeRootDetail].forEach {
+            $0.widthAnchor.constraint(equalToConstant: detailWidth).isActive = true
+        }
+        stack.frame = NSRect(x: 0, y: 0, width: accessoryWidth, height: 1)
+        stack.layoutSubtreeIfNeeded()
+        let accessoryHeight = ceil(stack.fittingSize.height)
 
-        let accessoryView = NSView()
+        let accessoryView = NSView(frame: NSRect(
+            x: 0,
+            y: 0,
+            width: accessoryWidth,
+            height: accessoryHeight
+        ))
+        stack.frame = accessoryView.bounds
+        stack.autoresizingMask = [.width, .height]
         accessoryView.addSubview(stack)
-        NSLayoutConstraint.activate([
-            accessoryView.widthAnchor.constraint(equalToConstant: 440),
-            stack.leadingAnchor.constraint(equalTo: accessoryView.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: accessoryView.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: accessoryView.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: accessoryView.bottomAnchor),
-        ])
         alert.accessoryView = accessoryView
 
         self.directButton = directButton
@@ -108,6 +118,7 @@ final class FolderImportMethodPresenter: NSObject {
         label.textColor = .secondaryLabelColor
         label.maximumNumberOfLines = 0
         label.preferredMaxLayoutWidth = 416
+        label.setContentCompressionResistancePriority(.required, for: .vertical)
         return label
     }
 

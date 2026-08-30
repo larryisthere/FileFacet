@@ -1,6 +1,7 @@
 (() => {
   const pages = [
     { id: "manual-video-import", label: "手动导入" },
+    { id: "scan-new-videos", label: "扫描新视频" },
     { id: "folder-structure-tags", label: "目录标签导入" },
     { id: "smart-filters", label: "筛选与智能分类" },
     { id: "deferred-tag-editing", label: "标签编辑" },
@@ -84,6 +85,7 @@
         <button class="prototype-menubar-button" id="fileMenuButton" aria-haspopup="menu" aria-expanded="false">文件</button>
         <div class="prototype-menu-popover" id="fileMenu" role="menu" hidden>
           <button class="prototype-menu-command" id="importMenuItem" role="menuitem"><span>导入视频与文件夹…</span><span class="prototype-menu-shortcut">⇧⌘I</span></button>
+          <button class="prototype-menu-command" id="scanMenuItem" role="menuitem"><span>扫描新视频</span></button>
           <div class="prototype-menu-divider"></div>
           <button class="prototype-menu-command" role="menuitem"><span>关闭窗口</span><span class="prototype-menu-shortcut">⌘W</span></button>
         </div>

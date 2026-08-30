@@ -10,6 +10,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private static let toolbarIdentifier = NSToolbar.Identifier("LibraryToolbar")
     private static let settingsToolbarIdentifier = NSToolbar.Identifier("SettingsToolbar")
     private static let searchItemIdentifier = NSToolbarItem.Identifier("LibrarySearch")
+    private static let scanItemIdentifier = NSToolbarItem.Identifier("ScanForNewVideos")
     private static let zoomItemIdentifier = NSToolbarItem.Identifier("LibraryZoom")
     private static let zoomOutItemIdentifier = NSToolbarItem.Identifier("LibraryZoomOut")
     private static let zoomSliderItemIdentifier = NSToolbarItem.Identifier("LibraryZoomSlider")
@@ -23,6 +24,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private static let splitViewAutosaveDefaultsKey = "NSSplitView Subview Frames \(splitViewAutosaveName)"
 
     private let videoGridViewController: VideoGridViewController
+    private let scanResultsViewController: ScanResultsViewController
     private let ruleBarViewController = LibraryRuleBarViewController()
     private let libraryContentViewController: LibraryContentViewController
     private let inspectorViewController: InspectorViewController
@@ -42,10 +44,20 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     ) -> Void
     private let onDeleteSmartCollection: (String, @escaping (Bool) -> Void) -> Void
     private let onEndVideoRemovalUndo: () -> Void
+    private let onScanForNewVideos: () -> Void
+    private let onChooseAdditionalScanFolders: () -> Void
+    private let onImportScannedVideos: ([String]) -> Void
+    private let onClearScanResults: () -> Void
     private var contextTitle = String(localized: .libraryAllVideos)
     private var contextTagID: String?
     private var contextStatus: String?
     private var isImporting = false
+    private var isScanWorking = false
+    private var isShowingScanResults = false
+    private var currentScanResults: LibraryScanResults?
+    private var scanSearchText = ""
+    private var libraryVideoCount = 0
+    private var contextBeforeScan: (title: String, tagID: String?, status: String?)?
     private var visibleVideoCount = 0
     private var tags: [TagRecord] = []
     private var smartCollections: [SmartCollectionRecord] = []
@@ -65,6 +77,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private var shouldApplyInitialLayout = false
     private var isLibraryAvailable = true
     private weak var searchToolbarItem: NSSearchToolbarItem?
+    private weak var scanToolbarButton: NSButton?
     private weak var zoomSlider: NSSlider?
     private weak var zoomOutButton: NSButton?
     private weak var zoomInButton: NSButton?
@@ -96,6 +109,10 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     init(
         onCancelImport: @escaping () -> Void,
         onImportDroppedItems: @escaping ([URL]) -> Void,
+        onScanForNewVideos: @escaping () -> Void,
+        onChooseAdditionalScanFolders: @escaping () -> Void,
+        onImportScannedVideos: @escaping ([String]) -> Void,
+        onClearScanResults: @escaping () -> Void,
         onRemoveVideos: @escaping ([String], @escaping (Bool) -> Void) -> Void,
         onRelinkVideo: @escaping (VideoRecord) -> Void,
         onRetryRelinkVideo: @escaping (String) -> Void,
@@ -138,6 +155,10 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         self.onUpdateSmartCollection = onUpdateSmartCollection
         self.onDeleteSmartCollection = onDeleteSmartCollection
         self.onEndVideoRemovalUndo = onEndVideoRemovalUndo
+        self.onScanForNewVideos = onScanForNewVideos
+        self.onChooseAdditionalScanFolders = onChooseAdditionalScanFolders
+        self.onImportScannedVideos = onImportScannedVideos
+        self.onClearScanResults = onClearScanResults
         self.settingsViewController = settingsViewController
         let inspector = InspectorViewController(
             onApplyTagDraft: onApplyTagDraft,
@@ -153,6 +174,8 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             onSmartCollectionSelected: { _ in },
             onRenameSmartCollection: { _, _ in },
             onDeleteSmartCollection: { _ in },
+            onScanResultsSelected: {},
+            onCloseScanResults: {},
             onCreateTag: onCreateTag,
             onRenameTag: onRenameTag,
             onDeleteTag: onDeleteTag,
@@ -185,9 +208,12 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             onUndoLastMutation: onUndoLastMutation,
             onDismissNotification: onEndVideoRemovalUndo
         )
+        let scanResults = ScanResultsViewController()
+        scanResultsViewController = scanResults
         libraryContentViewController = LibraryContentViewController(
             ruleBarViewController: ruleBarViewController,
-            videoGridViewController: videoGridViewController
+            videoGridViewController: videoGridViewController,
+            scanResultsViewController: scanResults
         )
         super.init(nibName: nil, bundle: nil)
         inspectorViewController.onVideoRemoved = { [weak self] count in
@@ -213,8 +239,22 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             },
             deleteSmartCollection: { [weak self] collection in
                 self?.presentDeleteSmartCollection(collection)
-            }
+            },
+            scanResults: { [weak self] in self?.showCurrentScanResults() },
+            closeScanResults: { [weak self] in self?.onClearScanResults() }
         )
+        scanResultsViewController.onImportSelected = { [weak self] ids in
+            self?.onImportScannedVideos(ids)
+        }
+        scanResultsViewController.onChooseFolders = { [weak self] in
+            self?.onChooseAdditionalScanFolders()
+        }
+        scanResultsViewController.onCloseResults = { [weak self] in
+            self?.onClearScanResults()
+        }
+        scanResultsViewController.onSelectionChanged = { [weak self] candidates in
+            self?.inspectorViewController.setScannedCandidates(candidates)
+        }
         configureRuleBarCallbacks()
     }
 
@@ -231,11 +271,15 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     }
 
     var canUseRuleCommands: Bool {
+        isShowingSettings == false && isLibraryAvailable && isShowingScanResults == false
+    }
+
+    var canFocusFilenameSearch: Bool {
         isShowingSettings == false && isLibraryAvailable
     }
 
     func focusFilenameSearch() {
-        guard canUseRuleCommands, let searchField = searchToolbarItem?.searchField else { return }
+        guard canFocusFilenameSearch, let searchField = searchToolbarItem?.searchField else { return }
         view.window?.makeFirstResponder(searchField)
         searchField.selectText(nil)
     }
@@ -371,7 +415,141 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     }
 
     func setSidebarFilterCounts(_ counts: SidebarFilterCounts) {
+        libraryVideoCount = counts.all + counts.unavailable
         sidebarViewController.setFilterCounts(counts)
+        updateToolbarState()
+    }
+
+    var canScanForNewVideos: Bool {
+        isLibraryAvailable
+            && libraryVideoCount > 0
+            && isImporting == false
+            && isScanWorking == false
+            && isShowingSettings == false
+    }
+
+    func setScanState(_ state: LibraryScanState) {
+        switch state {
+        case .idle:
+            isScanWorking = false
+            sidebarViewController.setScanResultsCloseEnabled(true)
+            currentScanResults = nil
+            sidebarViewController.setScanResultCount(nil)
+            scanResultsViewController.reset()
+            leaveScanResults()
+        case let .scanning(title, detail):
+            isScanWorking = true
+            sidebarViewController.setScanResultsCloseEnabled(false)
+            currentScanResults = nil
+            sidebarViewController.setScanResultCount(nil)
+            if isShowingScanResults == false { contextStatus = nil }
+            enterScanResults(selectSidebar: false)
+            contextTitle = title
+            updateWindowTitle()
+            scanResultsViewController.showScanning(title: title, detail: detail)
+        case let .results(results):
+            isScanWorking = false
+            sidebarViewController.setScanResultsCloseEnabled(true)
+            currentScanResults = results
+            let keepsTemporaryGroup = results.candidates.isEmpty == false
+                || results.notice != nil
+            sidebarViewController.setScanResultCount(
+                keepsTemporaryGroup ? results.candidates.count : nil
+            )
+            if keepsTemporaryGroup
+                || results.uncheckedFolderCount > 0
+                || results.failedFolderCount > 0 {
+                enterScanResults(selectSidebar: keepsTemporaryGroup)
+                scanResultsViewController.showResults(results)
+            } else {
+                leaveScanResults()
+                setContextStatus(String(
+                    localized: "scan.empty.title",
+                    defaultValue: "No New Videos Found"
+                ))
+            }
+        case let .importing(title, detail, results):
+            isScanWorking = true
+            sidebarViewController.setScanResultsCloseEnabled(false)
+            currentScanResults = results
+            sidebarViewController.setScanResultCount(results.candidates.count)
+            enterScanResults(selectSidebar: true)
+            contextTitle = title
+            updateWindowTitle()
+            scanResultsViewController.showImporting(
+                title: title,
+                detail: detail,
+                results: results
+            )
+        case let .completed(completion):
+            isScanWorking = false
+            sidebarViewController.setScanResultsCloseEnabled(true)
+            currentScanResults = nil
+            sidebarViewController.setScanResultCount(nil)
+            scanResultsViewController.reset()
+            leaveScanResults()
+            var seenVideoIDs = Set<String>()
+            let targetVideoIDs = (completion.addedVideoIDs + completion.existingVideoIDs)
+                .filter { seenVideoIDs.insert($0).inserted }
+            if targetVideoIDs.isEmpty == false {
+                viewVideos(VideoRevealRequest(
+                    videoIDs: targetVideoIDs,
+                    destination: completion.existingVideoIDs.isEmpty ? .recent : .all
+                ))
+            }
+        case let .failed(message):
+            isScanWorking = false
+            sidebarViewController.setScanResultsCloseEnabled(true)
+            currentScanResults = nil
+            sidebarViewController.setScanResultCount(nil)
+            scanResultsViewController.reset()
+            leaveScanResults()
+            setContextStatus(message)
+        }
+        updateToolbarState()
+    }
+
+    private func showCurrentScanResults() {
+        guard let currentScanResults else { return }
+        enterScanResults(selectSidebar: true)
+        scanResultsViewController.showResults(currentScanResults)
+    }
+
+    private func enterScanResults(selectSidebar: Bool) {
+        loadViewIfNeeded()
+        if isShowingScanResults == false {
+            contextBeforeScan = (contextTitle, contextTagID, contextStatus)
+        }
+        isShowingScanResults = true
+        libraryContentViewController.setShowsScanResults(true)
+        inspectorViewController.setBrowsingContext(.scanResults)
+        inspectorViewController.setScannedCandidates([])
+        contextTitle = String(
+            localized: "scan.sidebar.pending",
+            defaultValue: "Videos to Import"
+        )
+        contextTagID = nil
+        contextStatus = nil
+        searchToolbarItem?.searchField.stringValue = scanSearchText
+        scanResultsViewController.setSearchText(scanSearchText)
+        if selectSidebar { sidebarViewController.selectScanResults() }
+        updateWindowTitle()
+    }
+
+    private func leaveScanResults() {
+        guard isShowingScanResults else { return }
+        isShowingScanResults = false
+        libraryContentViewController.setShowsScanResults(false)
+        if let previous = contextBeforeScan {
+            contextTitle = previous.title
+            contextTagID = previous.tagID
+            contextStatus = previous.status
+        }
+        contextBeforeScan = nil
+        searchToolbarItem?.searchField.stringValue = temporaryFilenameSearch
+        updateInspectorBrowsingContext()
+        restoreCurrentSidebarSelection()
+        updateWindowTitle()
     }
 
     func setPresetShortcutHintsVisible(_ visible: Bool) {
@@ -543,7 +721,11 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
 
     private func requestNavigation(to target: NavigationTarget) {
         guard isSameNavigationTarget(target) == false else {
-            restoreCurrentSidebarSelection()
+            if isShowingScanResults {
+                leaveScanResults()
+            } else {
+                restoreCurrentSidebarSelection()
+            }
             return
         }
         if smartCollectionIsDirty {
@@ -576,6 +758,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     }
 
     private func performNavigation(to target: NavigationTarget) {
+        leaveScanResults()
         pendingNavigationTarget = nil
         onEndVideoRemovalUndo()
         transitionGrouping(to: target)
@@ -961,7 +1144,9 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             isImporting = false
         case .importing:
             isImporting = true
-            clearSearchForImport()
+            if isShowingScanResults == false {
+                clearSearchForImport()
+            }
         case .completed, .cancelled, .failed:
             isImporting = false
         }
@@ -996,6 +1181,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             .flexibleSpace,
             Self.zoomItemIdentifier,
             .space,
+            Self.scanItemIdentifier,
             Self.searchItemIdentifier,
             .inspectorTrackingSeparator,
             .flexibleSpace,
@@ -1018,6 +1204,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             .flexibleSpace,
             Self.zoomItemIdentifier,
             .space,
+            Self.scanItemIdentifier,
             Self.searchItemIdentifier,
             .inspectorTrackingSeparator,
             .flexibleSpace,
@@ -1072,6 +1259,25 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
             item.isEnabled = isLibraryAvailable
             searchToolbarItem = item
             return item
+        case Self.scanItemIdentifier:
+            let label = String(
+                localized: "scan.action",
+                defaultValue: "Scan for New Videos"
+            )
+            let button = makeToolbarIconButton(
+                symbolName: "arrow.clockwise",
+                label: label,
+                target: self,
+                action: #selector(scanForNewVideos(_:)),
+                buttonType: .momentaryPushIn
+            )
+            button.isEnabled = canScanForNewVideos
+            scanToolbarButton = button
+            let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+            item.paletteLabel = label
+            item.toolTip = label
+            item.view = button
+            return item
         case Self.zoomItemIdentifier:
             return makeZoomToolbarItem(identifier: itemIdentifier)
         default:
@@ -1083,6 +1289,8 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         switch item.itemIdentifier {
         case Self.searchItemIdentifier, Self.zoomItemIdentifier:
             isLibraryAvailable
+        case Self.scanItemIdentifier:
+            canScanForNewVideos
         default:
             super.validateUserInterfaceItem(item)
         }
@@ -1246,6 +1454,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
 
     private func updateToolbarState() {
         searchToolbarItem?.isEnabled = isLibraryAvailable
+        scanToolbarButton?.isEnabled = canScanForNewVideos
         zoomSlider?.isEnabled = isLibraryAvailable
         zoomOutButton?.isEnabled = isLibraryAvailable
         zoomInButton?.isEnabled = isLibraryAvailable
@@ -1283,7 +1492,13 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private func updateWindowTitle() {
         var subtitleParts: [String] = []
         if isLibraryAvailable {
-            subtitleParts.append(String(localized: .libraryVideoCount(visibleVideoCount)))
+            if isShowingScanResults {
+                if let count = currentScanResults?.candidates.count {
+                    subtitleParts.append(scanVideoCountDescription(count))
+                }
+            } else {
+                subtitleParts.append(String(localized: .libraryVideoCount(visibleVideoCount)))
+            }
         }
         if let contextStatus, contextStatus.isEmpty == false {
             subtitleParts.append(contextStatus)
@@ -1296,10 +1511,29 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         window.titleVisibility = .hidden
     }
 
+    private func scanVideoCountDescription(_ count: Int) -> String {
+        count == 1
+            ? String(localized: "scan.videoCount.one", defaultValue: "1 video")
+            : String(
+                localized: "scan.videoCount.many",
+                defaultValue: "\(count) videos"
+            )
+    }
+
     @objc private func searchChanged(_ sender: NSSearchField) {
+        if isShowingScanResults {
+            scanSearchText = sender.stringValue
+            scanResultsViewController.setSearchText(scanSearchText)
+            return
+        }
         temporaryFilenameSearch = sender.stringValue
         refreshRuleBar()
         applyCurrentQuery(debounce: true)
+    }
+
+    @objc private func scanForNewVideos(_ sender: Any?) {
+        guard canScanForNewVideos else { return }
+        onScanForNewVideos()
     }
 
     @objc private func toggleSidebarFromToolbar(_ sender: NSButton) {

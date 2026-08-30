@@ -78,3 +78,45 @@ struct DiscoveredVideo: Equatable, Sendable {
         )
     }
 }
+
+struct ScannedVideoCandidate: Identifiable, Equatable, Sendable {
+    let id: String
+    let sourceID: String
+    let sourceName: String
+    let video: DiscoveredVideo
+    let fileURL: URL
+
+    init(
+        sourceID: String,
+        sourceName: String,
+        video: DiscoveredVideo,
+        fileURL: URL
+    ) {
+        self.sourceID = sourceID
+        self.sourceName = sourceName
+        self.video = video
+        self.fileURL = fileURL
+        id = Self.identifier(sourceID: sourceID, video: video, fileURL: fileURL)
+    }
+
+    private static func identifier(
+        sourceID: String,
+        video: DiscoveredVideo,
+        fileURL: URL
+    ) -> String {
+        var identity = Data()
+        if let volumeIdentifier = video.volumeIdentifier,
+           let fileResourceIdentifier = video.fileResourceIdentifier {
+            identity.append(Data("resource:".utf8))
+            identity.append(volumeIdentifier)
+            identity.append(fileResourceIdentifier)
+        } else if let fallbackPathKey = video.fallbackPathKey {
+            identity.append(Data("path:".utf8))
+            identity.append(fallbackPathKey)
+        } else {
+            identity.append(Data("source:\(sourceID):".utf8))
+            identity.append(Data(fileURL.standardizedFileURL.absoluteString.utf8))
+        }
+        return Data(SHA256.hash(data: identity)).base64EncodedString()
+    }
+}

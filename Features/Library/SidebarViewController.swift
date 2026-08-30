@@ -10,11 +10,15 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var tags: [TagRecord] = []
     private var smartCollections: [SmartCollectionRecord] = []
     private var filterCounts = SidebarFilterCounts.zero
+    private var scanResultCount: Int?
+    private var scanResultsCloseEnabled = true
     private var groups: [SidebarGroupNode] = []
     private var onFilterChanged: (LibraryFilter) -> Void
     private var onSmartCollectionSelected: (SmartCollectionRecord) -> Void
     private var onRenameSmartCollection: (SmartCollectionRecord, String) -> Void
     private var onDeleteSmartCollection: (SmartCollectionRecord) -> Void
+    private var onScanResultsSelected: () -> Void
+    private var onCloseScanResults: () -> Void
     private let onCreateTag: (String, String?) -> Void
     private let onRenameTag: (TagRecord, String) -> Void
     private let onDeleteTag: (TagRecord) -> Void
@@ -38,6 +42,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         onSmartCollectionSelected: @escaping (SmartCollectionRecord) -> Void,
         onRenameSmartCollection: @escaping (SmartCollectionRecord, String) -> Void,
         onDeleteSmartCollection: @escaping (SmartCollectionRecord) -> Void,
+        onScanResultsSelected: @escaping () -> Void,
+        onCloseScanResults: @escaping () -> Void,
         onCreateTag: @escaping (String, String?) -> Void,
         onRenameTag: @escaping (TagRecord, String) -> Void,
         onDeleteTag: @escaping (TagRecord) -> Void,
@@ -50,6 +56,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         self.onSmartCollectionSelected = onSmartCollectionSelected
         self.onRenameSmartCollection = onRenameSmartCollection
         self.onDeleteSmartCollection = onDeleteSmartCollection
+        self.onScanResultsSelected = onScanResultsSelected
+        self.onCloseScanResults = onCloseScanResults
         self.onCreateTag = onCreateTag
         self.onRenameTag = onRenameTag
         self.onDeleteTag = onDeleteTag
@@ -154,6 +162,35 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         refocusInlineRenameIfNeeded()
     }
 
+    func setScanResultCount(_ count: Int?) {
+        guard scanResultCount != count else { return }
+        let selection = selectedItemKeys()
+        scanResultCount = count
+        rebuildNodes()
+        loadViewIfNeeded()
+        outlineView.reloadData()
+        restoreExpansionState()
+        restoreSelection(selection)
+    }
+
+    func selectScanResults() {
+        loadViewIfNeeded()
+        guard let row = (0..<outlineView.numberOfRows).first(where: { row in
+            outlineView.item(atRow: row) is ScanResultsNode
+        }) else { return }
+        isRestoringSelection = true
+        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        isRestoringSelection = false
+    }
+
+    func setScanResultsCloseEnabled(_ enabled: Bool) {
+        guard scanResultsCloseEnabled != enabled else { return }
+        scanResultsCloseEnabled = enabled
+        guard isViewLoaded,
+              let group = groups.first(where: { $0.kind == .scanResults }) else { return }
+        outlineView.reloadItem(group)
+    }
+
     func setPresetShortcutHintsVisible(_ visible: Bool) {
         guard showsPresetShortcutHints != visible else { return }
         showsPresetShortcutHints = visible
@@ -194,12 +231,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         filter: @escaping (LibraryFilter) -> Void,
         smartCollection: @escaping (SmartCollectionRecord) -> Void,
         renameSmartCollection: @escaping (SmartCollectionRecord, String) -> Void,
-        deleteSmartCollection: @escaping (SmartCollectionRecord) -> Void
+        deleteSmartCollection: @escaping (SmartCollectionRecord) -> Void,
+        scanResults: @escaping () -> Void,
+        closeScanResults: @escaping () -> Void
     ) {
         onFilterChanged = filter
         onSmartCollectionSelected = smartCollection
         onRenameSmartCollection = renameSmartCollection
         onDeleteSmartCollection = deleteSmartCollection
+        onScanResultsSelected = scanResults
+        onCloseScanResults = closeScanResults
     }
 
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
@@ -230,7 +271,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
-        item is SidebarFilterNode || item is SmartCollectionNode || item is TagNode
+        item is SidebarFilterNode
+            || item is SmartCollectionNode
+            || item is TagNode
+            || item is ScanResultsNode
     }
 
     func outlineView(
@@ -255,6 +299,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     func outlineViewSelectionDidChange(_ notification: Notification) {
         guard isRestoringSelection == false else { return }
         let selectedItems = outlineView.selectedRowIndexes.map { outlineView.item(atRow: $0) }
+        if selectedItems.contains(where: { $0 is ScanResultsNode }) {
+            onScanResultsSelected()
+            return
+        }
         if let smartCollection = selectedItems.compactMap({ $0 as? SmartCollectionNode }).first {
             onSmartCollectionSelected(smartCollection.collection)
             return
@@ -275,6 +323,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         if let group = item as? SidebarGroupNode {
+            if group.kind == .scanResults {
+                let identifier = NSUserInterfaceItemIdentifier("SidebarScanGroupCell")
+                let cell = outlineView.makeView(withIdentifier: identifier, owner: self)
+                    as? SidebarScanGroupCellView
+                    ?? makeScanGroupCell(identifier: identifier)
+                cell.closeButton.target = self
+                cell.closeButton.action = #selector(closeScanResults(_:))
+                cell.closeButton.isEnabled = scanResultsCloseEnabled
+                return cell
+            }
             if group.kind == .tags {
                 let identifier = NSUserInterfaceItemIdentifier("SidebarTagGroupCell")
                 let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? SidebarTagGroupCellView
@@ -339,7 +397,21 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             showsActionButton: showsActionButton
         )
 
-        if let filter = item as? SidebarFilterNode {
+        if let scanResults = item as? ScanResultsNode {
+            let title = String(
+                localized: "scan.sidebar.pending",
+                defaultValue: "Videos to Import"
+            )
+            cell.textField?.stringValue = title
+            cell.imageView?.image = sidebarSymbol(
+                named: "folder.badge.plus",
+                description: title
+            )
+            cell.configureTrailingLayout(
+                text: String(scanResults.videoCount),
+                showsActionButton: false
+            )
+        } else if let filter = item as? SidebarFilterNode {
             cell.textField?.stringValue = filter.title
             cell.imageView?.image = sidebarSymbol(named: filter.systemImageName, description: filter.title)
             if let shortcutHint = filter.shortcutHint {
@@ -406,6 +478,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     private func trailingText(for item: Any) -> String? {
+        if let scanResults = item as? ScanResultsNode {
+            return String(scanResults.videoCount)
+        }
         if let filter = item as? SidebarFilterNode {
             if showsPresetShortcutHints, let shortcutHint = filter.shortcutHint {
                 return shortcutHint
@@ -676,7 +751,18 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if tagChildren.isEmpty {
             tagChildren = [SidebarPlaceholderNode(title: String(localized: .sidebarNoTags))]
         }
-        groups = [library]
+        groups = []
+        if let scanResultCount {
+            groups.append(SidebarGroupNode(
+                kind: .scanResults,
+                title: String(
+                    localized: "scan.sidebar.group",
+                    defaultValue: "Scan Results"
+                ),
+                children: [ScanResultsNode(videoCount: scanResultCount)]
+            ))
+        }
+        groups.append(library)
         if smartCollections.isEmpty == false {
             groups.append(SidebarGroupNode(
                 kind: .smartCollections,
@@ -1087,6 +1173,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         isRestoringSelection = false
     }
     private func selectionKey(for item: Any?) -> SidebarSelectionKey? {
+        if item is ScanResultsNode { return .scanResults }
         if let smartCollection = item as? SmartCollectionNode {
             return .smartCollection(smartCollection.collection.id)
         }
@@ -1236,6 +1323,18 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         return cell
     }
 
+    private func makeScanGroupCell(
+        identifier: NSUserInterfaceItemIdentifier
+    ) -> SidebarScanGroupCellView {
+        let cell = SidebarScanGroupCellView()
+        cell.identifier = identifier
+        return cell
+    }
+
+    @objc private func closeScanResults(_ sender: Any?) {
+        onCloseScanResults()
+    }
+
     private func makeTagGroupCell(identifier: NSUserInterfaceItemIdentifier) -> SidebarTagGroupCellView {
         let cell = SidebarTagGroupCellView()
         cell.identifier = identifier
@@ -1277,6 +1376,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 }
 
 private enum SidebarSelectionKey: Hashable {
+    case scanResults
     case all
     case untagged
     case recent
@@ -1379,6 +1479,57 @@ private final class SidebarCountRowView: NSTableRowView {
     private func updateTextColor() {
         countLabel.textColor = isSelected ? .selectedControlTextColor : .secondaryLabelColor
     }
+}
+
+private final class SidebarScanGroupCellView: NSTableCellView {
+    let closeButton: NSButton = {
+        let title = String(
+            localized: "scan.sidebar.close",
+            defaultValue: "Close Scan Results"
+        )
+        let image = NSImage(
+            systemSymbolName: "xmark",
+            accessibilityDescription: title
+        )?.withSymbolConfiguration(.init(pointSize: 9, weight: .medium)) ?? NSImage()
+        let button = NSButton(image: image, target: nil, action: nil)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.title = ""
+        button.imagePosition = .imageOnly
+        button.bezelStyle = .accessoryBarAction
+        button.isBordered = false
+        button.contentTintColor = .secondaryLabelColor
+        button.toolTip = title
+        button.setAccessibilityLabel(title)
+        return button
+    }()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        let titleLabel = NSTextField(labelWithString: String(
+            localized: "scan.sidebar.group",
+            defaultValue: "Scan Results"
+        ))
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        titleLabel.textColor = .secondaryLabelColor
+        addSubview(titleLabel)
+        addSubview(closeButton)
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: closeButton.leadingAnchor,
+                constant: -4
+            ),
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 24),
+            closeButton.heightAnchor.constraint(equalToConstant: 22),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
 private final class SidebarTagGroupCellView: NSTableCellView {

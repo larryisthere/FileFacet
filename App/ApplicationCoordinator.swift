@@ -32,6 +32,16 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
     private lazy var libraryViewController = LibrarySplitViewController(
         onCancelImport: { [weak self] in self?.libraryAccessCoordinator?.cancelImport() },
         onImportDroppedItems: { [weak self] urls in self?.libraryAccessCoordinator?.importDroppedItems(urls) },
+        onScanForNewVideos: { [weak self] in self?.libraryAccessCoordinator?.scanForNewVideos() },
+        onChooseAdditionalScanFolders: { [weak self] in
+            self?.libraryAccessCoordinator?.chooseAdditionalScanFolders()
+        },
+        onImportScannedVideos: { [weak self] ids in
+            self?.libraryAccessCoordinator?.importScannedVideos(ids: ids)
+        },
+        onClearScanResults: { [weak self] in
+            self?.libraryAccessCoordinator?.clearScanResults()
+        },
         onRemoveVideos: { [weak self] videoIDs, completion in
             guard let coordinator = self?.libraryAccessCoordinator else {
                 completion(false)
@@ -193,6 +203,9 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
             case .idle, .importing:
                 break
             }
+        }
+        libraryAccessCoordinator?.onScanStateChanged = { [weak self] state in
+            self?.libraryViewController.setScanState(state)
         }
         libraryAccessCoordinator?.onTagsChanged = { [weak self] tags in
             self?.libraryViewController.setTags(tags)
@@ -381,6 +394,12 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         libraryAccessCoordinator.importVideos()
     }
 
+    @objc private func scanForNewVideos() {
+        guard lockCoordinator.state == .unlocked,
+              libraryViewController.canScanForNewVideos else { return }
+        libraryAccessCoordinator?.scanForNewVideos()
+    }
+
     private func resolveFolderImportMethod() async -> FolderImportMethod? {
         switch preferencesStore.folderImportPreference {
         case .direct:
@@ -471,6 +490,11 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         if menuItem.action == #selector(importVideos) {
             return lockCoordinator.state == .unlocked && databaseStore != nil
         }
+        if menuItem.action == #selector(scanForNewVideos) {
+            return lockCoordinator.state == .unlocked
+                && databaseStore != nil
+                && libraryViewController.canScanForNewVideos
+        }
         if menuItem.action == #selector(undoLastMutation) {
             return lockCoordinator.state == .unlocked
                 && libraryAccessCoordinator?.canUndoLastMutation == true
@@ -480,8 +504,12 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
                 && databaseStore != nil
                 && libraryViewController.canBeginCreatingRootTag
         }
-        if menuItem.action == #selector(focusFilenameSearch)
-            || menuItem.action == #selector(presentAddFilterMenu) {
+        if menuItem.action == #selector(focusFilenameSearch) {
+            return lockCoordinator.state == .unlocked
+                && databaseStore != nil
+                && libraryViewController.canFocusFilenameSearch
+        }
+        if menuItem.action == #selector(presentAddFilterMenu) {
             return lockCoordinator.state == .unlocked
                 && databaseStore != nil
                 && libraryViewController.canUseRuleCommands
@@ -549,6 +577,17 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         importItem.keyEquivalentModifierMask = [.command, .shift]
         importItem.target = self
         fileMenu.addItem(importItem)
+        let scanItem = NSMenuItem(
+            title: String(
+                localized: "scan.action",
+                defaultValue: "Scan for New Videos"
+            ),
+            action: #selector(scanForNewVideos),
+            keyEquivalent: ""
+        )
+        scanItem.target = self
+        fileMenu.addItem(scanItem)
+        fileMenu.addItem(.separator())
         let createTagItem = NSMenuItem(
             title: String(localized: .menuFileNewTag),
             action: #selector(createRootTag),

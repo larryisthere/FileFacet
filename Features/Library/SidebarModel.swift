@@ -55,9 +55,18 @@ struct SidebarFilterCounts: Equatable, Sendable {
 }
 
 enum SidebarGroupKind {
+    case scanResults
     case library
     case smartCollections
     case tags
+}
+
+final class ScanResultsNode {
+    let videoCount: Int
+
+    init(videoCount: Int) {
+        self.videoCount = videoCount
+    }
 }
 
 final class SidebarGroupNode {

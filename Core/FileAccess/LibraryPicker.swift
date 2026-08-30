@@ -43,4 +43,26 @@ struct LibraryPicker {
             .compactMap { UTType(filenameExtension: $0) }
         return panel.runModal() == .OK ? panel.url : nil
     }
+
+    func chooseScanFolders() -> [URL]? {
+        let panel = NSOpenPanel()
+        panel.title = String(
+            localized: "scan.folderPicker.title",
+            defaultValue: "Choose Folders to Scan"
+        )
+        panel.message = String(
+            localized: "scan.folderPicker.message",
+            defaultValue: "FileFacet will look for new videos in these folders and their subfolders."
+        )
+        panel.prompt = String(
+            localized: "scan.folderPicker.prompt",
+            defaultValue: "Choose"
+        )
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.canCreateDirectories = false
+        panel.resolvesAliases = false
+        return panel.runModal() == .OK ? panel.urls : nil
+    }
 }

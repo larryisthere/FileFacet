@@ -4,12 +4,18 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+### Added
+
+- Added on-demand scans for new videos in previously selected folders, with temporary Quick Look previews, selectable results, and optional folder access recovery for individually imported videos.
+
 ### Changed
 
+- Completed scan sessions now close their temporary sidebar category and reveal every video added during the session in Recently Added; sessions containing an existing record reveal the handled videos in All Videos.
 - Aligned tag-draft metadata, filter fields, and related action buttons with the native macOS text hierarchy.
 
 ### Fixed
 
+- Fixed scan results remaining onscreen when the user selected the already-active library category, compressed folder-import choices, and inconsistent singular scan feedback.
 - Fixed long Inspector tag lists briefly compressing their row spacing while calculating the scrollable content size.
 
 ## [1.0.7] - 2026-08-07
