@@ -4,6 +4,8 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-08-30
+
 ### Added
 
 - Added on-demand scans for new videos in previously selected folders, with temporary Quick Look previews, selectable results, and optional folder access recovery for individually imported videos.
