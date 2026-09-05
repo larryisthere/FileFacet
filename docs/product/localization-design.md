@@ -241,7 +241,7 @@ struct ImportResultPresentation {
 
 ## 11. 验证边界
 
-代理默认执行：
+工程验证要求 Debug 构建成功；执行权限遵循 `AGENTS.md`。参考命令：
 
 ```bash
 xcodebuild -project VideoTagManager.xcodeproj -scheme VideoTagManager -configuration Debug -derivedDataPath .build/DerivedData build

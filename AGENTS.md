@@ -20,7 +20,8 @@
 
 ## 开发、验证与提交
 
-- 默认只进行源代码、现有文件和既有日志的只读检查，以及不会触发构建、依赖安装、测试宿主、预览或 App 运行的文本级检查；保留改动交给用户验收。
+- 用户明确要求实现或修复，且评估合理、范围清楚时，可修改相应源码和文档；只读或先提建议的任务保持只读。发现矛盾、未决选择或未接受风险时，说明依据并再次确认。
+- 默认验证限于源代码、现有文件、既有日志和不触发构建、依赖安装、测试宿主、预览或 App 运行的文本级检查。改动交给用户验收；测试代码、执行操作和提交仍遵守下述授权与验收要求。
 - 构建、编译、链接、依赖安装或更新、自动化测试、预览、截图检查、交互验收、App 启动或操作都需要用户当前轮明确授权相应操作类别；所有 `xcodebuild` 操作均受此门禁约束，包括 `build`、`build-for-testing`、`test`、`test-without-building` 和 `-showBuildSettings`。
 - “实现”“修复”“继续”“验证”“回归检查”“收尾”“review”“提交前检查”等请求不产生上述执行授权；较早轮次的用户批准、已保存的命令批准、沙箱批准、工具审批或提权批准也不产生用户授权。
 - 授权只覆盖用户说明的类别、scheme、configuration、目标和范围；构建授权不扩展到测试、预览或 App 启动。Skill 和其他工作流同样受此限制。
@@ -62,11 +63,12 @@
 xcodebuild -project VideoTagManager.xcodeproj -scheme VideoTagManager -configuration Debug -derivedDataPath .build/DerivedData build
 ```
 
-获得用户当前轮测试或 App 启动授权后，按授权类别运行：
+获得用户当前轮测试授权后，按授权范围运行：
 
 ```bash
 xcodebuild -project VideoTagManager.xcodeproj -scheme VideoTagManager -configuration Debug -derivedDataPath .build/DerivedData test
-./script/build_and_run.sh
 ```
+
+`./script/build_and_run.sh` 会停止项目构建实例、构建、处理产物签名并尝试启动 App，须获当前轮对这些操作及目标范围的明确授权。仅获启动授权时，只读核实现有 App 路径后使用单独启动命令。
 
 未授权或因执行失败停止的项目记录为延期验证，汇报拟议命令、未执行原因和剩余风险。
