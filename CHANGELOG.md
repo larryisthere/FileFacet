@@ -4,6 +4,8 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-09-21
+
 ### Added
 
 - Added Restore Access to reconnect unavailable videos after confirming their original folders, with content verification, progress, and cancellation.
