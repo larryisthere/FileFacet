@@ -61,6 +61,14 @@ struct DiscoveredVideo: Equatable, Sendable {
         self.lastKnownPath = lastKnownPath
     }
 
+    func relativeToRecoveryDirectory(path: String) -> DiscoveredVideo {
+        DiscoveredVideo(relativePath: path, filename: self.filename, fileExtension: fileExtension,
+            fileSize: fileSize, creationDate: creationDate, modificationDate: modificationDate,
+            volumeIdentifier: volumeIdentifier, fileResourceIdentifier: fileResourceIdentifier,
+            contentFingerprint: contentFingerprint, finderTags: [], fallbackPathKey: fallbackPathKey,
+            lastKnownPath: lastKnownPath)
+    }
+
     func withContentFingerprint(_ fingerprint: Data) -> DiscoveredVideo {
         DiscoveredVideo(
             relativePath: relativePath,

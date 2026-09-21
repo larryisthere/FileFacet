@@ -6,6 +6,7 @@
     { id: "smart-filters", label: "筛选与智能分类" },
     { id: "deferred-tag-editing", label: "标签编辑" },
     { id: "offline-library", label: "不可用视频" },
+    { id: "folder-access-recovery", label: "文件夹恢复" },
     { id: "media-source-inspector", label: "媒体检查器" },
     { id: "video-grouping", label: "视频分组" },
     { id: "tag-sorting", label: "标签排序" },

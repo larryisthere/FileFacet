@@ -90,10 +90,8 @@ final class SidebarFilterNode {
     var shortcutHint: String? {
         switch filter {
         case .all: "⌘1"
-        case .untagged: "⌘2"
-        case .recent: "⌘3"
-        case .unavailable: "⌘4"
-        case .tag, .tags: nil
+        case .recent: "⌘2"
+        case .untagged, .unavailable, .tag, .tags: nil
         }
     }
 

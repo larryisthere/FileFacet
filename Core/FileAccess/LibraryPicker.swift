@@ -3,6 +3,24 @@ import UniformTypeIdentifiers
 
 @MainActor
 struct LibraryPicker {
+    func authorizeRecoveryDirectory(_ expected: URL) -> URL? {
+        let panel = NSOpenPanel()
+        let validation = RecoveryDirectoryValidation(expected: expected)
+        panel.delegate = validation
+        panel.title = String(localized: "recovery.permission.title", defaultValue: "Restore Folder Access")
+        panel.message = String(localized: "recovery.permission.message", defaultValue: "Confirm this folder to check the original videos.")
+        panel.prompt = String(localized: "recovery.permission.allow", defaultValue: "Allow Access")
+        panel.directoryURL = expected
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.resolvesAliases = false
+        guard panel.runModal() == .OK, let url = panel.url,
+              url.standardizedFileURL == expected.standardizedFileURL else { return nil }
+        return url
+    }
+
     func chooseImportItems() -> [URL]? {
         let panel = NSOpenPanel()
         panel.title = String(localized: .importPickerTitle)
@@ -64,5 +82,19 @@ struct LibraryPicker {
         panel.canCreateDirectories = false
         panel.resolvesAliases = false
         return panel.runModal() == .OK ? panel.urls : nil
+    }
+}
+
+@MainActor
+private final class RecoveryDirectoryValidation: NSObject, NSOpenSavePanelDelegate {
+    let expected: URL
+    init(expected: URL) { self.expected = expected }
+    func panel(_ sender: Any, validate url: URL) throws {
+        guard url.standardizedFileURL == expected.standardizedFileURL,
+              url.resolvingSymlinksInPath().standardizedFileURL == expected.standardizedFileURL else {
+            throw NSError(domain: "FileFacet.Recovery", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: String(localized: "recovery.permission.exact", defaultValue: "Confirm the original folder shown here.")
+            ])
+        }
     }
 }

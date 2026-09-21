@@ -7,6 +7,51 @@ final class LibraryContentViewController: NSViewController {
     let videoGridViewController: VideoGridViewController
     let scanResultsViewController: ScanResultsViewController
 
+    var onRecover: (() -> Void)?
+    var onStopRecovery: (() -> Void)?
+    var onDismissRecovery: (() -> Void)?
+    private var recoveryStatus = RecoveryStatus()
+    private var showsScanResults = false
+    private let recoveryBar = NSStackView()
+    private let recoveryLabel = NSTextField(wrappingLabelWithString: "")
+    private let recoveryButton = NSButton()
+    private let recoveryClose = NSButton()
+    private let recoveryProgress = NSProgressIndicator()
+    private var recoveryHeight: NSLayoutConstraint?
+
+    func setRecoveryStatus(_ status: RecoveryStatus) {
+        loadViewIfNeeded()
+        recoveryStatus = status
+        updateRecoveryBar()
+    }
+
+    private func updateRecoveryBar() {
+        let status = recoveryStatus
+        let hasEntry = status.candidateCount > 0 && (status.showEntry || showsScanResults)
+        let visible = status.running || status.message != nil || hasEntry
+        recoveryBar.isHidden = !visible
+        recoveryHeight?.constant = visible ? 64 : 0
+        recoveryClose.isHidden = status.message == nil || status.running
+        recoveryProgress.isHidden = !status.running
+        recoveryButton.isHidden = !status.running && !hasEntry
+        recoveryButton.isEnabled = status.running || status.canStart
+        recoveryButton.title = status.running
+            ? String(localized: "recovery.stop", defaultValue: "Stop Recovery")
+            : String(localized: "recovery.action", defaultValue: "Restore Access")
+        if status.running {
+            recoveryLabel.stringValue = String(localized: "recovery.progress", defaultValue: "Checking original videos: \(status.completed) of \(status.total)")
+            recoveryProgress.maxValue = Double(max(1, status.total))
+            recoveryProgress.doubleValue = Double(status.completed)
+        } else {
+            recoveryLabel.stringValue = status.message ?? String(localized: "recovery.scope", defaultValue: "\(status.candidateCount) videos can be checked for recovery.")
+        }
+    }
+
+    @objc private func performRecoveryAction() {
+        if recoveryStatus.running { onStopRecovery?() } else { onRecover?() }
+    }
+    @objc private func dismissRecovery() { onDismissRecovery?() }
+
     init(
         ruleBarViewController: LibraryRuleBarViewController,
         videoGridViewController: VideoGridViewController,
@@ -35,6 +80,33 @@ final class LibraryContentViewController: NSViewController {
         ruleBar.translatesAutoresizingMaskIntoConstraints = false
         grid.translatesAutoresizingMaskIntoConstraints = false
         scanResults.translatesAutoresizingMaskIntoConstraints = false
+        recoveryBar.translatesAutoresizingMaskIntoConstraints = false
+        recoveryBar.orientation = .horizontal
+        recoveryBar.alignment = .centerY
+        recoveryBar.spacing = 12
+        recoveryBar.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        recoveryLabel.font = .systemFont(ofSize: 13)
+        recoveryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        recoveryButton.target = self
+        recoveryButton.action = #selector(performRecoveryAction)
+        recoveryButton.bezelStyle = .rounded
+        recoveryClose.title = String(localized: "recovery.dismiss", defaultValue: "Dismiss")
+        recoveryClose.target = self
+        recoveryClose.action = #selector(dismissRecovery)
+        recoveryClose.bezelStyle = .rounded
+        recoveryProgress.isIndeterminate = false
+        recoveryProgress.style = .bar
+        recoveryProgress.widthAnchor.constraint(equalToConstant: 90).isActive = true
+        let recoveryViews: [NSView] = [recoveryLabel, recoveryProgress, recoveryButton, recoveryClose]
+        recoveryViews.forEach { recoveryBar.addArrangedSubview($0) }
+        container.addSubview(recoveryBar)
+        recoveryHeight = recoveryBar.heightAnchor.constraint(equalToConstant: 0)
+        recoveryHeight?.isActive = true
+        NSLayoutConstraint.activate([
+            recoveryBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            recoveryBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            recoveryBar.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor)
+        ])
         container.addSubview(ruleBar)
         container.addSubview(grid)
         container.addSubview(scanResults)
@@ -42,7 +114,7 @@ final class LibraryContentViewController: NSViewController {
         NSLayoutConstraint.activate([
             ruleBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             ruleBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            ruleBar.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
+            ruleBar.topAnchor.constraint(equalTo: recoveryBar.bottomAnchor),
             ruleBar.heightAnchor.constraint(equalToConstant: 44),
             grid.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             grid.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -50,15 +122,18 @@ final class LibraryContentViewController: NSViewController {
             grid.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             scanResults.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scanResults.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scanResults.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
+            scanResults.topAnchor.constraint(equalTo: recoveryBar.bottomAnchor),
             scanResults.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
         scanResults.isHidden = true
         view = container
+        updateRecoveryBar()
     }
 
     func setShowsScanResults(_ showsScanResults: Bool) {
         loadViewIfNeeded()
+        self.showsScanResults = showsScanResults
+        updateRecoveryBar()
         ruleBarViewController.view.isHidden = showsScanResults
         videoGridViewController.view.isHidden = showsScanResults
         scanResultsViewController.view.isHidden = showsScanResults == false

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FileFacet · 文件夹恢复</title>
+<link rel="stylesheet" href="recovery.css"><link rel="stylesheet" href="../prototype-shell.css">
+</head>
+<body data-prototype-page="folder-access-recovery" data-prototype-subtitle="目录恢复 · 待确认交互稿">
+<template id="prototypePageActions"><section class="prototype-group">
+<div class="prototype-group-title">演示场景 · 重置数据</div>
+<button class="prototype-action" data-scenario="mixed">部分恢复 / 需要逐项处理</button>
+<button class="prototype-action" data-scenario="all">参与恢复的视频全部成功</button>
+<button class="prototype-action" data-scenario="denied">全部恢复失败</button>
+<button class="prototype-action" data-scenario="none">只有原位置缺失与离线</button>
+<div class="prototype-group-title">重新定位 · 下次核对结果</div>
+<label class="prototype-link">模拟结果 <select id="demoRelinkOutcome"><option value="exact">内容一致</option><option value="different">内容不同</option><option value="unknown">缺少原指纹</option><option value="existing">属于另一条记录</option><option value="error">读取失败</option></select></label>
+<div class="prototype-group-title">入口与生命周期</div>
+<button class="prototype-action" id="demoScan">从扫描失败提示进入</button>
+<button class="prototype-action" id="demoRestart">模拟重启 · 保留已恢复结果</button>
+</section></template>
+<template id="prototypePanelFooter"><p>三阶段交互稿 · 虚构数据。初始 10 个可尝试、2 个原位置缺失、2 个离线。默认恢复 8 个。系统授权窗口为概念模拟，按 3 个精确原目录逐个确认；本机单目录预定位与重启授权恢复已用户验收，多目录仍为模拟。重新定位结果由左侧选择，产品窗口不提前判断所选文件。</p></template>
+<main class="desktop prototype-content prototype-app-surface">
+<section class="window" aria-label="FileFacet">
+<header class="titlebar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><strong>FileFacet</strong><span class="muted">资料库</span></header>
+<div class="workspace"><nav class="sidebar" aria-label="资料库分类"><small>资料库</small><button id="navAll">所有视频 <span>14</span></button><button id="navUnavailable" class="selected">不可用视频 <span id="unavailableCount">14</span></button><hr><button id="navScan">扫描结果 <span>3</span></button></nav>
+<section class="content"><header class="content-head"><div><h1 id="pageTitle">不可用视频</h1><p id="pageDetail" class="muted"></p></div><button class="primary" id="openRecovery">一键恢复</button></header>
+<div class="notice" id="scanNotice" hidden><span>3 个文件夹无法检查。</span><button id="scanRecovery">一键恢复</button></div>
+<div id="feedback" class="feedback" role="status" aria-live="polite"></div><button id="dismissFeedback" hidden aria-label="关闭结果通知">关闭通知</button>
+<div id="progressArea" hidden><label for="progress" id="progressLabel"></label><progress id="progress" max="10" value="0"></progress><button id="stop">停止恢复</button></div>
+<div id="cards" class="cards"></div>
+</section><aside class="inspector"><h2>恢复范围</h2><p id="scopeSummary"></p><hr><h2>其他不可用视频</h2><p>原位置未找到的视频，可逐个重新定位。</p><p>离线视频等待 Archive SSD 接入后自动检查。</p></aside></div>
+</section>
+</main>
+<dialog id="picker" aria-labelledby="pickerTitle"><div class="sheet-head"><h2 id="pickerTitle">允许 FileFacet 访问文件夹</h2></div><div class="sheet-body"><p id="authorizationDetail"></p><div class="folder-row"><div><strong id="authorizationFolder"></strong><small id="authorizationPath"></small></div></div><p class="muted">确认后继续核对其中的原文件。</p></div><footer><button id="cancelPicker">取消恢复</button><span class="spacer"></span><button id="confirmFolders" class="primary">允许访问</button></footer></dialog>
+<dialog id="filePicker" aria-labelledby="fileTitle"><div class="sheet-head"><h2 id="fileTitle">重新定位原文件</h2></div><div class="sheet-body"><p id="fileDescription"></p><div id="fileSelection"><p class="muted">当前位置：个人文件 / 视频</p><button class="file-choice" id="selectedFile" aria-pressed="true"></button></div><p id="fileProgress" role="status" aria-live="polite" hidden>正在核对所选文件…</p><div id="difference" hidden><h3>所选文件与原记录不完全一致</h3><p id="differenceDetail"></p><p>仍然连接会保留原有整理结果，并更新媒体信息与预览图。</p></div><div id="fileError" role="status" hidden></div></div><footer><button id="forceConnect" hidden>仍然连接</button><button id="viewExisting" hidden>查看已有视频</button><span class="spacer"></span><button id="cancelFile">取消</button><button id="confirmFile" class="primary">选择</button></footer></dialog>
+<script src="../prototype-shell.js"></script><script src="recovery.js"></script>
+</body></html>

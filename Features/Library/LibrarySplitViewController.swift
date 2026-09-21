@@ -57,6 +57,7 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
     private var currentScanResults: LibraryScanResults?
     private var scanSearchText = ""
     private var libraryVideoCount = 0
+    private var sidebarFilterCounts = SidebarFilterCounts.zero
     private var contextBeforeScan: (title: String, tagID: String?, status: String?)?
     private var visibleVideoCount = 0
     private var tags: [TagRecord] = []
@@ -330,6 +331,16 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         splitView.autosaveName = Self.splitViewAutosaveName
     }
 
+    func configureRecovery(onRecover: @escaping () -> Void, onStop: @escaping () -> Void, onDismiss: @escaping () -> Void) {
+        libraryContentViewController.onRecover = onRecover
+        libraryContentViewController.onStopRecovery = onStop
+        libraryContentViewController.onDismissRecovery = onDismiss
+    }
+
+    func setRecoveryStatus(_ status: RecoveryStatus) {
+        libraryContentViewController.setRecoveryStatus(status)
+    }
+
     func makeToolbar() -> NSToolbar {
         isShowingSettings ? settingsToolbar : libraryToolbar
     }
@@ -416,8 +427,13 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
 
     func setSidebarFilterCounts(_ counts: SidebarFilterCounts) {
         libraryVideoCount = counts.all + counts.unavailable
+        sidebarFilterCounts = counts
         sidebarViewController.setFilterCounts(counts)
         updateToolbarState()
+        if !isShowingScanResults, selectedSmartCollection == nil,
+           !isPresetVisible(currentBaseFilter) {
+            requestNavigation(to: .filter(.all))
+        }
     }
 
     var canScanForNewVideos: Bool {
@@ -560,8 +576,16 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         isLibraryAvailable && isShowingSettings == false
     }
 
+    private func isPresetVisible(_ filter: LibraryFilter) -> Bool {
+        switch filter {
+        case .untagged: sidebarFilterCounts.untagged > 0
+        case .unavailable: sidebarFilterCounts.unavailable > 0
+        default: true
+        }
+    }
+
     func navigateToPreset(_ filter: LibraryFilter) {
-        guard canNavigateLibraryPresets else { return }
+        guard canNavigateLibraryPresets, isPresetVisible(filter) else { return }
         requestNavigation(to: .filter(filter))
     }
 
@@ -577,6 +601,11 @@ final class LibrarySplitViewController: NSSplitViewController, NSToolbarDelegate
         updateContext(for: filter)
         updateInspectorBrowsingContext()
         refreshRuleBar()
+    }
+
+    func mediaPriorityVideoIDs() -> [String] {
+        guard !isShowingSettings, !isShowingScanResults else { return [] }
+        return videoGridViewController.mediaPriorityVideoIDs()
     }
 
     func updateVideo(_ video: VideoRecord) {

@@ -8,6 +8,7 @@ struct SourceAuthorizationRecord: Equatable, Sendable {
     let rootBookmarkData: Data
     let createdAt: Date
     let scansDescendants: Bool
+    let scanPolicyExplicit: Bool
 
     init(
         id: String,
@@ -15,7 +16,8 @@ struct SourceAuthorizationRecord: Equatable, Sendable {
         displayName: String,
         rootBookmarkData: Data,
         createdAt: Date,
-        scansDescendants: Bool = false
+        scansDescendants: Bool = false,
+        scanPolicyExplicit: Bool = true
     ) {
         self.id = id
         self.libraryID = libraryID
@@ -23,6 +25,7 @@ struct SourceAuthorizationRecord: Equatable, Sendable {
         self.rootBookmarkData = rootBookmarkData
         self.createdAt = createdAt
         self.scansDescendants = scansDescendants
+        self.scanPolicyExplicit = scanPolicyExplicit
     }
 }
 
@@ -33,6 +36,7 @@ struct VideoLocationRecord: Equatable, Sendable {
     let fallbackPathKey: Data?
     let volumeIdentifier: Data?
     let lastKnownPath: String?
+    let requiresRecoveryVerification: Bool
 
     init(
         videoID: String,
@@ -40,7 +44,8 @@ struct VideoLocationRecord: Equatable, Sendable {
         relativePath: String,
         fallbackPathKey: Data? = nil,
         volumeIdentifier: Data? = nil,
-        lastKnownPath: String? = nil
+        lastKnownPath: String? = nil,
+        requiresRecoveryVerification: Bool = false
     ) {
         self.videoID = videoID
         self.sourceID = sourceID
@@ -48,6 +53,7 @@ struct VideoLocationRecord: Equatable, Sendable {
         self.fallbackPathKey = fallbackPathKey
         self.volumeIdentifier = volumeIdentifier
         self.lastKnownPath = lastKnownPath
+        self.requiresRecoveryVerification = requiresRecoveryVerification
     }
 }
 
@@ -102,7 +108,7 @@ enum VideoRelinkAssessment: Equatable, Sendable {
 }
 
 actor DatabaseStore {
-    static let currentSchemaVersion = 13
+    static let currentSchemaVersion = 14
 
     private let connection: SQLiteConnection
     private var isPrepared = false
@@ -208,13 +214,14 @@ actor DatabaseStore {
             """
             INSERT INTO source_authorizations (
                 id, library_id, display_name, root_bookmark_data, created_at,
-                health_status, scans_descendants
-            ) VALUES (?, ?, ?, ?, ?, 'available', ?)
+                health_status, scans_descendants, scan_policy_explicit
+            ) VALUES (?, ?, ?, ?, ?, 'available', ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 display_name = excluded.display_name,
                 root_bookmark_data = excluded.root_bookmark_data,
                 health_status = 'available',
-                scans_descendants = excluded.scans_descendants
+                scans_descendants = excluded.scans_descendants,
+                scan_policy_explicit = excluded.scan_policy_explicit
             """
         )
         defer { sqlite3_finalize(statement) }
@@ -224,6 +231,7 @@ actor DatabaseStore {
         bindData(record.rootBookmarkData, to: 4, in: statement)
         sqlite3_bind_double(statement, 5, record.createdAt.timeIntervalSince1970)
         sqlite3_bind_int(statement, 6, record.scansDescendants ? 1 : 0)
+        sqlite3_bind_int(statement, 7, record.scanPolicyExplicit ? 1 : 0)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw DatabaseError.statementFailed
         }
@@ -234,7 +242,7 @@ actor DatabaseStore {
         let statement = try prepare(
             """
             SELECT id, library_id, display_name, root_bookmark_data, created_at,
-                   scans_descendants
+                   scans_descendants, scan_policy_explicit
             FROM source_authorizations
             WHERE library_id = ?
             ORDER BY created_at, id
@@ -256,7 +264,8 @@ actor DatabaseStore {
                 displayName: displayName,
                 rootBookmarkData: bookmark,
                 createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
-                scansDescendants: sqlite3_column_int(statement, 5) != 0
+                scansDescendants: sqlite3_column_int(statement, 5) != 0,
+                scanPolicyExplicit: sqlite3_column_int(statement, 6) != 0
             ))
         }
         return records
@@ -344,21 +353,24 @@ actor DatabaseStore {
         return identifiers
     }
 
-    func fetchVideoLocations(includeUnavailable: Bool = false) throws -> [VideoLocationRecord] {
+    func fetchVideoLocations(includeUnavailable: Bool = false, videoID: String? = nil) throws -> [VideoLocationRecord] {
         try prepareIfNeeded()
-        let availabilityClause = includeUnavailable ? "" : "WHERE video_locations.is_available = 1"
+        var locationConditions: [String] = includeUnavailable ? [] : ["video_locations.is_available = 1"]
+        if videoID != nil { locationConditions.append("video_locations.video_id = ?") }
+        let availabilityClause = locationConditions.isEmpty ? "" : "WHERE " + locationConditions.joined(separator: " AND ")
         let statement = try prepare(
             """
             SELECT video_locations.video_id, video_locations.source_id,
                    video_locations.relative_path, video_locations.fallback_path_key,
-                   videos.volume_identifier, video_locations.last_known_path
+                   videos.volume_identifier, video_locations.last_known_path, video_locations.requires_recovery_verification
             FROM video_locations
             JOIN videos ON videos.id = video_locations.video_id
             \(availabilityClause)
-            ORDER BY video_locations.last_verified_at DESC
+            ORDER BY video_locations.last_verified_at DESC, video_locations.source_id, video_locations.relative_path
             """
         )
         defer { sqlite3_finalize(statement) }
+        if let videoID { bindText(videoID, to: 1, in: statement) }
         var records: [VideoLocationRecord] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let videoID = text(at: 0, in: statement),
@@ -372,7 +384,8 @@ actor DatabaseStore {
                 relativePath: relativePath,
                 fallbackPathKey: data(at: 3, in: statement),
                 volumeIdentifier: data(at: 4, in: statement),
-                lastKnownPath: text(at: 5, in: statement)
+                lastKnownPath: text(at: 5, in: statement),
+                requiresRecoveryVerification: sqlite3_column_int(statement, 6) != 0
             ))
         }
         return records
@@ -392,6 +405,7 @@ actor DatabaseStore {
                     UPDATE video_locations
                     SET fallback_path_key = ?
                     WHERE video_id = ? AND source_id = ? AND relative_path = ?
+                      AND requires_recovery_verification = 0
                       AND fallback_path_key IS NULL
                     """
                 )
@@ -433,6 +447,7 @@ actor DatabaseStore {
                     UPDATE video_locations
                     SET last_known_path = ?
                     WHERE video_id = ? AND source_id = ? AND relative_path = ?
+                      AND requires_recovery_verification = 0
                     """
                 )
                 defer { sqlite3_finalize(statement) }
@@ -467,6 +482,7 @@ actor DatabaseStore {
                 UPDATE video_locations
                 SET is_available = 0
                 WHERE video_id = ? AND source_id = ? AND relative_path = ?
+                      AND requires_recovery_verification = 0
                 """
             )
             for location in locations {
@@ -494,7 +510,7 @@ actor DatabaseStore {
                   AND NOT EXISTS (
                       SELECT 1 FROM video_locations
                       WHERE video_locations.video_id = videos.id
-                        AND video_locations.is_available = 1
+                        AND (video_locations.is_available = 1 OR video_locations.requires_recovery_verification = 1)
                   )
                 """
             )
@@ -527,6 +543,7 @@ actor DatabaseStore {
         try prepareIfNeeded()
         try Task.checkCancellation()
         let runID = UUID().uuidString
+        var recoveryBlockedCount = 0
         var addedCount = 0
         var existingCount = 0
         var addedVideoIDs: [String] = []
@@ -563,6 +580,10 @@ actor DatabaseStore {
                         let videoID: String
                         if let existingID = try existingVideoID(for: video, sourceID: sourceID) {
                             videoID = existingID
+                            guard try permitsAutomaticUpdate(videoID: existingID, pathKey: video.fallbackPathKey) else {
+                                recoveryBlockedCount += 1
+                                continue
+                            }
                             try updateVideo(videoID: existingID, from: video, updatedAt: importedAt)
                             try upsertLocation(videoID: existingID, sourceID: sourceID, video: video, verifiedAt: importedAt)
                             batchExistingCount += 1
@@ -603,7 +624,7 @@ actor DatabaseStore {
                 status: "completed",
                 addedCount: addedCount,
                 existingCount: existingCount,
-                failedCount: discoveryFailedCount
+                failedCount: discoveryFailedCount + recoveryBlockedCount
             )
         } catch is CancellationError {
             try? updateImportRun(
@@ -611,7 +632,7 @@ actor DatabaseStore {
                 status: "cancelled",
                 addedCount: addedCount,
                 existingCount: existingCount,
-                failedCount: discoveryFailedCount
+                failedCount: discoveryFailedCount + recoveryBlockedCount
             )
             throw CancellationError()
         } catch {
@@ -620,7 +641,7 @@ actor DatabaseStore {
                 status: "failed",
                 addedCount: addedCount,
                 existingCount: existingCount,
-                failedCount: discoveryFailedCount + 1
+                failedCount: discoveryFailedCount + recoveryBlockedCount + 1
             )
             throw error
         }
@@ -631,7 +652,7 @@ actor DatabaseStore {
         return VideoImportResult(
             addedCount: addedCount,
             existingCount: existingCount,
-            failedCount: discoveryFailedCount,
+            failedCount: discoveryFailedCount + recoveryBlockedCount,
             addedVideoIDs: addedVideoIDs,
             existingVideoIDs: existingVideoIDs,
             importedVideos: imported,
@@ -719,6 +740,7 @@ actor DatabaseStore {
                         try Task.checkCancellation()
                         guard let videoID = try existingVideoID(for: video, sourceID: sourceID) else { continue }
                         batchSeenVideoIDs.insert(videoID)
+                        guard try permitsAutomaticUpdate(videoID: videoID, pathKey: video.fallbackPathKey) else { continue }
                         let mediaContentChanged = try mediaContentChanged(videoID: videoID, comparedWith: video)
                         try updateVideo(videoID: videoID, from: video, updatedAt: verifiedAt)
                         try removeOtherLocations(videoID: videoID, sourceID: sourceID, keepingPath: video.relativePath)
@@ -749,6 +771,7 @@ actor DatabaseStore {
                             UPDATE video_locations
                             SET is_available = 0
                             WHERE video_id = ? AND source_id = ? AND relative_path = ?
+                              AND requires_recovery_verification = 0
                             """
                         )
                         bindText(location.videoID, to: 1, in: statement)
@@ -822,7 +845,7 @@ actor DatabaseStore {
                   AND NOT EXISTS (
                       SELECT 1 FROM video_locations
                       WHERE video_locations.video_id = videos.id
-                        AND video_locations.is_available = 1
+                        AND (video_locations.is_available = 1 OR video_locations.requires_recovery_verification = 1)
                   )
                   AND NOT EXISTS (
                       SELECT 1 FROM video_locations
@@ -1065,7 +1088,7 @@ actor DatabaseStore {
 
     private func removeOtherLocations(videoID: String, sourceID: String, keepingPath: String) throws {
         let statement = try prepare(
-            "DELETE FROM video_locations WHERE video_id = ? AND source_id = ? AND relative_path != ?"
+            "DELETE FROM video_locations WHERE video_id = ? AND source_id = ? AND relative_path != ? AND requires_recovery_verification = 0"
         )
         defer { sqlite3_finalize(statement) }
         bindText(videoID, to: 1, in: statement)
@@ -1487,12 +1510,93 @@ actor DatabaseStore {
         return try videoRecord(from: statement)
     }
 
+    // A path match can identify an existing record without authorizing a write to it.
+    private func permitsAutomaticUpdate(videoID: String, pathKey: Data?) throws -> Bool {
+        let statement = try prepare("""
+            SELECT NOT EXISTS (SELECT 1 FROM video_locations WHERE video_id = ? AND requires_recovery_verification = 1)
+                OR EXISTS (SELECT 1 FROM video_locations WHERE video_id = ? AND requires_recovery_verification = 0
+                    AND is_available = 1 AND fallback_path_key = ?)
+            """)
+        defer { sqlite3_finalize(statement) }
+        bindText(videoID, to: 1, in: statement)
+        bindText(videoID, to: 2, in: statement)
+        bindData(pathKey, to: 3, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw DatabaseError.statementFailed }
+        return sqlite3_column_int(statement, 0) != 0
+    }
+
+    func confirmRecoveryPathMissing(videoID: String, path: String) throws {
+        try prepareIfNeeded()
+        try execute("BEGIN IMMEDIATE")
+        do {
+            let statement = try prepare("""
+                UPDATE video_locations SET requires_recovery_verification = 0, is_available = 0
+                WHERE video_id = ? AND last_known_path = ? AND requires_recovery_verification = 1
+                """)
+            defer { sqlite3_finalize(statement) }
+            bindText(videoID, to: 1, in: statement)
+            bindText(path, to: 2, in: statement)
+            guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed }
+            let mark = try prepare("""
+                UPDATE videos SET availability_status = 'missing', invalidated_at = COALESCE(invalidated_at, ?)
+                WHERE id = ? AND NOT EXISTS (SELECT 1 FROM video_locations WHERE video_id = ?
+                    AND (is_available = 1 OR requires_recovery_verification = 1))
+                """)
+            defer { sqlite3_finalize(mark) }
+            sqlite3_bind_double(mark, 1, Date().timeIntervalSince1970)
+            bindText(videoID, to: 2, in: mark)
+            bindText(videoID, to: 3, in: mark)
+            guard sqlite3_step(mark) == SQLITE_DONE else { throw DatabaseError.statementFailed }
+            try execute("COMMIT")
+        } catch { try? execute("ROLLBACK"); throw error }
+    }
+
+
+    func protectLostLocations(_ locations: [VideoLocationRecord]) throws {
+        guard !locations.isEmpty else { return }
+        try prepareIfNeeded()
+        try execute("BEGIN IMMEDIATE")
+        do {
+            let statement = try prepare("""
+                UPDATE video_locations SET requires_recovery_verification = 1
+                WHERE video_id = ? AND source_id = ? AND relative_path = ? AND is_available = 1
+                """)
+            defer { sqlite3_finalize(statement) }
+            for location in locations {
+                sqlite3_reset(statement)
+                sqlite3_clear_bindings(statement)
+                bindText(location.videoID, to: 1, in: statement)
+                bindText(location.sourceID, to: 2, in: statement)
+                bindText(location.relativePath, to: 3, in: statement)
+                guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed }
+            }
+            try execute("COMMIT")
+        } catch { try? execute("ROLLBACK"); throw error }
+    }
+
+    func protectRecoveryLocations(videoIDs: [String]) throws {
+        try prepareIfNeeded()
+        try execute("BEGIN IMMEDIATE")
+        do {
+            let statement = try prepare("UPDATE video_locations SET requires_recovery_verification = 1 WHERE video_id = ?")
+            defer { sqlite3_finalize(statement) }
+            for id in videoIDs {
+                sqlite3_reset(statement)
+                sqlite3_clear_bindings(statement)
+                bindText(id, to: 1, in: statement)
+                guard sqlite3_step(statement) == SQLITE_DONE else { throw DatabaseError.statementFailed }
+            }
+            try execute("COMMIT")
+        } catch { try? execute("ROLLBACK"); throw error }
+    }
+
     func relinkVideo(
         id videoID: String,
         sourceID: String,
         discoveredVideo: DiscoveredVideo,
         allowAvailableRecord: Bool = false,
         allowContentMismatch: Bool = false,
+        sourceAuthorization: SourceAuthorizationRecord? = nil,
         verifiedAt: Date = Date()
     ) throws -> VideoRecord {
         try prepareIfNeeded()
@@ -1514,6 +1618,7 @@ actor DatabaseStore {
             case let .existingRecord(existingVideoID):
                 throw DatabaseError.relinkExistingRecord(videoID: existingVideoID)
             }
+            if let sourceAuthorization { try saveSourceAuthorization(sourceAuthorization) }
             try updateRelinkedVideo(
                 videoID: videoID,
                 from: discoveredVideo,
@@ -1526,6 +1631,12 @@ actor DatabaseStore {
                 video: discoveredVideo,
                 verifiedAt: verifiedAt
             )
+            let clear = try prepare("UPDATE video_locations SET requires_recovery_verification = 0 WHERE video_id = ? AND source_id = ? AND relative_path = ?")
+            defer { sqlite3_finalize(clear) }
+            bindText(videoID, to: 1, in: clear)
+            bindText(sourceID, to: 2, in: clear)
+            bindText(discoveredVideo.relativePath, to: 3, in: clear)
+            guard sqlite3_step(clear) == SQLITE_DONE else { throw DatabaseError.statementFailed }
             try execute("COMMIT")
         } catch {
             try? execute("ROLLBACK")
@@ -1741,7 +1852,7 @@ actor DatabaseStore {
             let locationStatement = try prepare(
                 """
                 SELECT video_id, source_id, relative_path, last_verified_at, is_available,
-                       fallback_path_key, last_known_path
+                       fallback_path_key, last_known_path, requires_recovery_verification
                 FROM video_locations
                 WHERE video_id IN (SELECT id FROM pending_video_removal_ids)
                 ORDER BY video_id, source_id, relative_path
@@ -1762,7 +1873,8 @@ actor DatabaseStore {
                     lastVerifiedAt: Date(timeIntervalSince1970: sqlite3_column_double(locationStatement, 3)),
                     isAvailable: sqlite3_column_int(locationStatement, 4) != 0,
                     fallbackPathKey: data(at: 5, in: locationStatement),
-                    lastKnownPath: text(at: 6, in: locationStatement)
+                    lastKnownPath: text(at: 6, in: locationStatement),
+                    requiresRecoveryVerification: sqlite3_column_int(locationStatement, 7) != 0
                 ))
             }
             sqlite3_finalize(locationStatement)
@@ -1869,8 +1981,8 @@ actor DatabaseStore {
                 """
                 INSERT OR IGNORE INTO video_locations (
                     video_id, source_id, relative_path, last_verified_at, is_available,
-                    fallback_path_key, last_known_path
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    fallback_path_key, last_known_path, requires_recovery_verification
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """
             )
             for location in snapshot.locations {
@@ -1884,6 +1996,7 @@ actor DatabaseStore {
                 sqlite3_bind_int(locationStatement, 5, location.isAvailable ? 1 : 0)
                 bindData(location.fallbackPathKey, to: 6, in: locationStatement)
                 bindOptionalText(location.lastKnownPath, to: 7, in: locationStatement)
+                sqlite3_bind_int(locationStatement, 8, location.requiresRecoveryVerification ? 1 : 0)
                 guard sqlite3_step(locationStatement) == SQLITE_DONE else {
                     sqlite3_finalize(locationStatement)
                     throw DatabaseError.statementFailed
@@ -1959,8 +2072,53 @@ actor DatabaseStore {
         return nil
     }
 
-    func updateMediaInfo(videoID: String, result: MediaProcessingResult) throws -> VideoRecord? {
+    struct MediaProcessingSnapshot: Equatable, Sendable {
+        let video: VideoRecord
+        let revision: Double
+        let pathKey: Data
+        let locations: [VideoLocationRecord]
+    }
+
+    func mediaProcessingSnapshot(videoID: String, pathKey: Data) throws -> MediaProcessingSnapshot? {
         try prepareIfNeeded()
+        guard try permitsAutomaticUpdate(videoID: videoID, pathKey: pathKey),
+              let video = try fetchVideo(id: videoID), video.availability == .available else { return nil }
+        let statement = try prepare("SELECT updated_at FROM videos WHERE id = ?")
+        defer { sqlite3_finalize(statement) }
+        bindText(videoID, to: 1, in: statement)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        let locations = try fetchVideoLocations(videoID: videoID)
+        guard locations.contains(where: { $0.fallbackPathKey == pathKey && !$0.requiresRecoveryVerification }) else { return nil }
+        return MediaProcessingSnapshot(video: video, revision: sqlite3_column_double(statement, 0),
+            pathKey: pathKey, locations: locations)
+    }
+
+    func commitMediaProcessing(_ result: MediaProcessingResult, expected: MediaProcessingSnapshot) throws -> VideoRecord? {
+        try prepareIfNeeded()
+        try execute("BEGIN IMMEDIATE")
+        do {
+            // Compare and write atomically; stale work cannot overwrite a later mutation.
+            guard try mediaProcessingSnapshot(videoID: expected.video.id, pathKey: expected.pathKey) == expected else {
+                try execute("COMMIT")
+                return nil
+            }
+            let updated = try updateMediaInfo(videoID: expected.video.id, result: result, pathKey: expected.pathKey)
+            try execute("COMMIT")
+            return updated
+        } catch { try? execute("ROLLBACK"); throw error }
+    }
+
+    func isThumbnailReferenced(_ id: String) throws -> Bool {
+        try prepareIfNeeded()
+        let statement = try prepare("SELECT 1 FROM videos WHERE thumbnail_id = ? LIMIT 1")
+        defer { sqlite3_finalize(statement) }
+        bindText(id, to: 1, in: statement)
+        return sqlite3_step(statement) == SQLITE_ROW
+    }
+
+    func updateMediaInfo(videoID: String, result: MediaProcessingResult, pathKey: Data? = nil) throws -> VideoRecord? {
+        try prepareIfNeeded()
+        guard try permitsAutomaticUpdate(videoID: videoID, pathKey: pathKey) else { return nil }
         let statement = try prepare(
             """
             UPDATE videos SET duration = ?, width = ?, height = ?, thumbnail_id = ?,
@@ -2673,6 +2831,11 @@ actor DatabaseStore {
     }
 
     private func applyMigration(_ version: Int) throws {
+        if version == 14 {
+            try execute("ALTER TABLE source_authorizations ADD COLUMN scan_policy_explicit INTEGER NOT NULL DEFAULT 0")
+            try execute("ALTER TABLE video_locations ADD COLUMN requires_recovery_verification INTEGER NOT NULL DEFAULT 0")
+            return
+        }
         if version == 13 {
             try execute(
                 "ALTER TABLE source_authorizations "

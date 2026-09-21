@@ -4,6 +4,23 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+### Added
+
+- Added Restore Access to reconnect unavailable videos after confirming their original folders, with content verification, progress, and cancellation.
+
+### Changed
+
+- Kept All Videos and Recently Added first with Command-1 and Command-2. Untagged and Unavailable Videos appear only when nonempty and have no numeric shortcuts.
+- Kept folders authorized for recovery separate from new-video scan scope.
+
+### Fixed
+
+- Verified original content before automatically reconnecting lost file associations through existing folder access.
+- Prevented outdated background media results from replacing newer metadata or thumbnails.
+- Prioritized visible videos when rebuilding missing thumbnails, reused existing media information, and reduced repeated cache scans.
+- Loaded thumbnails in the background and updated individual cards to improve responsiveness and clear hover highlights promptly.
+- Fixed relinking readable original videos rejected by AVFoundation's playability flag while retaining content and media checks.
+
 ## [1.0.8] - 2026-08-30
 
 ### Added

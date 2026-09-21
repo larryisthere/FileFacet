@@ -189,6 +189,9 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         libraryAccessCoordinator?.onFilterChangedBySystem = { [weak self] filter in
             self?.libraryViewController.setFilterFromSystem(filter)
         }
+        libraryAccessCoordinator?.mediaPriorityVideoIDs = { [weak self] in
+            self?.libraryViewController.mediaPriorityVideoIDs() ?? []
+        }
         libraryAccessCoordinator?.onVideoChanged = { [weak self] video in
             self?.libraryViewController.updateVideo(video)
         }
@@ -227,6 +230,14 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         }
         libraryAccessCoordinator?.onOperationError = { [weak self] message in
             self?.libraryViewController.setOperationError(message)
+        }
+        libraryViewController.configureRecovery(
+            onRecover: { [weak self] in self?.libraryAccessCoordinator?.recoverVideoAccess() },
+            onStop: { [weak self] in self?.libraryAccessCoordinator?.stopAccessRecovery() },
+            onDismiss: { [weak self] in self?.libraryAccessCoordinator?.dismissRecoveryResult() }
+        )
+        libraryAccessCoordinator?.onRecoveryChanged = { [weak self] status in
+            self?.libraryViewController.setRecoveryStatus(status)
         }
         libraryAccessCoordinator?.onOperationStatusChanged = { [weak self] status in
             self?.libraryViewController.setOperationStatus(status)
@@ -639,10 +650,10 @@ final class ApplicationCoordinator: NSObject, NSMenuItemValidation {
         let viewMenu = NSMenu(title: String(localized: "menu.view", defaultValue: "View"))
         let presetItems: [(String, Selector, String)] = [
             (String(localized: .libraryAllVideos), #selector(showAllVideos), "1"),
-            (String(localized: .libraryUntagged), #selector(showUntaggedVideos), "2"),
-            (String(localized: .libraryRecent), #selector(showRecentVideos), "3"),
+            (String(localized: .libraryRecent), #selector(showRecentVideos), "2"),
+            (String(localized: .libraryUntagged), #selector(showUntaggedVideos), ""),
             (String(localized: "library.unavailable", defaultValue: "Unavailable Videos"),
-             #selector(showUnavailableVideos), "4"),
+             #selector(showUnavailableVideos), ""),
         ]
         for (title, action, keyEquivalent) in presetItems {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)

@@ -156,6 +156,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         filterCounts = counts
         rebuildNodes()
         loadViewIfNeeded()
+        isRestoringSelection = true
+        defer { isRestoringSelection = false }
         outlineView.reloadData()
         restoreExpansionState()
         restoreSelection(selection)
@@ -704,7 +706,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     private func rebuildNodes() {
-        let libraryChildren: [Any] = [
+        let libraryChildren: [SidebarFilterNode] = [
             SidebarFilterNode(
                 title: String(localized: .libraryAllVideos),
                 systemImageName: "film",
@@ -712,16 +714,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 videoCount: filterCounts.all
             ),
             SidebarFilterNode(
-                title: String(localized: .libraryUntagged),
-                systemImageName: "tag.slash",
-                filter: .untagged,
-                videoCount: filterCounts.untagged
-            ),
-            SidebarFilterNode(
                 title: String(localized: .libraryRecent),
                 systemImageName: "clock",
                 filter: .recent,
                 videoCount: filterCounts.recent
+            ),
+            SidebarFilterNode(
+                title: String(localized: .libraryUntagged),
+                systemImageName: "tag.slash",
+                filter: .untagged,
+                videoCount: filterCounts.untagged
             ),
             SidebarFilterNode(
                 title: String(
@@ -732,7 +734,12 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 filter: .unavailable,
                 videoCount: filterCounts.unavailable
             )
-        ]
+        ].filter { node in
+            switch node.filter {
+            case .untagged, .unavailable: node.videoCount > 0
+            default: true
+            }
+        }
         let library = SidebarGroupNode(
             kind: .library,
             title: String(localized: .libraryGroup),

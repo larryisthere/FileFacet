@@ -610,14 +610,14 @@
         <button class="nav-row preset-row selected" data-filter="all" aria-keyshortcuts="Meta+1">
           <span class="nav-label">所有视频</span><span class="nav-count" id="allCount" data-shortcut="⌘1">8</span>
         </button>
-        <button class="nav-row preset-row" data-filter="untagged" aria-keyshortcuts="Meta+2">
-          <span class="nav-label">未打标签</span><span class="nav-count" id="untaggedCount" data-shortcut="⌘2">1</span>
+        <button class="nav-row preset-row" data-filter="recent" aria-keyshortcuts="Meta+2">
+          <span class="nav-label">最近添加</span><span class="nav-count" id="recentCount" data-shortcut="⌘2">3</span>
         </button>
-        <button class="nav-row preset-row" data-filter="recent" aria-keyshortcuts="Meta+3">
-          <span class="nav-label">最近添加</span><span class="nav-count" id="recentCount" data-shortcut="⌘3">3</span>
+        <button class="nav-row preset-row" data-filter="untagged">
+          <span class="nav-label">未打标签</span><span class="nav-count" id="untaggedCount">1</span>
         </button>
-        <button class="nav-row preset-row" data-filter="unavailable" aria-keyshortcuts="Meta+4">
-          <span class="nav-label">不可用视频</span><span class="nav-count" id="unavailableCount" data-shortcut="⌘4">0</span>
+        <button class="nav-row preset-row" data-filter="unavailable">
+          <span class="nav-label">不可用视频</span><span class="nav-count" id="unavailableCount">0</span>
         </button>
 
         <div class="section-label">标签</div>
@@ -628,6 +628,7 @@
       </aside>
 
       <section class="content">
+        <a id="folderRecoveryEntry" href="../folder-access-recovery/index.html" hidden style="align-self:flex-start;margin:12px 16px;color:var(--accent)">一键恢复</a>
         <div class="inline-status" id="inlineStatus" role="status" aria-live="polite">
           <span class="status-mark" aria-hidden="true"></span>
           <div class="status-copy">
@@ -887,9 +888,7 @@
     };
     const shortcutFilters = {
       "1": "all",
-      "2": "untagged",
-      "3": "recent",
-      "4": "unavailable"
+      "2": "recent"
     };
 
     function isOffline(video) {
@@ -939,7 +938,8 @@
       Object.entries(presetCounts).forEach(([filter, element]) => {
         const count = presetTotal(filter);
         element.dataset.count = String(count);
-        element.textContent = commandKeyHeld ? element.dataset.shortcut : String(count);
+        element.textContent = commandKeyHeld && element.dataset.shortcut ? element.dataset.shortcut : String(count);
+        element.closest(".preset-row").hidden = ["untagged", "unavailable"].includes(filter) && count === 0;
       });
     }
 
@@ -1048,6 +1048,7 @@
       const selected = selection.length === 1 ? selection[0] : null;
       const unavailableContext = currentFilter === "unavailable";
 
+      document.getElementById("folderRecoveryEntry").hidden = !unavailableContext;
       tagsSegment.textContent = unavailableContext ? "处理" : "标签";
       tagsSegment.dataset.inspectorMode = unavailableContext ? "resolve" : "tags";
       tagsSegment.setAttribute("aria-controls", unavailableContext ? "resolvePane" : "tagsPane");

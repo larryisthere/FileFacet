@@ -257,6 +257,7 @@ struct RemovedVideoLocation: Equatable, Sendable {
     let isAvailable: Bool
     let fallbackPathKey: Data?
     let lastKnownPath: String?
+    var requiresRecoveryVerification: Bool = false
 }
 
 struct RemovedVideoTagRelation: Equatable, Sendable {

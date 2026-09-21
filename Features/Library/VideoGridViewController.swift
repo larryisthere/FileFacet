@@ -1,4 +1,6 @@
 import AppKit
+import ImageIO
+import QuartzCore
 
 enum VideoGroupingKey: String, CaseIterable, Sendable {
     case none
@@ -63,7 +65,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
     private struct GroupSection {
         let id: String
         let title: String?
-        let videos: [VideoRecord]
+        var videos: [VideoRecord]
     }
 
     private struct GroupBucket {
@@ -734,6 +736,11 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
 
     func setVideos(_ videos: [VideoRecord], resetBrowsingState: Bool = false) {
         loadViewIfNeeded()
+        if !resetBrowsingState, self.videos.map(\.id) == videos.map(\.id),
+           zip(self.videos, videos).allSatisfy({ groupBucket(for: $0.0).id == groupBucket(for: $0.1).id }) {
+            for video in videos { updateVideo(video, refreshThumbnail: false) }
+            return
+        }
         selectedVideoIDs = resetBrowsingState ? [] : selectedVideoIDs.intersection(videos.map(\.id))
         self.videos = videos
         if resetBrowsingState {
@@ -754,12 +761,41 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
         notifySelectionChanged()
     }
 
-    func updateVideo(_ video: VideoRecord) {
-        guard let index = videos.firstIndex(where: { $0.id == video.id }) else { return }
+    func updateVideo(_ video: VideoRecord, refreshThumbnail: Bool = true) {
+        guard let index = videos.firstIndex(where: { $0.id == video.id }), refreshThumbnail || videos[index] != video else { return }
+        let previous = videos[index]
         videos[index] = video
-        rebuildSections()
-        reloadCollectionDataPreservingSelection()
-        notifySelectionChanged()
+        if groupBucket(for: previous).id == groupBucket(for: video).id {
+            for section in sections.indices {
+                if let item = sections[section].videos.firstIndex(where: { $0.id == video.id }) {
+                    sections[section].videos[item] = video
+                    let path = IndexPath(item: item, section: section)
+                    if let cell = collectionView.item(at: path) as? VideoCollectionViewItem {
+                        cell.configure(with: video, thumbnailURL: thumbnailURL(video), refreshThumbnail: refreshThumbnail)
+                    }
+                    break
+                }
+            }
+        } else {
+            rebuildSections()
+            reloadCollectionDataPreservingSelection()
+        }
+        if selectedVideoIDs.contains(video.id) { notifySelectionChanged() }
+    }
+
+    // Actual viewport first, nearby items next, then the current displayed ordering.
+    func mediaPriorityVideoIDs() -> [String] {
+        guard isViewLoaded, !view.isHidden else { return [] }
+        let ordered = sections.filter { !collapsedGroupIDs.contains($0.id) }.flatMap { $0.videos.map(\.id) }
+        let visible = Set(collectionView.visibleItems().compactMap { item -> String? in
+            guard let path = collectionView.indexPath(for: item) else { return nil }
+            return video(at: path)?.id
+        })
+        let indices = ordered.indices.filter { visible.contains(ordered[$0]) }
+        guard let first = indices.first, let last = indices.last else { return ordered }
+        let nearby = Array(ordered[max(0, first - 12)..<min(ordered.count, last + 13)])
+        var seen = Set<String>()
+        return (ordered.filter { visible.contains($0) } + nearby + ordered).filter { seen.insert($0).inserted }
     }
 
     func selectedVideos() -> [VideoRecord] {
@@ -1624,6 +1660,22 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
     private let filenameLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
     private var isHovered = false
+    private var imageTask: Task<Void, Never>?
+    private var imageRequest = UUID()
+    private var configuredVideo: VideoRecord?
+    private var configuredURL: URL?
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        imageTask?.cancel()
+        imageRequest = UUID()
+        configuredVideo = nil
+        configuredURL = nil
+        thumbnailView.image = nil
+        isHovered = false
+        updateSelectionAppearance()
+    }
+
 
     override var isSelected: Bool {
         didSet { updateSelectionAppearance() }
@@ -1672,9 +1724,30 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
         updateSelectionAppearance()
     }
 
-    func configure(with video: VideoRecord, thumbnailURL: URL?) {
+    func configure(with video: VideoRecord, thumbnailURL: URL?, refreshThumbnail: Bool = false) {
         loadViewIfNeeded()
-        thumbnailView.image = thumbnailURL.flatMap(NSImage.init(contentsOf:))
+        let needsImage = refreshThumbnail || configuredVideo?.id != video.id || configuredURL != thumbnailURL
+            || configuredVideo?.thumbnailStatus != video.thumbnailStatus
+            || configuredVideo?.contentFingerprint != video.contentFingerprint
+        if configuredVideo?.id != video.id {
+            isHovered = false
+            updateSelectionAppearance()
+        }
+        configuredVideo = video
+        configuredURL = thumbnailURL
+        if needsImage {
+            imageTask?.cancel()
+            let request = UUID()
+            imageRequest = request
+            thumbnailView.image = nil
+            if let thumbnailURL {
+                imageTask = Task { [weak self] in
+                    let image = await DecodedVideoThumbnailCache.shared.image(at: thumbnailURL)
+                    guard !Task.isCancelled, let self, imageRequest == request else { return }
+                    thumbnailView.image = image
+                }
+            }
+        }
         thumbnailView.availability = video.availability
         filenameLabel.stringValue = video.filename
         let duration = video.duration.map { formattedDuration($0) } ?? video.fileExtension.uppercased()
@@ -1696,7 +1769,10 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
         } else {
             backgroundColor = .clear
         }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         view.layer?.backgroundColor = backgroundColor.cgColor
+        CATransaction.commit()
     }
 }
 
@@ -1707,7 +1783,7 @@ private final class VideoThumbnailView: NSView {
     private let offlineBadgeView = NSView()
     private let offlineBadgeLabel = NSTextField(labelWithString: String(localized: .videoOfflineBadge))
 
-    var image: NSImage? {
+    var image: CGImage? {
         didSet {
             placeholderView.isHidden = image != nil
             updateImageLayer()
@@ -1802,8 +1878,7 @@ private final class VideoThumbnailView: NSView {
             layer?.contents = nil
             return
         }
-        var proposedRect = NSRect(origin: .zero, size: image.size)
-        layer?.contents = image.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil)
+        layer?.contents = image
         layer?.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
     }
 }
@@ -1826,6 +1901,13 @@ private final class VideoCollectionItemView: NSView {
         )
         addTrackingArea(trackingArea)
         hoverTrackingArea = trackingArea
+        refreshHover()
+    }
+
+    @objc private func refreshHover() {
+        guard let window, window.isKeyWindow else { onHoverChanged?(false); return }
+        let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        onHoverChanged?(visibleRect.contains(point))
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -1838,8 +1920,38 @@ private final class VideoCollectionItemView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil {
-            onHoverChanged?(false)
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
+        if let window {
+            NotificationCenter.default.addObserver(self, selector: #selector(refreshHover), name: NSWindow.didResignKeyNotification, object: window)
+            NotificationCenter.default.addObserver(self, selector: #selector(refreshHover), name: NSWindow.didBecomeKeyNotification, object: window)
         }
+        refreshHover()
+    }
+}
+
+// File I/O and eager JPEG decoding stay on this actor, away from AppKit's main actor.
+private actor DecodedVideoThumbnailCache {
+    static let shared = DecodedVideoThumbnailCache()
+    private let cache: NSCache<NSString, CGImage> = {
+        let cache = NSCache<NSString, CGImage>()
+        cache.totalCostLimit = 64 * 1_024 * 1_024
+        cache.countLimit = 256
+        return cache
+    }()
+
+    func image(at url: URL) -> CGImage? {
+        guard !Task.isCancelled,
+              let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]) else { return nil }
+        let key = "\(url.path)|\(values.contentModificationDate?.timeIntervalSince1970 ?? 0)|\(values.fileSize ?? 0)" as NSString
+        if let image = cache.object(forKey: key) { return image }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 640,
+                kCGImageSourceShouldCacheImmediately: true
+              ] as CFDictionary), !Task.isCancelled else { return nil }
+        cache.setObject(image, forKey: key, cost: image.bytesPerRow * image.height)
+        return image
     }
 }

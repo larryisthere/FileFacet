@@ -10,6 +10,7 @@ struct MediaProcessingResult: Sendable {
     let width: Int?
     let height: Int?
     let thumbnailID: String?
+    let generatedThumbnailID: String?
     let metadataStatus: VideoRecord.ProcessingStatus
     let thumbnailStatus: VideoRecord.ProcessingStatus
     let mediaSourceInfo: MediaSourceInfo?
@@ -23,12 +24,14 @@ struct MediaProcessingResult: Sendable {
         metadataStatus: VideoRecord.ProcessingStatus,
         thumbnailStatus: VideoRecord.ProcessingStatus,
         mediaSourceInfo: MediaSourceInfo? = nil,
-        contentFingerprint: Data? = nil
+        contentFingerprint: Data? = nil,
+        generatedThumbnailID: String? = nil
     ) {
         self.duration = duration
         self.width = width
         self.height = height
         self.thumbnailID = thumbnailID
+        self.generatedThumbnailID = generatedThumbnailID
         self.metadataStatus = metadataStatus
         self.thumbnailStatus = thumbnailStatus
         self.mediaSourceInfo = mediaSourceInfo
@@ -45,6 +48,7 @@ struct VideoMediaInspection: Sendable {
 actor MediaProcessingService {
     private let thumbnailDirectory: URL
     private let maximumCacheBytes: Int64
+    private var lastPrunedAt = Date()
 
     init(
         fileManager: FileManager = .default,
@@ -65,38 +69,48 @@ actor MediaProcessingService {
         try Self.prune(directory: thumbnailDirectory, maximumBytes: maximumCacheBytes, fileManager: fileManager)
     }
 
+    func needsProcessing(_ video: VideoRecord) -> Bool {
+        if video.contentFingerprint == nil || video.metadataStatus == .pending || video.thumbnailStatus == .pending { return true }
+        guard video.thumbnailStatus == .completed, let id = video.thumbnailID else { return false }
+        return !FileManager.default.fileExists(atPath: thumbnailURL(for: id).path)
+    }
+
     func process(video: VideoRecord, fileURL: URL) async -> MediaProcessingResult {
         let asset = AVURLAsset(url: fileURL)
-        let fingerprint = try? contentFingerprint(for: fileURL)
-        var duration: Double?
-        var width: Int?
-        var height: Int?
-        let mediaSourceInfo = await loadMediaSourceInfo(asset: asset, fileURL: fileURL)
-        var metadataStatus: VideoRecord.ProcessingStatus = .failed
+        // A missing JPEG does not invalidate previously established content identity.
+        let fingerprint = video.contentFingerprint ?? (try? contentFingerprint(for: fileURL))
+        var duration = video.duration
+        var width = video.width
+        var height = video.height
+        var mediaSourceInfo = video.mediaSourceInfo
+        var metadataStatus = video.metadataStatus
 
-        do {
-            let assetDuration = try await asset.load(.duration)
-            if assetDuration.isNumeric {
-                duration = max(0, assetDuration.seconds)
+        if video.metadataStatus != .completed {
+            mediaSourceInfo = await loadMediaSourceInfo(asset: asset, fileURL: fileURL)
+            do {
+                let assetDuration = try await asset.load(.duration)
+                if assetDuration.isNumeric {
+                    duration = max(0, assetDuration.seconds)
+                }
+                if let track = try await asset.loadTracks(withMediaType: .video).first {
+                    let naturalSize = try await track.load(.naturalSize)
+                    let transform = try await track.load(.preferredTransform)
+                    let transformedSize = naturalSize.applying(transform)
+                    width = Int(abs(transformedSize.width).rounded())
+                    height = Int(abs(transformedSize.height).rounded())
+                }
+                metadataStatus = .completed
+            } catch {
+                metadataStatus = .failed
             }
-            if let track = try await asset.loadTracks(withMediaType: .video).first {
-                let naturalSize = try await track.load(.naturalSize)
-                let transform = try await track.load(.preferredTransform)
-                let transformedSize = naturalSize.applying(transform)
-                width = Int(abs(transformedSize.width).rounded())
-                height = Int(abs(transformedSize.height).rounded())
-            }
-            metadataStatus = .completed
-        } catch {
-            metadataStatus = .failed
         }
 
+        var generatedThumbnailID: String?
         do {
             try Task.checkCancellation()
-            let thumbnailID = video.id
-            let destinationURL = thumbnailURL(for: thumbnailID)
-            let thumbnailExists = FileManager.default.fileExists(atPath: destinationURL.path)
-            if video.thumbnailStatus != .completed || thumbnailExists == false {
+            var thumbnailID = video.thumbnailID
+            let thumbnailExists = thumbnailID.map { FileManager.default.fileExists(atPath: thumbnailURL(for: $0).path) } ?? false
+            if video.thumbnailStatus != .completed || !thumbnailExists {
                 let image: CGImage
                 do {
                     let generator = AVAssetImageGenerator(asset: asset)
@@ -120,13 +134,15 @@ actor MediaProcessingService {
                         throw error
                     }
                 }
-                if thumbnailExists { try FileManager.default.removeItem(at: destinationURL) }
-                try writeJPEG(image, to: destinationURL)
-                try Self.prune(
-                    directory: thumbnailDirectory,
-                    maximumBytes: maximumCacheBytes,
-                    fileManager: .default
-                )
+                try Task.checkCancellation()
+                let newID = UUID().uuidString
+                generatedThumbnailID = newID
+                try writeJPEG(image, to: thumbnailURL(for: newID))
+                thumbnailID = newID
+                if Date().timeIntervalSince(lastPrunedAt) >= 60 {
+                    try Self.prune(directory: thumbnailDirectory, maximumBytes: maximumCacheBytes, fileManager: .default)
+                    lastPrunedAt = Date()
+                }
             }
             return MediaProcessingResult(
                 duration: duration,
@@ -136,9 +152,11 @@ actor MediaProcessingService {
                 metadataStatus: metadataStatus,
                 thumbnailStatus: .completed,
                 mediaSourceInfo: mediaSourceInfo,
-                contentFingerprint: fingerprint
+                contentFingerprint: fingerprint,
+                generatedThumbnailID: generatedThumbnailID
             )
         } catch {
+            if let generatedThumbnailID { try? FileManager.default.removeItem(at: thumbnailURL(for: generatedThumbnailID)) }
             return MediaProcessingResult(
                 duration: duration,
                 width: width,
@@ -154,8 +172,7 @@ actor MediaProcessingService {
 
     func inspectVideo(fileURL: URL) async throws -> VideoMediaInspection {
         let asset = AVURLAsset(url: fileURL)
-        guard try await asset.load(.isPlayable),
-              let track = try await asset.loadTracks(withMediaType: .video).first else {
+        guard let track = try await asset.loadTracks(withMediaType: .video).first else {
             throw CocoaError(.fileReadCorruptFile)
         }
         let durationValue = try await asset.load(.duration)
