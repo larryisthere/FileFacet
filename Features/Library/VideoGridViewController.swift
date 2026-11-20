@@ -1748,7 +1748,7 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
                 }
             }
         }
-        thumbnailView.setStatus(.init(availability: video.availability, isCloudPlaceholder: video.isCloudPlaceholder, unavailableReason: video.unavailableReason))
+        thumbnailView.setStatus(video.accessPresentation)
         filenameLabel.stringValue = video.filename
         let duration = video.duration.map { formattedDuration($0) } ?? video.fileExtension.uppercased()
         detailLabel.stringValue = duration
@@ -1776,44 +1776,6 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
     }
 }
 
-enum VideoThumbnailStatus: Equatable {
-    case none, cloud, offline, unavailable
-
-    init(
-        availability: VideoRecord.Availability,
-        isCloudPlaceholder: Bool,
-        unavailableReason: VideoRecord.UnavailableReason? = nil
-    ) {
-        if isCloudPlaceholder, availability != .offline, unavailableReason != .accessLost {
-            self = .cloud
-            return
-        }
-        switch availability {
-        case .available: self = .none
-        case .offline: self = .offline
-        case .unavailable: self = .unavailable
-        }
-    }
-
-    var symbol: String? {
-        switch self {
-        case .none: nil
-        case .cloud: "icloud.and.arrow.down"
-        case .offline: "externaldrive.badge.exclamationmark"
-        case .unavailable: "exclamationmark.circle"
-        }
-    }
-
-    var accessibilityLabel: String? {
-        switch self {
-        case .none: nil
-        case .cloud: String(localized: "video.cloudPlaceholderBadge", defaultValue: "Original not downloaded")
-        case .offline: String(localized: .videoOfflineBadge)
-        case .unavailable: String(localized: "video.unavailableBadge", defaultValue: "Unavailable")
-        }
-    }
-}
-
 @MainActor
 private final class VideoThumbnailView: NSView {
     private let placeholderView = NSImageView()
@@ -1830,7 +1792,7 @@ private final class VideoThumbnailView: NSView {
 
     func setStatus(_ status: VideoThumbnailStatus) {
         let label = status.accessibilityLabel
-        offlineOverlayView.isHidden = status != .offline && status != .unavailable
+        offlineOverlayView.isHidden = status == .none || status == .cloud
         offlineBadgeView.isHidden = status.symbol == nil
         statusIcon.image = status.symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: label) }
         statusIcon.toolTip = label

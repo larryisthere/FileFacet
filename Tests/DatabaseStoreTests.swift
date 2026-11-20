@@ -1016,6 +1016,51 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertNil(rejected)
     }
 
+    func testProtectedLocationCanRecoverOnceInNewAuthenticatedScope() async throws {
+        let first = UUID(), next = UUID()
+        let timestamp = Date(timeIntervalSince1970: 100)
+        let fingerprint = Data([1, 2, 3])
+        let old = RecoveryFileObservation(sourceID: "synthetic", scopeGeneration: first, path: "/synthetic/test.m4v",
+                                          size: 10, modified: timestamp, originalFingerprint: fingerprint)
+        let retry = RecoveryFileObservation(sourceID: old.sourceID, scopeGeneration: next, path: old.path,
+                                            size: old.size, modified: old.modified, originalFingerprint: fingerprint)
+        XCTAssertFalse(old.needsVerification(previous: old, authenticatedScope: first))
+        XCTAssertTrue(retry.needsVerification(previous: old, authenticatedScope: next))
+        XCTAssertFalse(retry.needsVerification(previous: retry, authenticatedScope: next))
+        XCTAssertFalse(retry.needsVerification(previous: old, authenticatedScope: nil))
+        XCTAssertFalse(retry.needsVerification(previous: old, authenticatedScope: first))
+        XCTAssertTrue(VideoCloudReadiness.isPlaceholder(status: .notDownloaded, dataless: false))
+
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "synthetic", name: "Synthetic"))
+        let exact = makeDiscoveredVideo(path: "test.m4v", size: 10, contentFingerprint: fingerprint)
+        let mismatched = makeDiscoveredVideo(path: "test.m4v", size: 10, contentFingerprint: Data([4]))
+        let imported = try await store.importVideos(sourceID: "synthetic", discoveredVideos: [exact])
+        let record = try XCTUnwrap(imported.importedVideos.first)
+        try await store.protectRecoveryLocations(videoIDs: [record.id])
+        let locked = record.withAvailability(.unavailable, unavailableReason: .accessLost)
+        XCTAssertEqual(locked.accessPresentation, .accessNeedsVerification)
+        XCTAssertEqual(locked.accessPresentation.symbol, "exclamationmark.circle")
+        XCTAssertEqual(record.withAvailability(.unavailable, unavailableReason: .missingFromKnownLocation).accessPresentation, .unavailable)
+        XCTAssertEqual(record.withAvailability(.offline).accessPresentation, .offline)
+        XCTAssertEqual(record.withAvailability(.available, isCloudPlaceholder: true).accessPresentation, .cloud)
+        let mismatch = try await store.assessRelinkVideo(id: record.id, sourceID: "synthetic",
+            discoveredVideo: mismatched, allowAvailableRecord: true)
+        XCTAssertNotEqual(mismatch, .exactMatch)
+        let protected = try await store.fetchVideoLocations(videoID: record.id)
+        XCTAssertEqual(protected.first?.requiresRecoveryVerification, true)
+        let restored = try await store.relinkVideo(id: record.id, sourceID: "synthetic",
+            discoveredVideo: exact, allowAvailableRecord: true)
+        let resolved = try await store.fetchVideoLocations(videoID: record.id)
+        XCTAssertEqual(resolved.first?.requiresRecoveryVerification, false)
+        XCTAssertEqual(restored.id, record.id)
+        XCTAssertEqual(restored.accessPresentation, .none)
+        XCTAssertNil(restored.accessPresentation.symbol)
+    }
+
     private func makeDiscoveredVideo(
         path: String,
         size: Int64,

@@ -143,12 +143,17 @@ private enum RelinkFlowError: Error {
     case fileChangedDuringReview
 }
 
-private struct RecoveryFileObservation: Equatable, Sendable {
+struct RecoveryFileObservation: Equatable, Sendable {
     let sourceID: String
+    let scopeGeneration: UUID
     let path: String
     let size: Int?
     let modified: Date?
     let originalFingerprint: Data
+
+    func needsVerification(previous: Self?, authenticatedScope: UUID?) -> Bool {
+        authenticatedScope == scopeGeneration && previous != self
+    }
 }
 
 
@@ -188,6 +193,7 @@ final class LibraryAccessCoordinator {
     private var importRevision = 0
     private var isRestoringLibrary = false
     private var automaticRecoveryObservations: [String: RecoveryFileObservation] = [:]
+    private var sourceScopeGenerations: [String: UUID] = [:]
     private var maintenanceTask: Task<Void, Never>?
     private var maintenanceDebounceTask: Task<Void, Never>?
     private var volumeAvailabilityTask: Task<Void, Never>?
@@ -2051,11 +2057,13 @@ final class LibraryAccessCoordinator {
         if sourceURLs[sourceID]?.standardizedFileURL == url.standardizedFileURL,
            resources[sourceID] != nil { return }
         resources.removeValue(forKey: sourceID)
+        sourceScopeGenerations.removeValue(forKey: sourceID)
         sourceURLs.removeValue(forKey: sourceID)
         guard let resource = SecurityScopedResource(url: url) else {
             throw CocoaError(.fileReadNoPermission)
         }
         resources[sourceID] = resource
+        sourceScopeGenerations[sourceID] = UUID()
         sourceURLs[sourceID] = url
         knownSourceURLs[sourceID] = url
         updateWatcher(sourceID: sourceID, url: url)
@@ -2080,6 +2088,7 @@ final class LibraryAccessCoordinator {
 
     private func disconnectSource(_ sourceID: String) {
         resources.removeValue(forKey: sourceID)
+        sourceScopeGenerations.removeValue(forKey: sourceID)
         sourceURLs.removeValue(forKey: sourceID)
         knownSourceURLs.removeValue(forKey: sourceID)
         sourceBookmarks.removeValue(forKey: sourceID)
@@ -2093,6 +2102,7 @@ final class LibraryAccessCoordinator {
 
     private func resetRuntimeSourceConnections() {
         resources.removeAll()
+        sourceScopeGenerations.removeAll()
         sourceURLs.removeAll()
         for watcher in watchersByPath.values {
             watcher.stop()
@@ -2229,15 +2239,20 @@ final class LibraryAccessCoordinator {
                 }
                 return left.key < right.key
             }
-            guard let (sourceID, root) = scopes.first, let originalFingerprint = video.contentFingerprint else { continue }
-            let probe = Task.detached(priority: .utility) { () throws -> RecoveryFileObservation in
+            guard let (sourceID, root) = scopes.first,
+                  let generation = sourceScopeGenerations[sourceID],
+                  let originalFingerprint = video.contentFingerprint else { continue }
+            let probe = Task.detached(priority: .utility) { () throws -> RecoveryFileObservation? in
+                // No fingerprint or video read while the provider only has a placeholder.
+                guard !VideoCloudReadiness.isPlaceholder(at: file) else { return nil }
                 let values = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-                return RecoveryFileObservation(sourceID: sourceID, path: file.path, size: values.fileSize,
-                    modified: values.contentModificationDate, originalFingerprint: originalFingerprint)
+                return RecoveryFileObservation(sourceID: sourceID, scopeGeneration: generation, path: file.path,
+                    size: values.fileSize, modified: values.contentModificationDate, originalFingerprint: originalFingerprint)
             }
-            guard let observation = try? await probe.value else { continue }
+            guard let observation = try? await probe.value, sourceScopeGenerations[sourceID] == generation else { continue }
             let observationKey = location.videoID + "|" + file.path
-            guard automaticRecoveryObservations[observationKey] != observation else { continue }
+            guard observation.needsVerification(previous: automaticRecoveryObservations[observationKey],
+                authenticatedScope: sourceScopeGenerations[sourceID]) else { continue }
             let relativePath = file.pathComponents.dropFirst(root.standardizedFileURL.pathComponents.count).joined(separator: "/")
             do {
                 guard let candidate = try await verifiedRecoveryCandidate(videoID: video.id, file: file,
@@ -2245,8 +2260,12 @@ final class LibraryAccessCoordinator {
                     automaticRecoveryObservations[observationKey] = observation
                     continue
                 }
+                try Task.checkCancellation()
+                // Scope might have been revoked or replaced during the off-main verification.
+                guard sourceScopeGenerations[sourceID] == generation else { continue }
                 _ = try await database.relinkVideo(id: video.id, sourceID: sourceID,
                     discoveredVideo: candidate, allowAvailableRecord: true)
+                automaticRecoveryObservations.removeValue(forKey: observationKey)
                 restoredIDs.insert(video.id)
             } catch is CancellationError { throw CancellationError() }
             catch {
@@ -2335,6 +2354,7 @@ final class LibraryAccessCoordinator {
     private func refreshSourceURLsFromBookmarks() async {
         let bookmarks = sourceBookmarks
         for (sourceID, bookmark) in bookmarks {
+            var phase = "resolve"
             do {
                 var isStale = false
                 let resolvedURL = try URL(
@@ -2347,10 +2367,13 @@ final class LibraryAccessCoordinator {
                 let needsConnection = resources[sourceID] == nil
                 guard locationChanged || isStale || needsConnection else { continue }
                 knownSourceURLs[sourceID] = resolvedURL
+                phase = "activate"
                 try connect(sourceID: sourceID, url: resolvedURL)
+                phase = "refresh"
                 let refreshedBookmark = isStale ? try makeBookmark(for: resolvedURL) : bookmark
                 sourceBookmarks[sourceID] = refreshedBookmark
                 sourceDisplayNames[sourceID] = resolvedURL.lastPathComponent
+                phase = "persist"
                 try await database.saveSourceAuthorization(SourceAuthorizationRecord(
                     id: sourceID,
                     libraryID: LibraryRecord.primaryID,
@@ -2361,8 +2384,11 @@ final class LibraryAccessCoordinator {
                     scanPolicyExplicit: sourceScanPolicyExplicit[sourceID] ?? true
                 ))
             } catch {
+                let failure = error as NSError
+                let standardDomains = [NSCocoaErrorDomain, NSPOSIXErrorDomain, NSOSStatusErrorDomain]
+                let domain = standardDomains.contains(failure.domain) ? failure.domain : "other"
                 AppLogger.library.error(
-                    "Source bookmark refresh failed with category: \(String(describing: type(of: error)), privacy: .public)"
+                    "Source bookmark refresh failed: phase=\(phase, privacy: .public), domain=\(domain, privacy: .public), code=\(failure.code, privacy: .public)"
                 )
             }
         }

@@ -290,19 +290,17 @@ final class InspectorViewController: NSViewController {
 
         addFilename(video.filename)
         let accessStatus: String
-        if video.availability == .unavailable {
-            accessStatus = String(
-                localized: "detail.accessUnavailable",
-                defaultValue: "Unavailable"
-            )
-        } else if video.availability == .offline {
+        switch video.accessPresentation {
+        case .none:
+            accessStatus = String(localized: .detailAccessAvailable)
+        case .offline:
             if let sourceName = offlineSourceName(video), sourceName.isEmpty == false {
                 accessStatus = String(localized: .detailAccessOfflineNamed(sourceName))
             } else {
                 accessStatus = String(localized: .detailAccessOffline)
             }
-        } else {
-            accessStatus = String(localized: .detailAccessAvailable)
+        case .cloud, .accessNeedsVerification, .unavailable:
+            accessStatus = video.accessPresentation.accessibilityLabel ?? String(localized: .detailAccessAvailable)
         }
         let media = video.mediaSourceInfo
         let lastKnownLocation = lastKnownLocationDisplay(for: video)
