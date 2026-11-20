@@ -48,6 +48,59 @@ final class MediaProcessingServiceTests: XCTestCase {
         XCTAssertNotEqual(service.thumbnailURL(for: "one"), service.thumbnailURL(for: "two"))
     }
 
+    func testDeferredMediaWaitsForMatchingResolvedURLAndRetriesOnlyOnce() {
+        let video = makeVideo(id: "pending")
+        let sourceURL = URL(fileURLWithPath: "/synthetic/fixture.mp4")
+        var deferred = DeferredMediaVideos()
+        deferred.hold(video)
+        deferred.hold(video)
+
+        XCTAssertTrue(deferred.takeReady(resolvedURLs: [:]).isEmpty)
+        XCTAssertTrue(deferred.takeReady(resolvedURLs: ["unrelated": sourceURL]).isEmpty)
+        XCTAssertEqual(deferred.takeReady(resolvedURLs: [video.id: sourceURL]), [video])
+        XCTAssertTrue(deferred.takeReady(resolvedURLs: [video.id: sourceURL]).isEmpty)
+
+        deferred.hold(video)
+        deferred.remove(id: video.id)
+        XCTAssertTrue(deferred.takeReady(resolvedURLs: [video.id: sourceURL]).isEmpty)
+    }
+
+    func testFreshAndMissingCachedThumbnailGenerateWithoutPlayback() async throws {
+        let fixture = try MediaFixture()
+        defer { fixture.remove() }
+        let source = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "SyntheticThumbnailFixture", withExtension: "m4v"))
+        let file = fixture.rootURL.appendingPathComponent("synthetic.m4v")
+        try FileManager.default.copyItem(at: source, to: file)
+        let service = try MediaProcessingService(cacheDirectory: fixture.rootURL)
+        let pending = makeVideo(id: "fresh")
+        let freshNeeded = await service.needsProcessing(pending)
+        XCTAssertTrue(freshNeeded)
+        let result = await service.process(video: pending, fileURL: file)
+        XCTAssertEqual(result.metadataStatus, .completed)
+        XCTAssertEqual(result.thumbnailStatus, .completed)
+        XCTAssertEqual(result.duration, 2)
+        let firstID = try XCTUnwrap(result.thumbnailID)
+        let firstJPEG = service.thumbnailURL(for: firstID)
+        XCTAssertEqual(try Data(contentsOf: firstJPEG).prefix(3), Data([0xff, 0xd8, 0xff]))
+
+        try FileManager.default.removeItem(at: firstJPEG)
+        let old = VideoRecord(id: "old", libraryID: LibraryRecord.primaryID, relativePath: "synthetic.m4v",
+                              filename: "synthetic.m4v", fileExtension: "m4v", fileSize: 13741,
+                              creationDate: nil, modificationDate: nil, duration: result.duration,
+                              width: result.width, height: result.height, thumbnailID: firstID,
+                              metadataStatus: .completed, thumbnailStatus: .completed,
+                              firstIndexedAt: Date(), availability: .available,
+                              contentFingerprint: result.contentFingerprint)
+        let repairNeeded = await service.needsProcessing(old)
+        XCTAssertTrue(repairNeeded)
+        let rebuilt = await service.process(video: old, fileURL: file)
+        XCTAssertEqual(rebuilt.duration, old.duration)
+        XCTAssertEqual(rebuilt.thumbnailStatus, .completed)
+        let secondID = try XCTUnwrap(rebuilt.thumbnailID)
+        XCTAssertNotEqual(firstID, secondID)
+        XCTAssertEqual(try Data(contentsOf: service.thumbnailURL(for: secondID)).prefix(3), Data([0xff, 0xd8, 0xff]))
+    }
+
     private func makeVideo(id: String) -> VideoRecord {
         VideoRecord(
             id: id,

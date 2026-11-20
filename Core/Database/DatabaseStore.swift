@@ -2074,7 +2074,8 @@ actor DatabaseStore {
 
     struct MediaProcessingSnapshot: Equatable, Sendable {
         let video: VideoRecord
-        let revision: Double
+        let volumeIdentifier: Data?
+        let fileResourceIdentifier: Data?
         let pathKey: Data
         let locations: [VideoLocationRecord]
     }
@@ -2083,14 +2084,18 @@ actor DatabaseStore {
         try prepareIfNeeded()
         guard try permitsAutomaticUpdate(videoID: videoID, pathKey: pathKey),
               let video = try fetchVideo(id: videoID), video.availability == .available else { return nil }
-        let statement = try prepare("SELECT updated_at FROM videos WHERE id = ?")
+        let statement = try prepare("SELECT volume_identifier, file_resource_identifier FROM videos WHERE id = ?")
         defer { sqlite3_finalize(statement) }
         bindText(videoID, to: 1, in: statement)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
-        let locations = try fetchVideoLocations(videoID: videoID)
+        // Playback lookup orders locations by observation time, which is not a media revision.
+        let locations = try fetchVideoLocations(videoID: videoID).sorted {
+            ($0.sourceID, $0.relativePath) < ($1.sourceID, $1.relativePath)
+        }
         guard locations.contains(where: { $0.fallbackPathKey == pathKey && !$0.requiresRecoveryVerification }) else { return nil }
-        return MediaProcessingSnapshot(video: video, revision: sqlite3_column_double(statement, 0),
-            pathKey: pathKey, locations: locations)
+        // Source scans update observational timestamps even if the media and authorization are unchanged.
+        return MediaProcessingSnapshot(video: video, volumeIdentifier: data(at: 0, in: statement),
+            fileResourceIdentifier: data(at: 1, in: statement), pathKey: pathKey, locations: locations)
     }
 
     func commitMediaProcessing(_ result: MediaProcessingResult, expected: MediaProcessingSnapshot) throws -> VideoRecord? {

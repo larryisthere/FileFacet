@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F28A0932B7510114E8910211 /* SyntheticThumbnailFixture.m4v in Resources */ = {isa = PBXBuildFile; fileRef = F28A0932B7510114E8910212 /* SyntheticThumbnailFixture.m4v */; };
 		035724ABB602F506C8722631 /* AppConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69323B27400CD3637B980311 /* AppConfiguration.swift */; };
 		08FDEA4743F6479E788D57E3 /* LibraryRuleBarViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 267661C5A9D6E35F02D7041E /* LibraryRuleBarViewController.swift */; };
 		094938578441E9B6D1B51099 /* InspectorViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB2E252D426AB761A06F5F9F /* InspectorViewController.swift */; };
@@ -62,6 +63,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		F28A0932B7510114E8910212 /* SyntheticThumbnailFixture.m4v */ = {isa = PBXFileReference; lastKnownFileType = file; path = SyntheticThumbnailFixture.m4v; sourceTree = "<group>"; };
 		00218ADF00AE850CA7FEA287 /* VideoTagManagerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VideoTagManagerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		01EE661DF4D0B2DE750D896A /* FileFacet.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FileFacet.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		11D83A96E7A2BC52803CC7D9 /* PreferencesStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PreferencesStore.swift; path = Preferences/PreferencesStore.swift; sourceTree = "<group>"; };
@@ -178,6 +180,7 @@
 				44AF8E8E0BCA58C395F60A5F /* DatabaseStoreTests.swift */,
 				935F50B9F553D34C8563B4C9 /* LockCoordinatorTests.swift */,
 				C6074EECBDF10CF9B772C1A5 /* MediaProcessingServiceTests.swift */,
+				F28A0932B7510114E8910212 /* SyntheticThumbnailFixture.m4v */,
 				97EB9F42F6AE50FE1F8671DE /* PreferencesStoreTests.swift */,
 				AE9CC8AA63A88BF3576BA8A8 /* SidebarModelTests.swift */,
 				4BE57EA82D27A64C7E43A55F /* VideoFileDiscoveryTests.swift */,
@@ -334,6 +337,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F28A0932B7510114E8910211 /* SyntheticThumbnailFixture.m4v in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
