@@ -119,6 +119,7 @@ private struct PendingImportSource {
 
 private struct VideoAccessResolution: Sendable {
     let resolvedURLs: [String: URL]
+    let cloudPlaceholderIDs: Set<String>
     let offlineSourceNames: [String: String]
     let accessLostSourceNames: [String: String]
     let reachableSourceIDs: Set<String>
@@ -197,6 +198,7 @@ final class LibraryAccessCoordinator {
     var mediaPriorityVideoIDs: (() -> [String])?
     private var pendingMediaVideos: [String: VideoRecord] = [:]
     private var deferredMediaVideos = DeferredMediaVideos()
+    private var cloudPlaceholderIDs: Set<String> = []
     private var queryTask: Task<Void, Never>?
     private var smartCollectionTask: Task<Void, Never>?
     private var tagMutationTask: Task<Void, Never>?
@@ -2376,6 +2378,7 @@ final class LibraryAccessCoordinator {
         let resolution = await Task.detached(priority: .utility) {
             Self.resolveVideoAccess(
                 locations: locations,
+                cloudCandidateLocations: allLocations,
                 sourceURLs: knownURLs,
                 activeSourceIDs: activeSourceIDs,
                 authorizedSourceIDs: authorizedSourceIDs,
@@ -2392,6 +2395,7 @@ final class LibraryAccessCoordinator {
         try await database.confirmMissingLocations(resolution.confirmedMissingLocations)
         try Task.checkCancellation()
         resolvedVideoURLs = resolution.resolvedURLs
+        cloudPlaceholderIDs = resolution.cloudPlaceholderIDs
         let lastKnownResolution = Self.resolveLastKnownVideoPaths(
             locations: allLocations,
             sourceURLs: knownURLs
@@ -2447,10 +2451,12 @@ final class LibraryAccessCoordinator {
 
     nonisolated private static func resolveVideoAccess(
         locations: [VideoLocationRecord],
+        cloudCandidateLocations: [VideoLocationRecord],
         sourceURLs: [String: URL],
         activeSourceIDs: Set<String>,
         authorizedSourceIDs: Set<String>,
-        sourceDisplayNames: [String: String]
+        sourceDisplayNames: [String: String],
+        isCloudPlaceholder: (URL) -> Bool = VideoCloudReadiness.isPlaceholder(at:)
     ) -> VideoAccessResolution {
         let mountedVolumeIdentifiers = mountedVolumeIdentifiers()
         var resolvedURLs: [String: URL] = [:]
@@ -2464,6 +2470,19 @@ final class LibraryAccessCoordinator {
                 && FileManager.default.fileExists(atPath: sourceURL.path)
                 && isURLInTrash(sourceURL) == false {
             reachableSourceIDs.insert(sourceID)
+        }
+
+        // An available security scope can expose provider metadata even when fileExists says no
+        // or the database still carries an earlier missing observation. This does not restore access.
+        var cloudURLs: [String: Set<URL>] = [:]
+        for location in cloudCandidateLocations where !location.requiresRecoveryVerification
+            && activeSourceIDs.contains(location.sourceID) {
+            guard let root = sourceURLs[location.sourceID],
+                  let url = fileURL(sourceURL: root, relativePath: location.relativePath),
+                  !isURLInTrash(root), !isURLInTrash(url),
+                  !isOnUnmountedExternalVolume(url),
+                  isCloudPlaceholder(url) else { continue }
+            cloudURLs[location.videoID, default: []].insert(url)
         }
 
         for location in locations {
@@ -2521,6 +2540,9 @@ final class LibraryAccessCoordinator {
                 continue
             }
 
+            if let fileURL, cloudURLs[location.videoID]?.contains(fileURL.standardizedFileURL) == true {
+                continue
+            }
             if volumeIsOffline == false,
                location.relativePath.isEmpty,
                activeSourceIDs.contains(location.sourceID),
@@ -2554,6 +2576,10 @@ final class LibraryAccessCoordinator {
         }
         return VideoAccessResolution(
             resolvedURLs: resolvedURLs,
+            cloudPlaceholderIDs: Set(cloudURLs.compactMap { id, urls in
+                if let resolved = resolvedURLs[id], !urls.contains(resolved.standardizedFileURL) { return nil }
+                return id
+            }),
             offlineSourceNames: offlineSourceNames,
             accessLostSourceNames: accessLostSourceNames,
             reachableSourceIDs: reachableSourceIDs,
@@ -2726,6 +2752,8 @@ final class LibraryAccessCoordinator {
                             pathKey: fallbackPathKey(for: fileURL))
                     guard let snapshot = mediaSnapshot,
                           await mediaService.needsProcessing(snapshot.video) else { continue }
+                    // A selectable URL can still point at an iCloud/File Provider placeholder.
+                    guard await mediaService.hasLocalMedia(at: fileURL) else { continue }
                     let video = snapshot.video
                     let result = await mediaService.process(video: video, fileURL: fileURL)
                     generatedThumbnailID = result.generatedThumbnailID
@@ -2962,14 +2990,14 @@ final class LibraryAccessCoordinator {
     }
 
     private func presentedVideo(_ video: VideoRecord) -> VideoRecord {
-        if video.availability == .unavailable { return video }
-        if accessLostSourceNameByVideoID[video.id] != nil {
+        let cloud = cloudPlaceholderIDs.contains(video.id)
+        if !cloud, accessLostSourceNameByVideoID[video.id] != nil {
             return video.withAvailability(.unavailable, unavailableReason: .accessLost)
         }
-        if offlineSourceNameByVideoID[video.id] != nil {
+        if !cloud, offlineSourceNameByVideoID[video.id] != nil {
             return video.withAvailability(.offline)
         }
-        return video
+        return cloud ? video.withAvailability(video.availability, isCloudPlaceholder: true) : video
     }
 }
 

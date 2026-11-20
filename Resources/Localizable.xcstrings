@@ -5051,6 +5051,7 @@
         }
       }
     },
+    "video.cloudPlaceholderBadge" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Original not downloaded" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "原片未下载" } } } },
     "video.offlineBadge" : {
       "extractionState" : "manual",
       "localizations" : {
