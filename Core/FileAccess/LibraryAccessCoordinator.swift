@@ -196,6 +196,7 @@ final class LibraryAccessCoordinator {
     private var artifactCleanupTask: Task<Void, Never>?
     var mediaPriorityVideoIDs: (() -> [String])?
     private var pendingMediaVideos: [String: VideoRecord] = [:]
+    private var deferredMediaVideos = DeferredMediaVideos()
     private var queryTask: Task<Void, Never>?
     private var smartCollectionTask: Task<Void, Never>?
     private var tagMutationTask: Task<Void, Never>?
@@ -283,6 +284,7 @@ final class LibraryAccessCoordinator {
             await media?.value
             mediaTask = nil
             pendingMediaVideos.removeAll()
+            deferredMediaVideos.removeAll()
             var succeeded = 0
             var checked = 0
             var failures = 0
@@ -1354,6 +1356,7 @@ final class LibraryAccessCoordinator {
             interruptedMediaTask?.cancel()
             mediaTask = nil
             pendingMediaVideos.removeAll()
+            deferredMediaVideos.removeAll()
         }
         volumeAvailabilityTask = Task { [weak self] in
             guard let self else { return }
@@ -1507,7 +1510,10 @@ final class LibraryAccessCoordinator {
                     completion?(false)
                     return
                 }
-                for videoID in videoIDs { pendingMediaVideos.removeValue(forKey: videoID) }
+                for videoID in videoIDs {
+                    pendingMediaVideos.removeValue(forKey: videoID)
+                    deferredMediaVideos.remove(id: videoID)
+                }
                 registerVideoRemovalUndo(snapshot)
                 do {
                     try await refreshResolvedVideoURLs()
@@ -2395,6 +2401,10 @@ final class LibraryAccessCoordinator {
         offlineSourceNameByVideoID = resolution.offlineSourceNames
         accessLostSourceNameByVideoID = resolution.accessLostSourceNames
         reachableSourceIDs = resolution.reachableSourceIDs
+        if recoveryTask == nil {
+            let readyVideos = deferredMediaVideos.takeReady(resolvedURLs: resolvedVideoURLs)
+            if !readyVideos.isEmpty { startMediaProcessing(videos: readyVideos) }
+        }
     }
 
     nonisolated private static func resolveLastKnownVideoPaths(
@@ -2682,7 +2692,15 @@ final class LibraryAccessCoordinator {
     private func startMediaProcessing(videos: [VideoRecord]) {
         guard recoveryTask == nil else { return }
         guard let mediaService else { return }
-        for video in videos { pendingMediaVideos[video.id] = video }
+        for video in videos {
+            if resolvedVideoURLs[video.id] != nil {
+                deferredMediaVideos.remove(id: video.id)
+                pendingMediaVideos[video.id] = video
+            } else {
+                deferredMediaVideos.hold(video)
+            }
+        }
+        guard !pendingMediaVideos.isEmpty else { return }
         guard mediaTask == nil else { return }
         let database = self.database
 
@@ -2700,9 +2718,13 @@ final class LibraryAccessCoordinator {
                 var generatedThumbnailID: String?
                 do {
                     try Task.checkCancellation()
-                    guard let fileURL = resolvedVideoURLs[queued.id],
-                          let snapshot = try await database.mediaProcessingSnapshot(videoID: queued.id,
-                            pathKey: fallbackPathKey(for: fileURL)),
+                    guard let fileURL = resolvedVideoURLs[queued.id] else {
+                        deferredMediaVideos.hold(queued)
+                        continue
+                    }
+                    let mediaSnapshot = try await database.mediaProcessingSnapshot(videoID: queued.id,
+                            pathKey: fallbackPathKey(for: fileURL))
+                    guard let snapshot = mediaSnapshot,
                           await mediaService.needsProcessing(snapshot.video) else { continue }
                     let video = snapshot.video
                     let result = await mediaService.process(video: video, fileURL: fileURL)
@@ -2959,4 +2981,19 @@ struct RecoveryStatus: Equatable {
     var showEntry = false
     var canStart = true
     var message: String?
+}
+
+
+// Record only unresolved work; permission and identity are rechecked by the worker once resolved.
+struct DeferredMediaVideos {
+    private var videos: [String: VideoRecord] = [:]
+
+    mutating func hold(_ video: VideoRecord) { videos[video.id] = video }
+    mutating func remove(id: String) { videos.removeValue(forKey: id) }
+    mutating func removeAll() { videos.removeAll() }
+
+    mutating func takeReady(resolvedURLs: [String: URL]) -> [VideoRecord] {
+        let ids = videos.keys.filter { resolvedURLs[$0] != nil }
+        return ids.compactMap { videos.removeValue(forKey: $0) }
+    }
 }

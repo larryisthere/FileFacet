@@ -942,6 +942,80 @@ final class DatabaseStoreTests: XCTestCase {
         )
     }
 
+    func testMediaCommitSurvivesUnchangedDiscoveryButRejectsChangedFile() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "test-media", name: "Synthetic"))
+        let fileURL = fixture.directoryURL.appendingPathComponent("Synthetic.mp4")
+        let key = fallbackPathKey(for: fileURL)
+        func discovery(_ size: Int64) -> DiscoveredVideo {
+            DiscoveredVideo(relativePath: "Synthetic.mp4", filename: "Synthetic.mp4", fileExtension: "mp4",
+                            fileSize: size, creationDate: nil, modificationDate: nil,
+                            volumeIdentifier: Data([1]), fileResourceIdentifier: Data([2]),
+                            finderTags: [], fallbackPathKey: key, lastKnownPath: fileURL.path)
+        }
+        let first = try await store.importVideos(sourceID: "test-media", discoveredVideos: [discovery(10)],
+                                                 importedAt: Date(timeIntervalSince1970: 100))
+        let video = try XCTUnwrap(first.importedVideos.first)
+        let original = try await store.mediaProcessingSnapshot(videoID: video.id, pathKey: key)
+        let expected = try XCTUnwrap(original)
+        let result = MediaProcessingResult(duration: 2, width: 64, height: 64, thumbnailID: "synthetic",
+                                           metadataStatus: .completed, thumbnailStatus: .completed)
+        _ = try await store.reconcileSources(discoveredVideosBySource: ["test-media": [discovery(10)]],
+                                             verifiedAt: Date(timeIntervalSince1970: 200))
+        let committed = try await store.commitMediaProcessing(result, expected: expected)
+        XCTAssertEqual(committed?.thumbnailID, "synthetic")
+
+        let fresh = try await store.mediaProcessingSnapshot(videoID: video.id, pathKey: key)
+        let freshExpected = try XCTUnwrap(fresh)
+        _ = try await store.reconcileSources(discoveredVideosBySource: ["test-media": [discovery(11)]],
+                                             verifiedAt: Date(timeIntervalSince1970: 300))
+        let stale = try await store.commitMediaProcessing(result, expected: freshExpected)
+        XCTAssertNil(stale)
+        let updated = try await store.fetchVideo(id: video.id)
+        XCTAssertEqual(updated?.fileSize, 11)
+        XCTAssertEqual(updated?.thumbnailStatus, .pending)
+    }
+
+    func testMediaCommitIgnoresLocationOrderingButRejectsSelectedLocationRemoval() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "location-a", name: "A"))
+        try await store.saveSourceAuthorization(makeSource(id: "location-b", name: "B"))
+        let firstKey = Data([3])
+        for (sourceID, key, time) in [("location-a", firstKey, 100.0), ("location-b", Data([4]), 200.0)] {
+            let record = DiscoveredVideo(relativePath: "Same.mp4", filename: "Same.mp4", fileExtension: "mp4",
+                                         fileSize: 10, creationDate: nil, modificationDate: nil,
+                                         volumeIdentifier: Data([1]), fileResourceIdentifier: Data([2]),
+                                         finderTags: [], fallbackPathKey: key)
+            _ = try await store.importVideos(sourceID: sourceID, discoveredVideos: [record],
+                                             importedAt: Date(timeIntervalSince1970: time))
+        }
+        let rows = try await store.fetchVideos(libraryID: LibraryRecord.primaryID)
+        XCTAssertEqual(rows.count, 1)
+        let record = try XCTUnwrap(rows.first)
+        let before = try await store.mediaProcessingSnapshot(videoID: record.id, pathKey: firstKey)
+        let expected = try XCTUnwrap(before)
+        XCTAssertEqual(expected.locations.count, 2)
+        try executeSQL(at: fixture.databaseURL,
+                       sql: "UPDATE video_locations SET last_verified_at = 300 WHERE source_id = 'location-a'")
+        let result = MediaProcessingResult(duration: 2, width: 64, height: 64, thumbnailID: "synthetic",
+                                           metadataStatus: .completed, thumbnailStatus: .completed)
+        let committed = try await store.commitMediaProcessing(result, expected: expected)
+        XCTAssertEqual(committed?.thumbnailID, "synthetic")
+
+        let beforeRemoval = try await store.mediaProcessingSnapshot(videoID: record.id, pathKey: firstKey)
+        let expectedBeforeRemoval = try XCTUnwrap(beforeRemoval)
+        try executeSQL(at: fixture.databaseURL,
+                       sql: "UPDATE video_locations SET is_available = 0 WHERE source_id = 'location-a'")
+        let rejected = try await store.commitMediaProcessing(result, expected: expectedBeforeRemoval)
+        XCTAssertNil(rejected)
+    }
+
     private func makeDiscoveredVideo(
         path: String,
         size: Int64,
