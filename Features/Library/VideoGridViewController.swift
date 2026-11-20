@@ -1748,7 +1748,7 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
                 }
             }
         }
-        thumbnailView.availability = video.availability
+        thumbnailView.setStatus(.init(availability: video.availability, isCloudPlaceholder: video.isCloudPlaceholder, unavailableReason: video.unavailableReason))
         filenameLabel.stringValue = video.filename
         let duration = video.duration.map { formattedDuration($0) } ?? video.fileExtension.uppercased()
         detailLabel.stringValue = duration
@@ -1776,12 +1776,50 @@ private final class VideoCollectionViewItem: NSCollectionViewItem {
     }
 }
 
+enum VideoThumbnailStatus: Equatable {
+    case none, cloud, offline, unavailable
+
+    init(
+        availability: VideoRecord.Availability,
+        isCloudPlaceholder: Bool,
+        unavailableReason: VideoRecord.UnavailableReason? = nil
+    ) {
+        if isCloudPlaceholder, availability != .offline, unavailableReason != .accessLost {
+            self = .cloud
+            return
+        }
+        switch availability {
+        case .available: self = .none
+        case .offline: self = .offline
+        case .unavailable: self = .unavailable
+        }
+    }
+
+    var symbol: String? {
+        switch self {
+        case .none: nil
+        case .cloud: "icloud.and.arrow.down"
+        case .offline: "externaldrive.badge.exclamationmark"
+        case .unavailable: "exclamationmark.circle"
+        }
+    }
+
+    var accessibilityLabel: String? {
+        switch self {
+        case .none: nil
+        case .cloud: String(localized: "video.cloudPlaceholderBadge", defaultValue: "Original not downloaded")
+        case .offline: String(localized: .videoOfflineBadge)
+        case .unavailable: String(localized: "video.unavailableBadge", defaultValue: "Unavailable")
+        }
+    }
+}
+
 @MainActor
 private final class VideoThumbnailView: NSView {
     private let placeholderView = NSImageView()
     private let offlineOverlayView = NSView()
     private let offlineBadgeView = NSView()
-    private let offlineBadgeLabel = NSTextField(labelWithString: String(localized: .videoOfflineBadge))
+    private let statusIcon = NSImageView()
 
     var image: CGImage? {
         didSet {
@@ -1790,23 +1828,14 @@ private final class VideoThumbnailView: NSView {
         }
     }
 
-    var availability: VideoRecord.Availability = .available {
-        didSet {
-            let isUnavailable = availability != .available
-            offlineOverlayView.isHidden = isUnavailable == false
-            offlineBadgeView.isHidden = isUnavailable == false
-            switch availability {
-            case .available, .offline:
-                offlineBadgeLabel.stringValue = String(localized: .videoOfflineBadge)
-                offlineBadgeView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.72).cgColor
-            case .unavailable:
-                offlineBadgeLabel.stringValue = String(
-                    localized: "video.unavailableBadge",
-                    defaultValue: "Unavailable"
-                )
-                offlineBadgeView.layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.84).cgColor
-            }
-        }
+    func setStatus(_ status: VideoThumbnailStatus) {
+        let label = status.accessibilityLabel
+        offlineOverlayView.isHidden = status != .offline && status != .unavailable
+        offlineBadgeView.isHidden = status.symbol == nil
+        statusIcon.image = status.symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: label) }
+        statusIcon.toolTip = label
+        statusIcon.setAccessibilityElement(label != nil)
+        statusIcon.setAccessibilityLabel(label)
     }
 
     override init(frame frameRect: NSRect) {
@@ -1839,10 +1868,11 @@ private final class VideoThumbnailView: NSView {
         offlineBadgeView.layer?.borderColor = NSColor.white.withAlphaComponent(0.42).cgColor
         offlineBadgeView.layer?.borderWidth = 1
         offlineBadgeView.isHidden = true
-        offlineBadgeLabel.translatesAutoresizingMaskIntoConstraints = false
-        offlineBadgeLabel.font = .systemFont(ofSize: 10, weight: .semibold)
-        offlineBadgeLabel.textColor = .white
-        offlineBadgeView.addSubview(offlineBadgeLabel)
+        statusIcon.translatesAutoresizingMaskIntoConstraints = false
+        statusIcon.symbolConfiguration = .init(pointSize: 12, weight: .regular)
+        statusIcon.contentTintColor = .white
+        statusIcon.imageScaling = .scaleProportionallyDown
+        offlineBadgeView.addSubview(statusIcon)
         addSubview(offlineBadgeView)
 
         NSLayoutConstraint.activate([
@@ -1856,10 +1886,12 @@ private final class VideoThumbnailView: NSView {
             offlineOverlayView.bottomAnchor.constraint(equalTo: bottomAnchor),
             offlineBadgeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
             offlineBadgeView.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            offlineBadgeLabel.leadingAnchor.constraint(equalTo: offlineBadgeView.leadingAnchor, constant: 6),
-            offlineBadgeLabel.trailingAnchor.constraint(equalTo: offlineBadgeView.trailingAnchor, constant: -6),
-            offlineBadgeLabel.topAnchor.constraint(equalTo: offlineBadgeView.topAnchor, constant: 2),
-            offlineBadgeLabel.bottomAnchor.constraint(equalTo: offlineBadgeView.bottomAnchor, constant: -2),
+            offlineBadgeView.widthAnchor.constraint(equalToConstant: 23),
+            offlineBadgeView.heightAnchor.constraint(equalToConstant: 20),
+            statusIcon.centerXAnchor.constraint(equalTo: offlineBadgeView.centerXAnchor),
+            statusIcon.centerYAnchor.constraint(equalTo: offlineBadgeView.centerYAnchor),
+            statusIcon.widthAnchor.constraint(equalToConstant: 16),
+            statusIcon.heightAnchor.constraint(equalToConstant: 15),
         ])
     }
 

@@ -101,6 +101,23 @@ final class MediaProcessingServiceTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: service.thumbnailURL(for: secondID)).prefix(3), Data([0xff, 0xd8, 0xff]))
     }
 
+    @MainActor
+    func testThumbnailReadinessKeepsCloudAndUnavailableDistinct() {
+        XCTAssertTrue(VideoCloudReadiness.isPlaceholder(status: .notDownloaded, dataless: false))
+        XCTAssertTrue(VideoCloudReadiness.isPlaceholder(status: nil, dataless: true))
+        XCTAssertFalse(VideoCloudReadiness.isPlaceholder(status: .downloaded, dataless: false))
+        XCTAssertFalse(VideoCloudReadiness.isPlaceholder(status: .current, dataless: false))
+        XCTAssertFalse(VideoCloudReadiness.isPlaceholder(status: nil, dataless: false))
+        XCTAssertEqual(VideoThumbnailStatus(availability: .available, isCloudPlaceholder: true).symbol, "icloud.and.arrow.down")
+        XCTAssertEqual(VideoThumbnailStatus(availability: .unavailable, isCloudPlaceholder: true,
+                                            unavailableReason: .missingFromKnownLocation).symbol, "icloud.and.arrow.down")
+        XCTAssertEqual(VideoThumbnailStatus(availability: .unavailable, isCloudPlaceholder: true,
+                                            unavailableReason: .accessLost).symbol, "exclamationmark.circle")
+        XCTAssertEqual(VideoThumbnailStatus(availability: .unavailable, isCloudPlaceholder: false).symbol, "exclamationmark.circle")
+        XCTAssertEqual(VideoThumbnailStatus(availability: .offline, isCloudPlaceholder: false).symbol, "externaldrive.badge.exclamationmark")
+        XCTAssertNil(VideoThumbnailStatus(availability: .available, isCloudPlaceholder: false).symbol)
+    }
+
     private func makeVideo(id: String) -> VideoRecord {
         VideoRecord(
             id: id,

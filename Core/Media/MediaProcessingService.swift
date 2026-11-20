@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import CoreMedia
+import Darwin
 import Foundation
 import ImageIO
 @preconcurrency import QuickLookThumbnailing
@@ -67,6 +68,10 @@ actor MediaProcessingService {
         self.maximumCacheBytes = maximumCacheBytes
         try fileManager.createDirectory(at: thumbnailDirectory, withIntermediateDirectories: true)
         try Self.prune(directory: thumbnailDirectory, maximumBytes: maximumCacheBytes, fileManager: fileManager)
+    }
+
+    func hasLocalMedia(at url: URL) -> Bool {
+        !VideoCloudReadiness.isPlaceholder(at: url)
     }
 
     func needsProcessing(_ video: VideoRecord) -> Bool {
@@ -581,5 +586,20 @@ actor MediaProcessingService {
         guard CGImageDestinationFinalize(destination) else {
             throw CocoaError(.fileWriteUnknown)
         }
+    }
+}
+
+
+// Reads URL metadata only; never opens or requests download of the media file.
+enum VideoCloudReadiness {
+    static func isPlaceholder(at url: URL) -> Bool {
+        let values = try? url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
+        var metadata = stat()
+        let dataless = lstat(url.path, &metadata) == 0 && (metadata.st_flags & UInt32(SF_DATALESS)) != 0
+        return isPlaceholder(status: values?.ubiquitousItemDownloadingStatus, dataless: dataless)
+    }
+
+    static func isPlaceholder(status: URLUbiquitousItemDownloadingStatus?, dataless: Bool) -> Bool {
+        dataless || status == .notDownloaded
     }
 }

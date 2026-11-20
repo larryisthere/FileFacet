@@ -96,6 +96,7 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
     let invalidatedAt: Date?
     let mediaSourceInfo: MediaSourceInfo?
     let contentFingerprint: Data?
+    let isCloudPlaceholder: Bool
 
     init(
         id: String,
@@ -117,7 +118,8 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
         unavailableReason: UnavailableReason? = nil,
         invalidatedAt: Date? = nil,
         mediaSourceInfo: MediaSourceInfo? = nil,
-        contentFingerprint: Data? = nil
+        contentFingerprint: Data? = nil,
+        isCloudPlaceholder: Bool = false
     ) {
         self.id = id
         self.libraryID = libraryID
@@ -139,11 +141,13 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
         self.invalidatedAt = invalidatedAt
         self.mediaSourceInfo = mediaSourceInfo
         self.contentFingerprint = contentFingerprint
+        self.isCloudPlaceholder = isCloudPlaceholder
     }
 
     func withAvailability(
         _ availability: Availability,
-        unavailableReason: UnavailableReason? = nil
+        unavailableReason: UnavailableReason? = nil,
+        isCloudPlaceholder: Bool = false
     ) -> VideoRecord {
         VideoRecord(
             id: id,
@@ -165,7 +169,8 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
             unavailableReason: unavailableReason,
             invalidatedAt: invalidatedAt,
             mediaSourceInfo: mediaSourceInfo,
-            contentFingerprint: contentFingerprint
+            contentFingerprint: contentFingerprint,
+            isCloudPlaceholder: isCloudPlaceholder
         )
     }
 }
