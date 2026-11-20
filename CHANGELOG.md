@@ -4,6 +4,14 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+## [1.0.12] - 2026-11-21
+
+### Fixed
+
+- Retried verification of protected videos after FileFacet regained authorized access, while preserving file identity checks.
+- Kept the thumbnail badge and Inspector in sync when original files are unavailable, awaiting access verification, or not downloaded.
+- Skipped known cloud placeholders during source recovery without requesting downloads.
+
 ## [1.0.11] - 2026-11-20
 
 ### Changed
