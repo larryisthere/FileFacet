@@ -4,6 +4,13 @@ This file records the user-visible changes in FileFacet releases.
 
 ## [Unreleased]
 
+## [1.0.11] - 2026-11-20
+
+### Changed
+
+- Replaced thumbnail status text badges with compact system icons, distinguishing iCloud originals that are not downloaded from unavailable videos and offline drives.
+- Kept existing covers visible for iCloud placeholders and skipped those files during thumbnail generation without requesting downloads.
+
 ## [1.0.10] - 2026-11-20
 
 ### Fixed
