@@ -144,6 +144,10 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
         self.isCloudPlaceholder = isCloudPlaceholder
     }
 
+    var accessPresentation: VideoThumbnailStatus {
+        .init(availability: availability, isCloudPlaceholder: isCloudPlaceholder, unavailableReason: unavailableReason)
+    }
+
     func withAvailability(
         _ availability: Availability,
         unavailableReason: UnavailableReason? = nil,
@@ -172,6 +176,45 @@ struct VideoRecord: Equatable, Identifiable, Sendable {
             contentFingerprint: contentFingerprint,
             isCloudPlaceholder: isCloudPlaceholder
         )
+    }
+}
+
+enum VideoThumbnailStatus: Equatable {
+    case none, cloud, offline, accessNeedsVerification, unavailable
+
+    init(
+        availability: VideoRecord.Availability,
+        isCloudPlaceholder: Bool,
+        unavailableReason: VideoRecord.UnavailableReason? = nil
+    ) {
+        if isCloudPlaceholder, availability != .offline, unavailableReason != .accessLost {
+            self = .cloud
+            return
+        }
+        switch availability {
+        case .available: self = .none
+        case .offline: self = .offline
+        case .unavailable: self = unavailableReason == .accessLost ? .accessNeedsVerification : .unavailable
+        }
+    }
+
+    var symbol: String? {
+        switch self {
+        case .none: nil
+        case .cloud: "icloud.and.arrow.down"
+        case .offline: "externaldrive.badge.exclamationmark"
+        case .accessNeedsVerification, .unavailable: "exclamationmark.circle"
+        }
+    }
+
+    var accessibilityLabel: String? {
+        switch self {
+        case .none: nil
+        case .cloud: String(localized: "video.cloudPlaceholderBadge", defaultValue: "Original not downloaded")
+        case .offline: String(localized: .videoOfflineBadge)
+        case .accessNeedsVerification: String(localized: "video.accessNeedsVerification", defaultValue: "File access needs verification")
+        case .unavailable: String(localized: "video.unavailableBadge", defaultValue: "Unavailable")
+        }
     }
 }
 
