@@ -177,13 +177,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Confirm this folder to check the original videos."
+            "value" : "Choose this folder or a folder containing it to check the original videos."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "确认此文件夹后，继续核对其中的原视频。"
+            "value" : "选择此文件夹或它的上级文件夹，以核对原视频。"
           }
         }
       }
@@ -211,17 +211,19 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Confirm the original folder shown here."
+            "value" : "Choose the original folder or a folder containing it."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请确认当前指定的原文件夹。"
+            "value" : "请选择原文件夹或包含它的上级文件夹。"
           }
         }
       }
     },
+    "recovery.deferred.progress" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Waiting for files: %lld." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "等待文件：%lld 个。" } } } },
+    "recovery.deferred.result" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld videos could not be checked because their file locations did not respond. You can retry later." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 个视频的文件位置没有响应，暂未核对。可稍后重试。" } } } },
     "scan.access.chooseFolders" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose Folders…" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择文件夹…" } } } },
     "scan.access.unchecked.many" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld folders could not be fully checked." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有 %lld 个文件夹未能完整检查。" } } } },
     "scan.access.unchecked.one" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "1 folder could not be fully checked." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "有 1 个文件夹未能完整检查。" } } } },

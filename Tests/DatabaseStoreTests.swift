@@ -1061,6 +1061,115 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertNil(restored.accessPresentation.symbol)
     }
 
+    func testOriginalPathAccessPreservesFingerprintAndMakesNoDuplicate() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "old", name: "Old"))
+        let path = "/synthetic/root/nested/test.m4v"
+        let fingerprint = Data(repeating: 7, count: 32)
+        let input = DiscoveredVideo(relativePath: "test.m4v", filename: "test.m4v", fileExtension: "m4v",
+            fileSize: 100, creationDate: nil, modificationDate: nil, volumeIdentifier: nil,
+            fileResourceIdentifier: nil, contentFingerprint: fingerprint, finderTags: [], lastKnownPath: path)
+        let imported = try await store.importVideos(sourceID: "old", discoveredVideos: [input])
+        let record = try XCTUnwrap(imported.importedVideos.first)
+        _ = try await store.updateMediaInfo(videoID: record.id, result: MediaProcessingResult(
+            duration: nil, width: 64, height: 64, thumbnailID: "retained",
+            metadataStatus: .completed, thumbnailStatus: .completed, contentFingerprint: fingerprint))
+        try await store.protectRecoveryLocations(videoIDs: [record.id])
+        let grant = makeSource(id: "new", name: "Ancestor")
+        let wrongPath = try await store.restoreOriginalPathAccess(videoID: record.id, recordedPath: "/other/test.m4v",
+            relativePath: "test.m4v", toSourceID: "new", authorization: grant)
+        XCTAssertFalse(wrongPath)
+        for _ in 0...1 {
+            let restored = try await store.restoreOriginalPathAccess(videoID: record.id, recordedPath: path,
+                relativePath: "nested/test.m4v", toSourceID: "new", authorization: grant)
+            XCTAssertTrue(restored)
+        }
+        let observed = try await store.fetchVideo(id: record.id)
+        XCTAssertEqual(observed?.contentFingerprint, fingerprint)
+        XCTAssertEqual(observed?.thumbnailID, "retained")
+        let locations = try await store.fetchVideoLocations(videoID: record.id)
+        XCTAssertEqual(locations.filter({ !$0.requiresRecoveryVerification }).count, 1)
+        let sources = try await store.fetchSourceAuthorizations()
+        XCTAssertEqual(Set(sources.map(\.id)), ["old", "new"])
+    }
+
+    func testOriginalPathAccessForExactFileScopeRequiresExplicitRoot() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "file", name: "Single file"))
+        let path = "/synthetic/selected.m4v"
+        let input = DiscoveredVideo(relativePath: "", filename: "selected.m4v", fileExtension: "m4v",
+            fileSize: 0, creationDate: nil, modificationDate: nil, volumeIdentifier: nil,
+            fileResourceIdentifier: nil, finderTags: [], lastKnownPath: path)
+        let imported = try await store.importVideos(sourceID: "file", discoveredVideos: [input])
+        let video = try XCTUnwrap(imported.importedVideos.first)
+        try await store.protectRecoveryLocations(videoIDs: [video.id])
+        let unspecified = try await store.restoreOriginalPathAccess(videoID: video.id, recordedPath: path,
+            relativePath: "", toSourceID: "file")
+        XCTAssertFalse(unspecified)
+        let wrong = try await store.restoreOriginalPathAccess(videoID: video.id, recordedPath: path,
+            relativePath: "", toSourceID: "file", authorizedFilePath: "/other/selected.m4v")
+        XCTAssertFalse(wrong)
+        let exact = try await store.restoreOriginalPathAccess(videoID: video.id, recordedPath: path,
+            relativePath: "", toSourceID: "file", authorizedFilePath: path)
+        XCTAssertTrue(exact)
+        let result = try await store.fetchVideoLocations(videoID: video.id)
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.first?.relativePath, "")
+        XCTAssertEqual(result.first?.requiresRecoveryVerification, false)
+    }
+
+    func testIndexedLiveMoveKeepsExistingRecordAndRefusesDestinationCollision() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "granted", name: "Ancestor"))
+        let identity = IndexedFileIdentity(device: 1, inode: 42, volume: Data([8]), resource: Data([9]))
+        let fingerprint = Data(repeating: 7, count: 32)
+        let original = DiscoveredVideo(relativePath: "one/old.mov", filename: "old.mov", fileExtension: "mov",
+            fileSize: 0, creationDate: nil, modificationDate: nil, volumeIdentifier: identity.volume,
+            fileResourceIdentifier: identity.resource, contentFingerprint: fingerprint, finderTags: ["Synthetic"],
+            lastKnownPath: "/synthetic/one/old.mov")
+        let other = DiscoveredVideo(relativePath: "two/occupied.mov", filename: "occupied.mov", fileExtension: "mov",
+            fileSize: 0, creationDate: nil, modificationDate: nil, volumeIdentifier: identity.volume,
+            fileResourceIdentifier: Data([10]), finderTags: [], lastKnownPath: "/synthetic/two/occupied.mov")
+        let result = try await store.importVideos(sourceID: "granted", discoveredVideos: [original, other])
+        let video = try XCTUnwrap(result.importedVideos.first(where: { $0.filename == "old.mov" }))
+        let tag = try await store.createTag(libraryID: LibraryRecord.primaryID, name: "Synthetic relocation", parentID: nil)
+        try await store.setTagAssignment(tagID: tag, videoIDs: [video.id], enabled: true)
+        let locations = try await store.fetchVideoLocations(videoID: video.id)
+        let old = try XCTUnwrap(locations.first)
+        let collided = try await store.moveIndexedVideoLocation(old, to: "/synthetic/two/occupied.mov",
+            relativePath: "two/occupied.mov", identity: identity)
+        XCTAssertFalse(collided)
+        try await store.saveSourceAuthorization(makeSource(id: "overlapping", name: "Nested scope"))
+        let overlap = DiscoveredVideo(relativePath: "foreign.mov", filename: "foreign.mov", fileExtension: "mov",
+            fileSize: 0, creationDate: nil, modificationDate: nil, volumeIdentifier: identity.volume,
+            fileResourceIdentifier: Data([11]), finderTags: [], lastKnownPath: "/synthetic/two/foreign.mov")
+        _ = try await store.importVideos(sourceID: "overlapping", discoveredVideos: [overlap])
+        let crossScope = try await store.moveIndexedVideoLocation(old, to: "/synthetic/two/foreign.mov",
+            relativePath: "two/foreign.mov", identity: identity)
+        XCTAssertFalse(crossScope)
+        let moved = try await store.moveIndexedVideoLocation(old, to: "/synthetic/two/new.mov",
+            relativePath: "two/new.mov", identity: identity)
+        XCTAssertTrue(moved)
+        let updated = try await store.fetchVideo(id: video.id)
+        XCTAssertEqual(updated?.id, video.id)
+        XCTAssertEqual(updated?.contentFingerprint, fingerprint)
+        XCTAssertEqual(updated?.filename, "new.mov")
+        let newLocations = try await store.fetchVideoLocations(videoID: video.id)
+        XCTAssertEqual(newLocations.map(\.lastKnownPath), ["/synthetic/two/new.mov"])
+        let tags = try await store.fetchTags(libraryID: LibraryRecord.primaryID)
+        let states = try await store.tagAssignmentStates(videoIDs: [video.id], tags: tags)
+        XCTAssertEqual(states[tag], .on)
+    }
+
     private func makeDiscoveredVideo(
         path: String,
         size: Int64,

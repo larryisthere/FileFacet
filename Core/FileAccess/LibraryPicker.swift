@@ -3,12 +3,13 @@ import UniformTypeIdentifiers
 
 @MainActor
 struct LibraryPicker {
-    func authorizeRecoveryDirectory(_ expected: URL) -> URL? {
+    func authorizeRecoveryDirectory(for recordedFile: URL) -> URL? {
+        let expected = recordedFile.deletingLastPathComponent()
         let panel = NSOpenPanel()
-        let validation = RecoveryDirectoryValidation(expected: expected)
+        let validation = RecoveryDirectoryValidation(recordedFile: recordedFile)
         panel.delegate = validation
         panel.title = String(localized: "recovery.permission.title", defaultValue: "Restore Folder Access")
-        panel.message = String(localized: "recovery.permission.message", defaultValue: "Confirm this folder to check the original videos.")
+        panel.message = String(localized: "recovery.permission.message", defaultValue: "Choose this folder or a folder containing it to check the original videos.")
         panel.prompt = String(localized: "recovery.permission.allow", defaultValue: "Allow Access")
         panel.directoryURL = expected
         panel.canChooseFiles = false
@@ -17,8 +18,8 @@ struct LibraryPicker {
         panel.canCreateDirectories = false
         panel.resolvesAliases = false
         guard panel.runModal() == .OK, let url = panel.url,
-              url.standardizedFileURL == expected.standardizedFileURL else { return nil }
-        return url
+              RecoveryScope.recordedRelativePath(file: recordedFile, inside: url, checkResolvedPaths: false) != nil else { return nil }
+        return url.standardizedFileURL
     }
 
     func chooseImportItems() -> [URL]? {
@@ -85,15 +86,34 @@ struct LibraryPicker {
     }
 }
 
+// This maps one recorded absolute path, never searches a selected folder.
+enum RecoveryScope {
+    static func recordedRelativePath(file: URL, inside root: URL, checkResolvedPaths: Bool = true,
+                                     allowExactFileScope: Bool = false) -> String? {
+        guard file.isFileURL, root.isFileURL else { return nil }
+        let f = file.standardizedFileURL
+        let r = root.standardizedFileURL
+        let base = r.pathComponents
+        let path = f.pathComponents
+        guard base.count > 1, path.starts(with: base),
+              path.count > base.count || (allowExactFileScope && f.path == r.path)
+        else { return nil }
+        if checkResolvedPaths {
+            guard r.resolvingSymlinksInPath().standardizedFileURL.path == r.path,
+                  f.resolvingSymlinksInPath().standardizedFileURL.path == f.path else { return nil }
+        }
+        return path.dropFirst(base.count).joined(separator: "/")
+    }
+}
+
 @MainActor
 private final class RecoveryDirectoryValidation: NSObject, NSOpenSavePanelDelegate {
-    let expected: URL
-    init(expected: URL) { self.expected = expected }
+    let recordedFile: URL
+    init(recordedFile: URL) { self.recordedFile = recordedFile }
     func panel(_ sender: Any, validate url: URL) throws {
-        guard url.standardizedFileURL == expected.standardizedFileURL,
-              url.resolvingSymlinksInPath().standardizedFileURL == expected.standardizedFileURL else {
+        guard RecoveryScope.recordedRelativePath(file: recordedFile, inside: url, checkResolvedPaths: false) != nil else {
             throw NSError(domain: "Tagivy.Recovery", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: String(localized: "recovery.permission.exact", defaultValue: "Confirm the original folder shown here.")
+                NSLocalizedDescriptionKey: String(localized: "recovery.permission.exact", defaultValue: "Choose the original folder or a folder containing it.")
             ])
         }
     }

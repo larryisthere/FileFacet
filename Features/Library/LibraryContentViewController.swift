@@ -40,6 +40,10 @@ final class LibraryContentViewController: NSViewController {
             : String(localized: "recovery.action", defaultValue: "Restore Access")
         if status.running {
             recoveryLabel.stringValue = String(localized: "recovery.progress", defaultValue: "Checking original videos: \(status.completed) of \(status.total)")
+            if status.deferred > 0 {
+                recoveryLabel.stringValue += " " + String(localized: "recovery.deferred.progress",
+                    defaultValue: "Waiting for files: \(status.deferred).")
+            }
             recoveryProgress.maxValue = Double(max(1, status.total))
             recoveryProgress.doubleValue = Double(status.completed)
         } else {

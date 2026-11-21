@@ -138,6 +138,116 @@ private enum RelinkConfirmationChoice {
     case cancel
 }
 
+enum OriginalRecoveryExistence {
+    // Only vnode metadata: this does not open the file, read its contents,
+    // inspect duration, or request that a File Provider materialize it.
+    static func isRecordedFilePresent(_ file: URL, recordedPath: String, inside root: URL,
+                                      allowExactFileScope: Bool = false) throws -> Bool {
+        guard !recordedPath.isEmpty, file.path == recordedPath,
+              RecoveryScope.recordedRelativePath(file: file, inside: root,
+                  allowExactFileScope: allowExactFileScope) != nil else { return false }
+        var info = stat()
+        guard lstat(file.path, &info) == 0 else {
+            if errno == ENOENT || errno == ENOTDIR { return false }
+            throw RecoveryReadDeferral.metadataUnavailable
+        }
+        return (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG)
+    }
+}
+
+struct RecoveryMaintenanceReplay {
+    private var pending = false
+
+    mutating func shouldSchedule(recovering: Bool) -> Bool {
+        if recovering { pending = true }
+        return !recovering
+    }
+
+    mutating func takePending() -> Bool {
+        defer { pending = false }
+        return pending
+    }
+}
+
+enum RecoveryReadDeferral: Error, Equatable {
+    case metadataUnavailable
+    case deadlineExceeded
+    case workersOccupied
+}
+
+// A timed-out read still owns its slot and security scopes until it actually leaves
+// the OS. No structured child join and no ability for a late worker to commit.
+@MainActor
+final class RecoveryReadBudget {
+    @MainActor
+    private final class Waiter<Value: Sendable> {
+        var continuation: CheckedContinuation<Value, Error>?
+        var worker: Task<Void, Never>?
+        var timer: Task<Void, Never>?
+    }
+
+    private var active = 0
+    private let capacity: Int
+    private let timeout: Duration
+
+    init(capacity: Int = 2, timeout: Duration = .seconds(8)) {
+        precondition(capacity > 0 && timeout > .zero)
+        self.capacity = capacity
+        self.timeout = timeout
+    }
+
+    func run<Value: Sendable>(
+        retaining scopes: [SecurityScopedResource] = [],
+        _ operation: @escaping @Sendable () async throws -> Value
+    ) async throws -> Value {
+        try Task.checkCancellation()
+        guard active < capacity else { throw RecoveryReadDeferral.workersOccupied }
+        let waiter = Waiter<Value>()
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { c in
+                waiter.continuation = c
+                active += 1
+                waiter.worker = Task.detached(priority: .utility) {
+                    let result: Result<Value, Error>
+                    do { result = .success(try await operation()) }
+                    catch { result = .failure(error) }
+                    // The outer task holds all authorization handles until operation really exits.
+                    withExtendedLifetime(scopes) {}
+                    await self.workerFinished(waiter, result: result, clock: clock, deadline: deadline)
+                }
+                waiter.timer = Task { @MainActor in
+                    do { try await clock.sleep(until: deadline) } catch { return }
+                    self.resume(waiter, .failure(RecoveryReadDeferral.deadlineExceeded), cancelWorker: true)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in
+                self.resume(waiter, .failure(CancellationError()), cancelWorker: true)
+            }
+        }
+    }
+
+    private func workerFinished<Value: Sendable>(_ waiter: Waiter<Value>, result: Result<Value, Error>,
+                                                  clock: ContinuousClock, deadline: ContinuousClock.Instant) {
+        active -= 1
+        resume(waiter, clock.now < deadline ? result : .failure(RecoveryReadDeferral.deadlineExceeded),
+               cancelWorker: false)
+    }
+
+    private func resume<Value: Sendable>(_ waiter: Waiter<Value>, _ result: Result<Value, Error>,
+                                         cancelWorker: Bool) {
+        guard let c = waiter.continuation else { return }
+        waiter.continuation = nil
+        waiter.timer?.cancel()
+        waiter.timer = nil
+        if cancelWorker { waiter.worker?.cancel() }
+        waiter.worker = nil
+        c.resume(with: result)
+    }
+}
+
 private enum RelinkFlowError: Error {
     case invalidVideo
     case fileChangedDuringReview
@@ -179,6 +289,7 @@ final class LibraryAccessCoordinator {
     private var accessLostSourceNameByVideoID: [String: String] = [:]
     private var reachableSourceIDs = Set<String>()
     private var recoveryTask: Task<Void, Never>?
+    private let recoveryReadBudget = RecoveryReadBudget()
     private var recoveryCandidates: [VideoRecord] = []
     private var recoveryStatus = RecoveryStatus()
     var onRecoveryChanged: ((RecoveryStatus) -> Void)?
@@ -192,8 +303,23 @@ final class LibraryAccessCoordinator {
     private var relinkingVideoID: String?
     private var importRevision = 0
     private var isRestoringLibrary = false
-    private var automaticRecoveryObservations: [String: RecoveryFileObservation] = [:]
     private var sourceScopeGenerations: [String: UUID] = [:]
+    private struct WatchedRelocation: Sendable {
+        let location: VideoLocationRecord
+        let generation: UUID
+        let identity: IndexedFileIdentity
+    }
+    private var watchedRelocations: [String: WatchedRelocation] = [:]
+    private var relocationEvents: [String: IndexedRelocationHints] = [:]
+    private var watcherGenerations: [String: UUID] = [:]
+    private var relocationConflictPaths: Set<String> = []
+    private var relocationConflictVideoIDs: Set<String> = []
+
+    private let relocationReadBudget = RecoveryReadBudget()
+    private var relocationCaptureTask: Task<Void, Never>?
+    private var maintenanceReplay = RecoveryMaintenanceReplay()
+    private var recoveredMediaExclusions = RecoveryMediaExclusions()
+    private var maintenanceGeneration: UUID?
     private var maintenanceTask: Task<Void, Never>?
     private var maintenanceDebounceTask: Task<Void, Never>?
     private var volumeAvailabilityTask: Task<Void, Never>?
@@ -278,24 +404,31 @@ final class LibraryAccessCoordinator {
         guard !isRestoringLibrary, recoveryTask == nil, importTask == nil, relinkTask == nil, scanTask == nil,
               pendingTagMutationCount == 0, !recoveryCandidates.isEmpty else { return }
         let candidates = recoveryCandidates
+        recoveredMediaExclusions.beginRecovery(candidates.map(\.id))
         discardVideoRemovalUndo()
         recoveryStatus = RecoveryStatus(candidateCount: candidates.count, running: true, total: candidates.count)
         publishRecoveryStatus()
         recoveryTask = Task { [weak self] in
             guard let self else { return }
             let maintenance = maintenanceTask
+            relocationCaptureTask?.cancel()
+            relocationCaptureTask = nil
+            for key in Array(relocationEvents.keys) {
+                relocationEvents[key]?.holdForRecovery(at: ContinuousClock().now)
+            }
+            if maintenanceDebounceTask != nil || maintenanceGeneration != nil {
+                _ = maintenanceReplay.shouldSchedule(recovering: true)
+            }
             maintenanceDebounceTask?.cancel()
+            maintenanceDebounceTask = nil
             maintenance?.cancel()
-            let media = mediaTask
-            media?.cancel()
             await maintenance?.value
-            await media?.value
-            mediaTask = nil
-            pendingMediaVideos.removeAll()
-            deferredMediaVideos.removeAll()
+            // Access-only recovery owns no media work. Existing unrelated queued
+            // processing continues, without enqueueing recovered originals.
             var succeeded = 0
             var checked = 0
             var failures = 0
+            var deferred = 0
             var needsReview = 0
             var stopped = false
             var localSources: [URL: SourceAuthorizationRecord] = [:]
@@ -309,86 +442,93 @@ final class LibraryAccessCoordinator {
                     try Task.checkCancellation()
                     var restored = false
                     var requiresReview = false
-                    let paths = Set(locations.filter { $0.videoID == video.id }.compactMap { location -> String? in
-                        location.lastKnownPath ?? knownSourceURLs[location.sourceID].flatMap { Self.fileURL(sourceURL: $0, relativePath: location.relativePath)?.path }
-                    }).filter { $0.hasPrefix("/") }
+                    var deferredRead = false
+                    let paths = Set(locations.filter { $0.videoID == video.id }.compactMap(\.lastKnownPath))
+                        .filter { $0.hasPrefix("/") }
                     for path in paths.sorted() {
                         try Task.checkCancellation()
                         let file = URL(fileURLWithPath: path).standardizedFileURL
                         guard !Self.isURLInTrash(file), !Self.isOnUnmountedExternalVolume(file) else { continue }
-                        let directory = file.deletingLastPathComponent()
-                        do {
+                            do {
                             let source: SourceAuthorizationRecord
-                            if let cached = localSources[directory] { source = cached }
-                            else {
-                                // Existing scopes may already cover the exact original parent.
-                                let canAccess = sourceURLs.values.contains { root in
-                                    directory == root.standardizedFileURL || Self.isURL(file, inside: root.standardizedFileURL)
-                                }
-                                let authorizedURL: URL
-                                if canAccess { authorizedURL = directory }
-                                else {
-                                    guard let selected = picker.authorizeRecoveryDirectory(directory) else {
+                            let root: URL
+                            let cachedRoot = localSources.keys.filter {
+                                RecoveryScope.recordedRelativePath(file: file, inside: $0, checkResolvedPaths: false) != nil
+                            }.max { $0.pathComponents.count < $1.pathComponents.count }
+                            if let cachedRoot, let cached = localSources[cachedRoot] {
+                                root = cachedRoot
+                                source = cached
+                            } else {
+                                let current = sourceURLs.filter { id, folder in
+                                    resources[id] != nil && RecoveryScope.recordedRelativePath(file: file, inside: folder, checkResolvedPaths: false, allowExactFileScope: true) != nil
+                                }.max { $0.value.pathComponents.count < $1.value.pathComponents.count }
+                                if let current {
+                                    root = current.value.standardizedFileURL
+                                } else {
+                                    guard let selected = picker.authorizeRecoveryDirectory(for: file) else {
                                         throw CancellationError()
                                     }
-                                    authorizedURL = selected
+                                    root = selected
+                                    guard let resource = SecurityScopedResource(url: root) else {
+                                        throw CocoaError(.fileReadNoPermission)
+                                    }
+                                    localResources[root] = resource
                                 }
-                                if let resource = SecurityScopedResource(url: authorizedURL) {
-                                    localResources[directory] = resource
-                                } else if !canAccess { throw CocoaError(.fileReadNoPermission) }
-                                let bookmark = try makeBookmark(for: authorizedURL)
+                                let bookmark = try makeBookmark(for: root)
                                 let priorDirectoryID = locations.first { location in
                                     guard !location.relativePath.isEmpty, let previousPath = location.lastKnownPath else { return false }
                                     let components = location.relativePath.split(separator: "/")
                                     guard !components.contains("..") else { return false }
-                                    let previousRoot = components.reduce(URL(fileURLWithPath: previousPath)) { root, _ in root.deletingLastPathComponent() }
-                                    return previousRoot.standardizedFileURL == directory
+                                    let previousRoot = components.reduce(URL(fileURLWithPath: previousPath)) { url, _ in url.deletingLastPathComponent() }
+                                    return previousRoot.standardizedFileURL == root
                                 }?.sourceID
-                                let id = knownSourceURLs.first { $0.value.standardizedFileURL == directory }?.key
+                                let id = current?.key ?? knownSourceURLs.first { $0.value.standardizedFileURL == root }?.key
                                     ?? priorDirectoryID ?? UUID().uuidString
                                 source = SourceAuthorizationRecord(id: id, libraryID: LibraryRecord.primaryID,
-                                    displayName: directory.lastPathComponent, rootBookmarkData: bookmark,
+                                    displayName: root.lastPathComponent, rootBookmarkData: bookmark,
                                     createdAt: Date(), scansDescendants: sourceScansDescendants[id] ?? false)
-                                localSources[directory] = source
+                                localSources[root] = source
                             }
-                            guard let positioned = try await verifiedRecoveryCandidate(
-                                videoID: video.id, file: file, sourceID: source.id, relativePath: file.lastPathComponent
-                            ) else { requiresReview = true; continue }
+                            guard let relativePath = RecoveryScope.recordedRelativePath(file: file, inside: root, checkResolvedPaths: false, allowExactFileScope: true) else {
+                                throw RelinkFlowError.invalidVideo
+                            }
+                            let scopes = [localResources[root], resources[source.id]].compactMap { $0 }
+                            guard try await verifyOriginalRecoveryPath(file: file, recordedPath: path,
+                                root: root, retaining: scopes, allowExactFileScope: relativePath.isEmpty) else { requiresReview = true; continue }
                             try Task.checkCancellation()
-                            _ = try await database.relinkVideo(id: video.id, sourceID: source.id, discoveredVideo: positioned,
-                                allowAvailableRecord: true, sourceAuthorization: source)
+                            guard try await database.restoreOriginalPathAccess(videoID: video.id,
+                                recordedPath: path, relativePath: relativePath,
+                                toSourceID: source.id, authorizedFilePath: relativePath.isEmpty ? root.path : nil,
+                                authorization: source) else { requiresReview = true; continue }
+                            excludeRecoveredMedia(id: video.id)
                             // Count the committed result before any cancellable refresh.
                             succeeded += 1
                             restored = true
+                            let captureKey = source.id + "|" + path
+                            relocationConflictPaths.remove(captureKey)
+                            watchedRelocations.removeValue(forKey: captureKey)
                             sourceBookmarks[source.id] = source.rootBookmarkData
                             sourceDisplayNames[source.id] = source.displayName
                             sourceScansDescendants[source.id] = source.scansDescendants
                             sourceScanPolicyExplicit[source.id] = true
-                            try connect(sourceID: source.id, url: directory)
+                            try connect(sourceID: source.id, url: root)
                             break
                         } catch is CancellationError { throw CancellationError() }
+                        catch is RecoveryReadDeferral { deferredRead = true; continue }
                         catch {
                             if restored { break }
-                            // A readable parent listing provides positive absence evidence.
-                            let absence = Task.detached(priority: .utility) {
-                                guard let entries = try? FileManager.default.contentsOfDirectory(at: directory,
-                                    includingPropertiesForKeys: nil) else { return false }
-                                return !entries.contains { $0.lastPathComponent == file.lastPathComponent }
-                            }
-                            if await absence.value {
-                                try? await database.confirmRecoveryPathMissing(videoID: video.id, path: file.path)
-                            }
+                            // Keep the recorded location; a permission or metadata error
+                            // does not prove the original was moved or deleted.
                         }
                     }
                     checked += 1
                     if !restored {
-                        failures += 1
+                        if deferredRead { deferred += 1 } else { failures += 1 }
                         if requiresReview { needsReview += 1 }
                     }
                     recoveryStatus.completed = checked
+                    recoveryStatus.deferred = deferred
                     publishRecoveryStatus()
-                    try await refreshResolvedVideoURLs()
-                    try await refreshVisibleVideosNow()
                 }
             } catch is CancellationError { stopped = true }
             catch { failures += 1 }
@@ -397,10 +537,15 @@ final class LibraryAccessCoordinator {
             let finalChecked = checked
             let finalStopped = stopped
             let finalFailures = failures
+            let finalDeferred = deferred
             recoveryStatus.running = false
-            recoveryStatus.message = String(localized: "recovery.result", defaultValue: "Restored \(finalSucceeded); not restored \(max(0, finalChecked - finalSucceeded)); unchecked \(max(0, candidates.count - finalChecked)).")
+            recoveryStatus.message = String(localized: "recovery.result", defaultValue: "Restored \(finalSucceeded); not restored \(max(0, finalChecked - finalSucceeded - finalDeferred)); unchecked \(max(0, candidates.count - finalChecked)).")
             if finalStopped {
                 recoveryStatus.message = String(localized: "recovery.stopped", defaultValue: "Recovery stopped.") + " " + (recoveryStatus.message ?? "")
+            }
+            if deferred > 0 {
+                recoveryStatus.message = (recoveryStatus.message ?? "") + " " +
+                    String(localized: "recovery.deferred.result", defaultValue: "\(deferred) videos could not be checked because their file locations did not respond. You can retry later.")
             }
             if needsReview > 0 {
                 recoveryStatus.message = (recoveryStatus.message ?? "") + " " + String(localized: "recovery.reviewCount", defaultValue: "\(needsReview) videos require individual relinking to confirm their original files.")
@@ -412,12 +557,19 @@ final class LibraryAccessCoordinator {
             Task { [weak self] in
                 guard let self else { return }
                 try? await refreshResolvedVideoURLs()
+                recoveredMediaExclusions.finishRecovery()
                 recoveryTask = nil
-                try? await refreshVisibleVideosNow()
-                if let videos = try? await database.fetchVideos(libraryID: LibraryRecord.primaryID) {
-                    startMediaProcessing(videos: videos)
+                drainReadyDeferredMedia()
+                for key in Array(relocationEvents.keys) {
+                    relocationEvents[key]?.resumeAfterRecovery(at: ContinuousClock().now)
                 }
-                scheduleMaintenance()
+                if maintenanceReplay.takePending() { scheduleMaintenance() }
+                publishRecoveryStatus()
+                if let locations = try? await database.fetchVideoLocations() {
+                    scheduleIndexedRelocationCapture(locations: locations, resolved: resolvedVideoURLs, cloud: cloudPlaceholderIDs)
+                }
+                try? await refreshVisibleVideosNow()
+                // Recovery associates existing locations; it does not enqueue content reads.
             }
         }
     }
@@ -914,7 +1066,7 @@ final class LibraryAccessCoordinator {
                 onTagAssignmentsChanged?()
                 tagStateRevision += 1
                 invalidateUndoHistoryUnlessVideoRemoval()
-                startMediaProcessing(videos: importedVideos)
+                startMediaProcessing(videos: importedVideos, explicitIntent: true)
             } catch {
                 AppLogger.database.error(
                     "Scanned video import refresh failed with category: \(String(describing: type(of: error)), privacy: .public)"
@@ -1186,7 +1338,7 @@ final class LibraryAccessCoordinator {
                 onTagAssignmentsChanged?()
                 tagStateRevision += 1
                 invalidateUndoHistoryUnlessVideoRemoval()
-                startMediaProcessing(videos: importedVideos)
+                startMediaProcessing(videos: importedVideos, explicitIntent: true)
                 guard importRevision == revision else { return }
                 let uniqueAddedVideoIDs = stableUniqueVideoIDs(addedVideoIDs)
                 let addedVideoIDSet = Set(uniqueAddedVideoIDs)
@@ -1609,7 +1761,11 @@ final class LibraryAccessCoordinator {
                     throw RelinkFlowError.invalidVideo
                 }
 
-                let allowAvailableRecord = video.unavailableReason == .accessLost
+                let allowAvailableRecord = RelocationRelinkEligibility.allowsAvailableRecord(
+                    reason: video.unavailableReason,
+                    hasRuntimeConflict: relocationConflictVideoIDs.contains(video.id),
+                    hasUsableLocation: resolvedVideoURLs[video.id] != nil || cloudPlaceholderIDs.contains(video.id)
+                )
                 if let existingVideoID = try await database.existingRelinkVideoID(
                     id: video.id,
                     sourceID: source.id,
@@ -1708,7 +1864,11 @@ final class LibraryAccessCoordinator {
                     id: video.id,
                     sourceID: source.id,
                     discoveredVideo: discoveredVideo,
-                    allowAvailableRecord: allowAvailableRecord,
+                    allowAvailableRecord: allowAvailableRecord && RelocationRelinkEligibility.allowsAvailableRecord(
+                        reason: video.unavailableReason,
+                        hasRuntimeConflict: relocationConflictVideoIDs.contains(video.id),
+                        hasUsableLocation: resolvedVideoURLs[video.id] != nil || cloudPlaceholderIDs.contains(video.id)
+                    ),
                     allowContentMismatch: allowContentMismatch
                 )
                 resolvedVideoURLs[restored.id] = source.url
@@ -1724,7 +1884,7 @@ final class LibraryAccessCoordinator {
                     )
                     onVideoChanged?(presentedVideo(restored))
                 }
-                startMediaProcessing(videos: [restored])
+                startMediaProcessing(videos: [restored], explicitIntent: true)
                 onOperationStatusChanged?(.relinkSucceeded(filename: restored.filename))
                 return true
             } catch is CancellationError {
@@ -2077,10 +2237,27 @@ final class LibraryAccessCoordinator {
            previousPath != watchPath,
            sourceWatchPaths.values.contains(previousPath) == false {
             watchersByPath.removeValue(forKey: previousPath)?.stop()
+            watcherGenerations.removeValue(forKey: previousPath)
+            relocationEvents.removeValue(forKey: previousPath)
         }
         guard watchersByPath[watchPath] == nil else { return }
-        let watcher = FSEventsWatcher { [weak self] in
-            Task { @MainActor [weak self] in self?.scheduleMaintenance() }
+        let generation = UUID()
+        watcherGenerations[watchPath] = generation
+        let watcher = FSEventsWatcher { [weak self] events in
+            Task { @MainActor [weak self] in
+                guard let self, watcherGenerations[watchPath] == generation else { return }
+                if sourceWatchPaths.contains(where: { id, path in
+                    path == watchPath && sourceScansDescendants[id] == false &&
+                    sourceURLs[id]?.hasDirectoryPath == true
+                }) {
+                    let now = ContinuousClock().now
+                    if recoveryTask != nil {
+                        relocationEvents[watchPath, default: IndexedRelocationHints()].holdForRecovery(at: now)
+                    }
+                    relocationEvents[watchPath, default: IndexedRelocationHints()].append(events, now: now)
+                }
+                scheduleMaintenance()
+            }
         }
         watchersByPath[watchPath] = watcher
         watcher.start(watching: watchURL)
@@ -2098,6 +2275,8 @@ final class LibraryAccessCoordinator {
         guard let watchPath = sourceWatchPaths.removeValue(forKey: sourceID),
               sourceWatchPaths.values.contains(watchPath) == false else { return }
         watchersByPath.removeValue(forKey: watchPath)?.stop()
+        relocationEvents.removeValue(forKey: watchPath)
+        watcherGenerations.removeValue(forKey: watchPath)
     }
 
     private func resetRuntimeSourceConnections() {
@@ -2109,6 +2288,11 @@ final class LibraryAccessCoordinator {
         }
         watchersByPath.removeAll()
         sourceWatchPaths.removeAll()
+        watchedRelocations.removeAll()
+        relocationEvents.removeAll()
+        watcherGenerations.removeAll()
+        relocationConflictPaths.removeAll()
+        relocationConflictVideoIDs.removeAll()
     }
 
     private func makeBookmark(for url: URL) throws -> Data {
@@ -2186,48 +2370,28 @@ final class LibraryAccessCoordinator {
         )
     }
 
-    private func verifiedRecoveryCandidate(videoID: String, file: URL, sourceID: String,
-                                           relativePath: String) async throws -> DiscoveredVideo? {
-        let discovery = self.discovery
-        let worker = Task.detached(priority: .utility) { () throws -> DiscoveredVideo in
-            let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .isAliasFileKey])
-            guard values.isRegularFile == true, values.isSymbolicLink != true, values.isAliasFile != true,
-                  file.resolvingSymlinksInPath().standardizedFileURL == file else { throw RelinkFlowError.invalidVideo }
-            let result = try discovery.discoverVideoResult(at: file)
-            guard result.failedCount == 0, result.videos.count == 1, let candidate = result.videos.first else {
-                throw RelinkFlowError.invalidVideo
-            }
-            return candidate.withContentFingerprint(try contentFingerprint(for: file))
+    private func verifyOriginalRecoveryPath(file: URL, recordedPath: String, root: URL,
+                                            retaining scopes: [SecurityScopedResource],
+                                            allowExactFileScope: Bool = false) async throws -> Bool {
+        guard !scopes.isEmpty else { return false }
+        let present = try await recoveryReadBudget.run(retaining: scopes) {
+            try Task.checkCancellation()
+            return try OriginalRecoveryExistence.isRecordedFilePresent(file, recordedPath: recordedPath, inside: root,
+                allowExactFileScope: allowExactFileScope)
         }
-        let candidate = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
-        let positioned = candidate.relativeToRecoveryDirectory(path: relativePath)
-        let assessment = try await database.assessRelinkVideo(id: videoID, sourceID: sourceID,
-            discoveredVideo: positioned, allowAvailableRecord: true)
-        guard assessment == .exactMatch else { return nil }
-        guard let mediaService else { throw RelinkFlowError.invalidVideo }
-        _ = try await mediaService.inspectVideo(fileURL: file)
-        let recheck = Task.detached(priority: .utility) {
-            let fingerprint = try contentFingerprint(for: file)
-            let attributes = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isSymbolicLinkKey])
-            guard fingerprint == positioned.contentFingerprint,
-                  Int64(attributes.fileSize ?? -1) == positioned.fileSize,
-                  attributes.contentModificationDate == positioned.modificationDate,
-                  attributes.isSymbolicLink != true else { throw RelinkFlowError.fileChangedDuringReview }
-        }
-        try await withTaskCancellationHandler { try await recheck.value } onCancel: { recheck.cancel() }
         try Task.checkCancellation()
-        return positioned
+        return present
     }
 
     private func restoreAccessibleProtectedVideos() async throws {
         let locations = try await database.fetchVideoLocations(includeUnavailable: true)
-        var restoredIDs = Set(resolvedVideoURLs.keys)
+        var restoredIDs = Set(resolvedVideoURLs.keys).union(cloudPlaceholderIDs)
         // Only previously lost positions are checked. Healthy positions keep normal startup behavior.
         for location in locations where location.requiresRecoveryVerification {
             try Task.checkCancellation()
             guard !restoredIDs.contains(location.videoID), let path = location.lastKnownPath,
                   let video = try await database.fetchVideo(id: location.videoID),
-                  video.availability == .available, video.contentFingerprint != nil else { continue }
+                  video.availability == .available else { continue }
             let file = URL(fileURLWithPath: path).standardizedFileURL
             guard !Self.isURLInTrash(file), !Self.isOnUnmountedExternalVolume(file) else { continue }
             let scopes = sourceURLs.filter { id, root in
@@ -2239,62 +2403,185 @@ final class LibraryAccessCoordinator {
                 }
                 return left.key < right.key
             }
-            guard let (sourceID, root) = scopes.first,
-                  let generation = sourceScopeGenerations[sourceID],
-                  let originalFingerprint = video.contentFingerprint else { continue }
-            let probe = Task.detached(priority: .utility) { () throws -> RecoveryFileObservation? in
-                // No fingerprint or video read while the provider only has a placeholder.
-                guard !VideoCloudReadiness.isPlaceholder(at: file) else { return nil }
-                let values = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
-                return RecoveryFileObservation(sourceID: sourceID, scopeGeneration: generation, path: file.path,
-                    size: values.fileSize, modified: values.contentModificationDate, originalFingerprint: originalFingerprint)
-            }
-            guard let observation = try? await probe.value, sourceScopeGenerations[sourceID] == generation else { continue }
-            let observationKey = location.videoID + "|" + file.path
-            guard observation.needsVerification(previous: automaticRecoveryObservations[observationKey],
-                authenticatedScope: sourceScopeGenerations[sourceID]) else { continue }
-            let relativePath = file.pathComponents.dropFirst(root.standardizedFileURL.pathComponents.count).joined(separator: "/")
-            do {
-                guard let candidate = try await verifiedRecoveryCandidate(videoID: video.id, file: file,
-                    sourceID: sourceID, relativePath: relativePath) else {
-                    automaticRecoveryObservations[observationKey] = observation
-                    continue
+            for (sourceID, root) in scopes {
+                guard let resource = resources[sourceID], let generation = sourceScopeGenerations[sourceID],
+                      let relativePath = RecoveryScope.recordedRelativePath(file: file, inside: root,
+                        checkResolvedPaths: false, allowExactFileScope: true) else { continue }
+                do {
+                    // Do not memoize absence: a later normal availability pass may see the vnode again.
+                    guard try await verifyOriginalRecoveryPath(file: file, recordedPath: path, root: root,
+                        retaining: [resource], allowExactFileScope: relativePath.isEmpty) else { continue }
+                    try Task.checkCancellation()
+                    guard sourceScopeGenerations[sourceID] == generation else { continue }
+                    recoveredMediaExclusions.beginAutomaticRecovery(video.id)
+                    defer { recoveredMediaExclusions.finishAutomaticRecovery(video.id) }
+                    guard try await database.restoreOriginalPathAccess(videoID: video.id, recordedPath: path,
+                        relativePath: relativePath, toSourceID: sourceID,
+                        authorizedFilePath: relativePath.isEmpty ? root.path : nil) else { continue }
+                    excludeRecoveredMedia(id: video.id)
+                    restoredIDs.insert(video.id)
+                    break
+                } catch is CancellationError { throw CancellationError() }
+                catch is RecoveryReadDeferral { continue }
+                catch {
+                    AppLogger.library.notice("Automatic recovery left a video pending access")
                 }
-                try Task.checkCancellation()
-                // Scope might have been revoked or replaced during the off-main verification.
-                guard sourceScopeGenerations[sourceID] == generation else { continue }
-                _ = try await database.relinkVideo(id: video.id, sourceID: sourceID,
-                    discoveredVideo: candidate, allowAvailableRecord: true)
-                automaticRecoveryObservations.removeValue(forKey: observationKey)
-                restoredIDs.insert(video.id)
-            } catch is CancellationError { throw CancellationError() }
-            catch {
-                automaticRecoveryObservations[observationKey] = observation
-                AppLogger.library.notice("Automatic recovery left a video pending verification")
             }
         }
     }
 
+    private func scheduleIndexedRelocationCapture(
+        locations: [VideoLocationRecord], resolved: [String: URL], cloud: Set<String>
+    ) {
+        guard recoveryTask == nil else { return }
+        relocationCaptureTask?.cancel()
+        relocationCaptureTask = Task(priority: .utility) { [weak self] in
+            await self?.captureIndexedRelocations(locations: locations, resolved: resolved, cloud: cloud)
+        }
+    }
+
+    private func captureIndexedRelocations(
+        locations: [VideoLocationRecord], resolved: [String: URL], cloud: Set<String>
+    ) async {
+        for location in locations where !location.requiresRecoveryVerification && !cloud.contains(location.videoID) {
+            guard !Task.isCancelled, recoveryTask == nil else { return }
+            guard sourceScansDescendants[location.sourceID] == false,
+                  let root = sourceURLs[location.sourceID], root.hasDirectoryPath,
+                  let scope = resources[location.sourceID],
+                  let generation = sourceScopeGenerations[location.sourceID],
+                  let path = location.lastKnownPath, let file = resolved[location.videoID],
+                  file.path == path else { continue }
+            let key = location.sourceID + "|" + path
+            if watchedRelocations[key]?.generation == generation { continue }
+            guard let observed = try? await relocationReadBudget.run(retaining: [scope], {
+                IndexedFileIdentity.read(at: file, inside: root)
+            }), !Task.isCancelled, recoveryTask == nil,
+                sourceScopeGenerations[location.sourceID] == generation else { continue }
+            watchedRelocations[key] = WatchedRelocation(location: location, generation: generation, identity: observed)
+        }
+        guard !Task.isCancelled, recoveryTask == nil else { return }
+        let indexedPaths = Set(locations.compactMap { location in
+            location.lastKnownPath.map { location.sourceID + "|" + $0 }
+        })
+        watchedRelocations = watchedRelocations.filter {
+            indexedPaths.contains($0.key) &&
+            sourceScopeGenerations[$0.value.location.sourceID] == $0.value.generation
+        }
+        relocationConflictPaths.formIntersection(watchedRelocations.keys)
+    }
+
+    private func processIndexedRelocations() async throws {
+        let clock = ContinuousClock()
+        // Do not drain across awaits: maintenance can be canceled/restarted and
+        // the second half of a rename can arrive in a later callback.
+        for (key, old) in Array(watchedRelocations) {
+            try Task.checkCancellation()
+            let sourceID = old.location.sourceID
+            guard let path = old.location.lastKnownPath,
+                  sourceScopeGenerations[sourceID] == old.generation,
+                  sourceScansDescendants[sourceID] == false,
+                  let root = sourceURLs[sourceID], root.hasDirectoryPath,
+                  let scope = resources[sourceID],
+                  let watch = sourceWatchPaths[sourceID], let epoch = watcherGenerations[watch],
+                  let hints = relocationEvents[watch]?.retained(at: clock.now),
+                  !hints.contains(where: \.invalidatesLivePairing)
+            else { continue }
+            let file = URL(fileURLWithPath: path)
+            if hints.contains(where: { $0.path == path && $0.fileID != nil && $0.fileID != old.identity.inode }),
+               let current = try? await relocationReadBudget.run(retaining: [scope], {
+                   IndexedFileIdentity.read(at: file, inside: root)
+               }), current != old.identity, watcherGenerations[watch] == epoch,
+               sourceScopeGenerations[sourceID] == old.generation {
+                try Task.checkCancellation()
+                // Positive evidence of replacement in this session. Keep the
+                // database intact and let the existing explicit Relink UI handle it.
+                relocationConflictPaths.insert(key)
+                continue
+            }
+            guard hints.contains(where: { $0.path == path && $0.fileID == old.identity.inode && $0.isDirectFileRename })
+            else { continue }
+            let destination: URL?
+            do {
+                destination = try await relocationReadBudget.run(retaining: [scope]) {
+                    guard IndexedFileIdentity.oldEntryAbsentForLiveMove(at: file, inside: root) else { return nil }
+                    return IndexedMoveHint.destination(events: hints, oldPath: path, identity: old.identity, root: root) {
+                        IndexedFileIdentity.read(at: $0, inside: root)
+                    }
+                }
+            } catch is CancellationError { throw CancellationError() }
+            catch { continue }
+            guard let target = destination, sourceScopeGenerations[sourceID] == old.generation,
+                  watcherGenerations[watch] == epoch,
+                  let latestHints = relocationEvents[watch]?.retained(at: clock.now),
+                  IndexedMoveHint.destination(events: latestHints, oldPath: path, identity: old.identity,
+                      root: root, currentIdentity: { $0 == target ? old.identity : nil }) == target,
+                  let relative = RecoveryScope.recordedRelativePath(file: target, inside: root, checkResolvedPaths: false)
+            else { continue }
+            // Last recheck before the database actor. This is best effort across
+            // the filesystem/SQLite boundary; a later event must be checked again.
+            let stillExact: Bool
+            do {
+                stillExact = try await relocationReadBudget.run(retaining: [scope]) {
+                    IndexedFileIdentity.oldEntryAbsentForLiveMove(at: file, inside: root) &&
+                    IndexedFileIdentity.read(at: target, inside: root) == old.identity
+                }
+            } catch is CancellationError { throw CancellationError() }
+            catch { continue }
+            try Task.checkCancellation()
+            guard stillExact, sourceScopeGenerations[sourceID] == old.generation,
+                  watcherGenerations[watch] == epoch,
+                  let finalHints = relocationEvents[watch]?.retained(at: clock.now),
+                  IndexedMoveHint.destination(events: finalHints, oldPath: path, identity: old.identity,
+                      root: root, currentIdentity: { $0 == target ? old.identity : nil }) == target else { continue }
+            if try await database.moveIndexedVideoLocation(old.location, to: target.path,
+                    relativePath: relative, identity: old.identity) {
+                watchedRelocations.removeValue(forKey: key)
+                relocationConflictPaths.remove(key)
+                watchedRelocations[sourceID + "|" + target.path] = WatchedRelocation(
+                    location: VideoLocationRecord(videoID: old.location.videoID, sourceID: sourceID,
+                        relativePath: relative, fallbackPathKey: fallbackPathKey(for: target),
+                        volumeIdentifier: old.location.volumeIdentifier, lastKnownPath: target.path),
+                    generation: old.generation, identity: old.identity)
+            }
+            // A rename prefix, dropped batch or provider ambiguity never writes
+            // an unavailable/missing state; the original recorded path is preserved.
+        }
+    }
+
     private func scheduleMaintenance() {
-        guard !isRestoringLibrary, recoveryTask == nil else { return }
+        guard !isRestoringLibrary,
+              maintenanceReplay.shouldSchedule(recovering: recoveryTask != nil) else { return }
         maintenanceDebounceTask?.cancel()
         maintenanceDebounceTask = Task { [weak self] in
             do {
                 try await Task.sleep(nanoseconds: 1_000_000_000)
-                self?.startMaintenance()
+                guard let self else { return }
+                maintenanceDebounceTask = nil
+                startMaintenance()
             } catch {}
         }
     }
 
     private func startMaintenance() {
-        guard !isRestoringLibrary, recoveryTask == nil, importTask == nil, relinkTask == nil else { return }
+        guard !isRestoringLibrary,
+              maintenanceReplay.shouldSchedule(recovering: recoveryTask != nil),
+              importTask == nil, relinkTask == nil else { return }
         maintenanceTask?.cancel()
         let discovery = self.discovery
         let database = self.database
+        let generation = UUID()
+        maintenanceGeneration = generation
         maintenanceTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            defer {
+                if maintenanceGeneration == generation {
+                    maintenanceGeneration = nil
+                    maintenanceTask = nil
+                }
+            }
             do {
-                guard let self else { return }
                 await refreshSourceURLsFromBookmarks()
+                try await processIndexedRelocations()
                 try await refreshResolvedVideoURLs()
                 try await restoreAccessibleProtectedVideos()
                 try await refreshResolvedVideoURLs()
@@ -2307,6 +2594,8 @@ final class LibraryAccessCoordinator {
                 var discoveredVideosBySource: [String: [DiscoveredVideo]] = [:]
                 for sourceID in sources.keys.sorted() {
                     guard let url = sources[sourceID] else { continue }
+                    // A recovered ancestor is an access grant, not opt-in to enumerate its tree.
+                    guard sourceScansDescendants[sourceID] == true || !url.hasDirectoryPath else { continue }
                     do {
                         let discoveryTask = Task.detached(priority: .utility) {
                             try discovery.discoverVideoResult(at: url)
@@ -2401,10 +2690,19 @@ final class LibraryAccessCoordinator {
         let activeSourceIDs = Set(resources.keys)
         let authorizedSourceIDs = Set(sourceBookmarks.keys)
         let displayNames = sourceDisplayNames
+        let conflicts = relocationConflictPaths
+        let usableLocations = locations.filter { location in
+            guard let path = location.lastKnownPath else { return true }
+            return !conflicts.contains(location.sourceID + "|" + path)
+        }
+        let usableCloudLocations = allLocations.filter { location in
+            guard let path = location.lastKnownPath else { return true }
+            return !conflicts.contains(location.sourceID + "|" + path)
+        }
         let resolution = await Task.detached(priority: .utility) {
             Self.resolveVideoAccess(
-                locations: locations,
-                cloudCandidateLocations: allLocations,
+                locations: usableLocations,
+                cloudCandidateLocations: usableCloudLocations,
                 sourceURLs: knownURLs,
                 activeSourceIDs: activeSourceIDs,
                 authorizedSourceIDs: authorizedSourceIDs,
@@ -2422,6 +2720,13 @@ final class LibraryAccessCoordinator {
         try Task.checkCancellation()
         resolvedVideoURLs = resolution.resolvedURLs
         cloudPlaceholderIDs = resolution.cloudPlaceholderIDs
+        relocationConflictVideoIDs = Set(locations.compactMap { location in
+            guard resolution.resolvedURLs[location.videoID] == nil,
+                  !resolution.cloudPlaceholderIDs.contains(location.videoID),
+                  let path = location.lastKnownPath,
+                  conflicts.contains(location.sourceID + "|" + path) else { return nil }
+            return location.videoID
+        })
         let lastKnownResolution = Self.resolveLastKnownVideoPaths(
             locations: allLocations,
             sourceURLs: knownURLs
@@ -2432,8 +2737,8 @@ final class LibraryAccessCoordinator {
         accessLostSourceNameByVideoID = resolution.accessLostSourceNames
         reachableSourceIDs = resolution.reachableSourceIDs
         if recoveryTask == nil {
-            let readyVideos = deferredMediaVideos.takeReady(resolvedURLs: resolvedVideoURLs)
-            if !readyVideos.isEmpty { startMediaProcessing(videos: readyVideos) }
+            scheduleIndexedRelocationCapture(locations: locations, resolved: resolvedVideoURLs, cloud: cloudPlaceholderIDs)
+            drainReadyDeferredMedia()
         }
     }
 
@@ -2741,10 +3046,28 @@ final class LibraryAccessCoordinator {
         }.standardizedFileURL
     }
 
-    private func startMediaProcessing(videos: [VideoRecord]) {
+    private func drainReadyDeferredMedia() {
+        let readyVideos = deferredMediaVideos.takeReady(
+            resolvedURLs: resolvedVideoURLs, excluding: recoveredMediaExclusions.blockedIDs
+        )
+        if !readyVideos.isEmpty { startMediaProcessing(videos: readyVideos) }
+    }
+
+    private func holdProvisionalMedia(_ video: VideoRecord) {
+        if recoveredMediaExclusions.isProvisional(video.id) { deferredMediaVideos.hold(video) }
+    }
+
+    private func excludeRecoveredMedia(id: String) {
+        recoveredMediaExclusions.recordRestored(id)
+        pendingMediaVideos.removeValue(forKey: id)
+        deferredMediaVideos.remove(id: id)
+    }
+
+    private func startMediaProcessing(videos: [VideoRecord], explicitIntent: Bool = false) {
         guard recoveryTask == nil else { return }
         guard let mediaService else { return }
         for video in videos {
+            guard recoveredMediaExclusions.admit(video.id, explicitIntent: explicitIntent) else { continue }
             if resolvedVideoURLs[video.id] != nil {
                 deferredMediaVideos.remove(id: video.id)
                 pendingMediaVideos[video.id] = video
@@ -2770,24 +3093,43 @@ final class LibraryAccessCoordinator {
                 var generatedThumbnailID: String?
                 do {
                     try Task.checkCancellation()
+                    guard recoveredMediaExclusions.permitsAutomaticWork(queued.id) else {
+                        holdProvisionalMedia(queued)
+                        continue
+                    }
                     guard let fileURL = resolvedVideoURLs[queued.id] else {
                         deferredMediaVideos.hold(queued)
                         continue
                     }
                     let mediaSnapshot = try await database.mediaProcessingSnapshot(videoID: queued.id,
                             pathKey: fallbackPathKey(for: fileURL))
-                    guard let snapshot = mediaSnapshot,
-                          await mediaService.needsProcessing(snapshot.video) else { continue }
+                    guard recoveredMediaExclusions.permitsAutomaticWork(queued.id) else {
+                        holdProvisionalMedia(queued)
+                        continue
+                    }
+                    guard let snapshot = mediaSnapshot, await mediaService.needsProcessing(snapshot.video) else { continue }
+                    guard recoveredMediaExclusions.permitsAutomaticWork(queued.id) else {
+                        holdProvisionalMedia(queued)
+                        continue
+                    }
                     // A selectable URL can still point at an iCloud/File Provider placeholder.
                     guard await mediaService.hasLocalMedia(at: fileURL) else { continue }
+                    guard recoveredMediaExclusions.permitsAutomaticWork(queued.id) else {
+                        holdProvisionalMedia(queued)
+                        continue
+                    }
                     let video = snapshot.video
                     let result = await mediaService.process(video: video, fileURL: fileURL)
                     generatedThumbnailID = result.generatedThumbnailID
                     try Task.checkCancellation()
                     let stillSamePath = resolvedVideoURLs[video.id]?.standardizedFileURL == fileURL.standardizedFileURL
                     let updated: VideoRecord?
-                    if stillSamePath { updated = try await database.commitMediaProcessing(result, expected: snapshot) }
-                    else { updated = nil }
+                    if stillSamePath && recoveredMediaExclusions.permitsAutomaticWork(queued.id) {
+                        updated = try await database.commitMediaProcessing(result, expected: snapshot)
+                    } else {
+                        holdProvisionalMedia(queued)
+                        updated = nil
+                    }
                     if let updated {
                         generatedThumbnailID = nil // The database now owns this artifact.
                         onVideoChanged?(presentedVideo(updated))
@@ -2807,7 +3149,8 @@ final class LibraryAccessCoordinator {
                         // Requeue only a changed, still accessible snapshot, never a removed/protected record.
                         if let latestURL = resolvedVideoURLs[video.id],
                            let latest = try await database.mediaProcessingSnapshot(videoID: video.id,
-                             pathKey: fallbackPathKey(for: latestURL)), latest != snapshot {
+                             pathKey: fallbackPathKey(for: latestURL)), latest != snapshot,
+                           recoveredMediaExclusions.permitsAutomaticWork(video.id) {
                             pendingMediaVideos[video.id] = latest.video
                         }
                     }
@@ -2990,6 +3333,7 @@ final class LibraryAccessCoordinator {
         let unavailableVideoIDs = missingVideoIDs
             .union(accessLostSourceNameByVideoID.keys)
             .union(offlineSourceNameByVideoID.keys)
+            .union(relocationConflictVideoIDs)
         onSidebarFilterCountsChanged?(SidebarFilterCounts(
             all: databaseCounts.all,
             untagged: databaseCounts.untagged,
@@ -3017,6 +3361,9 @@ final class LibraryAccessCoordinator {
 
     private func presentedVideo(_ video: VideoRecord) -> VideoRecord {
         let cloud = cloudPlaceholderIDs.contains(video.id)
+        if !cloud, relocationConflictVideoIDs.contains(video.id) {
+            return video.withAvailability(.unavailable, unavailableReason: .missingFromKnownLocation)
+        }
         if !cloud, accessLostSourceNameByVideoID[video.id] != nil {
             return video.withAvailability(.unavailable, unavailableReason: .accessLost)
         }
@@ -3032,11 +3379,51 @@ struct RecoveryStatus: Equatable {
     var running = false
     var total = 0
     var completed = 0
+    var deferred = 0
     var showEntry = false
     var canStart = true
     var message: String?
 }
 
+
+// Recovery is not an intent to read video bytes. Only subsequent explicit
+// import/relink of this exact item lifts its in-session exclusion.
+struct RecoveryMediaExclusions {
+    private var restoredIDs: Set<String> = []
+    private var provisionalIDs: Set<String> = []
+
+    mutating func beginRecovery(_ ids: [String]) { provisionalIDs = Set(ids) }
+    mutating func finishRecovery() { provisionalIDs.removeAll() }
+    private var automaticCounts: [String: Int] = [:]
+
+    mutating func beginAutomaticRecovery(_ id: String) { automaticCounts[id, default: 0] += 1 }
+    mutating func finishAutomaticRecovery(_ id: String) {
+        if let count = automaticCounts[id], count > 1 { automaticCounts[id] = count - 1 }
+        else { automaticCounts.removeValue(forKey: id) }
+    }
+
+    var blockedIDs: Set<String> { restoredIDs.union(provisionalIDs).union(automaticCounts.keys) }
+    func isProvisional(_ id: String) -> Bool {
+        !restoredIDs.contains(id) && (provisionalIDs.contains(id) || automaticCounts[id] != nil)
+    }
+
+    mutating func recordRestored(_ id: String) { restoredIDs.insert(id) }
+
+    func permitsAutomaticWork(_ id: String) -> Bool { !restoredIDs.contains(id) && !isProvisional(id) }
+
+    mutating func admit(_ id: String, explicitIntent: Bool) -> Bool {
+        if explicitIntent { restoredIDs.remove(id) }
+        return permitsAutomaticWork(id)
+    }
+}
+
+enum RelocationRelinkEligibility {
+    static func allowsAvailableRecord(reason: VideoRecord.UnavailableReason?, hasRuntimeConflict: Bool,
+                                      hasUsableLocation: Bool) -> Bool {
+        reason == .accessLost ||
+            (reason == .missingFromKnownLocation && hasRuntimeConflict && !hasUsableLocation)
+    }
+}
 
 // Record only unresolved work; permission and identity are rechecked by the worker once resolved.
 struct DeferredMediaVideos {
@@ -3046,8 +3433,8 @@ struct DeferredMediaVideos {
     mutating func remove(id: String) { videos.removeValue(forKey: id) }
     mutating func removeAll() { videos.removeAll() }
 
-    mutating func takeReady(resolvedURLs: [String: URL]) -> [VideoRecord] {
-        let ids = videos.keys.filter { resolvedURLs[$0] != nil }
+    mutating func takeReady(resolvedURLs: [String: URL], excluding: Set<String> = []) -> [VideoRecord] {
+        let ids = videos.keys.filter { resolvedURLs[$0] != nil && !excluding.contains($0) }
         return ids.compactMap { videos.removeValue(forKey: $0) }
     }
 }
