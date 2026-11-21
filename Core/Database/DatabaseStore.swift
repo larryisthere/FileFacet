@@ -1590,6 +1590,61 @@ actor DatabaseStore {
         } catch { try? execute("ROLLBACK"); throw error }
     }
 
+    // Where an exact recorded original was confirmed inside a fresh scope,
+    // restore only access. This is deliberately not the relocation/relink API
+    // and must never refresh identity, content fingerprint, metadata or tags.
+    func restoreOriginalPathAccess(
+        videoID: String, recordedPath: String, relativePath: String, toSourceID: String,
+        authorization: SourceAuthorizationRecord? = nil, verifiedAt: Date = Date()
+    ) throws -> Bool {
+        try prepareIfNeeded()
+        try Task.checkCancellation()
+        try execute("BEGIN IMMEDIATE")
+        do {
+            guard let video = try fetchVideo(id: videoID), recordedPath.hasPrefix("/"), !relativePath.isEmpty,
+                  !relativePath.hasPrefix("/"), !relativePath.split(separator: "/").contains(".."),
+                  recordedPath.hasSuffix("/" + relativePath),
+                  authorization == nil || (authorization?.id == toSourceID && authorization?.libraryID == video.libraryID)
+            else { try execute("ROLLBACK"); return false }
+            let original = try prepare("SELECT 1 FROM video_locations WHERE video_id = ? AND last_known_path = ? LIMIT 1")
+            defer { sqlite3_finalize(original) }
+            bindText(videoID, to: 1, in: original)
+            bindText(recordedPath, to: 2, in: original)
+            guard sqlite3_step(original) == SQLITE_ROW else { try execute("ROLLBACK"); return false }
+            if let authorization { try saveSourceAuthorization(authorization) }
+            let repair = try prepare("""
+                INSERT INTO video_locations
+                (video_id, source_id, relative_path, fallback_path_key, last_known_path,
+                 last_verified_at, is_available, requires_recovery_verification)
+                VALUES (?, ?, ?, ?, ?, ?, 1, 0)
+                ON CONFLICT(source_id, relative_path) DO UPDATE SET
+                last_verified_at = excluded.last_verified_at, is_available = 1,
+                requires_recovery_verification = 0
+                WHERE video_locations.video_id = excluded.video_id
+                    AND video_locations.last_known_path = excluded.last_known_path
+                """)
+            defer { sqlite3_finalize(repair) }
+            bindText(videoID, to: 1, in: repair)
+            bindText(toSourceID, to: 2, in: repair)
+            bindText(relativePath, to: 3, in: repair)
+            bindData(fallbackPathKey(for: URL(fileURLWithPath: recordedPath)), to: 4, in: repair)
+            bindText(recordedPath, to: 5, in: repair)
+            sqlite3_bind_double(repair, 6, verifiedAt.timeIntervalSince1970)
+            guard sqlite3_step(repair) == SQLITE_DONE else { throw DatabaseError.statementFailed }
+            guard sqlite3_changes(connection.handle) == 1 else { try execute("ROLLBACK"); return false }
+            let available = try prepare("UPDATE videos SET availability_status = 'available', invalidated_at = NULL WHERE id = ?")
+            defer { sqlite3_finalize(available) }
+            bindText(videoID, to: 1, in: available)
+            guard sqlite3_step(available) == SQLITE_DONE else { throw DatabaseError.statementFailed }
+            try Task.checkCancellation()
+            try execute("COMMIT")
+            return true
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
     func relinkVideo(
         id videoID: String,
         sourceID: String,

@@ -1061,6 +1061,41 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertNil(restored.accessPresentation.symbol)
     }
 
+    func testOriginalPathAccessPreservesFingerprintAndMakesNoDuplicate() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "old", name: "Old"))
+        let path = "/synthetic/root/nested/test.m4v"
+        let fingerprint = Data(repeating: 7, count: 32)
+        let input = DiscoveredVideo(relativePath: "test.m4v", filename: "test.m4v", fileExtension: "m4v",
+            fileSize: 100, creationDate: nil, modificationDate: nil, volumeIdentifier: nil,
+            fileResourceIdentifier: nil, contentFingerprint: fingerprint, finderTags: [], lastKnownPath: path)
+        let imported = try await store.importVideos(sourceID: "old", discoveredVideos: [input])
+        let record = try XCTUnwrap(imported.importedVideos.first)
+        _ = try await store.updateMediaInfo(videoID: record.id, result: MediaProcessingResult(
+            duration: nil, width: 64, height: 64, thumbnailID: "retained",
+            metadataStatus: .completed, thumbnailStatus: .completed, contentFingerprint: fingerprint))
+        try await store.protectRecoveryLocations(videoIDs: [record.id])
+        let grant = makeSource(id: "new", name: "Ancestor")
+        let wrongPath = try await store.restoreOriginalPathAccess(videoID: record.id, recordedPath: "/other/test.m4v",
+            relativePath: "test.m4v", toSourceID: "new", authorization: grant)
+        XCTAssertFalse(wrongPath)
+        for _ in 0...1 {
+            let restored = try await store.restoreOriginalPathAccess(videoID: record.id, recordedPath: path,
+                relativePath: "nested/test.m4v", toSourceID: "new", authorization: grant)
+            XCTAssertTrue(restored)
+        }
+        let observed = try await store.fetchVideo(id: record.id)
+        XCTAssertEqual(observed?.contentFingerprint, fingerprint)
+        XCTAssertEqual(observed?.thumbnailID, "retained")
+        let locations = try await store.fetchVideoLocations(videoID: record.id)
+        XCTAssertEqual(locations.filter({ !$0.requiresRecoveryVerification }).count, 1)
+        let sources = try await store.fetchSourceAuthorizations()
+        XCTAssertEqual(Set(sources.map(\.id)), ["old", "new"])
+    }
+
     private func makeDiscoveredVideo(
         path: String,
         size: Int64,
