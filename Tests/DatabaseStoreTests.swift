@@ -1096,6 +1096,34 @@ final class DatabaseStoreTests: XCTestCase {
         XCTAssertEqual(Set(sources.map(\.id)), ["old", "new"])
     }
 
+    func testOriginalPathAccessForExactFileScopeRequiresExplicitRoot() async throws {
+        let fixture = try DatabaseFixture()
+        defer { fixture.remove() }
+        let store = try DatabaseStore(databaseURL: fixture.databaseURL)
+        try await store.saveLibrary(makeLibraryRecord())
+        try await store.saveSourceAuthorization(makeSource(id: "file", name: "Single file"))
+        let path = "/synthetic/selected.m4v"
+        let input = DiscoveredVideo(relativePath: "", filename: "selected.m4v", fileExtension: "m4v",
+            fileSize: 0, creationDate: nil, modificationDate: nil, volumeIdentifier: nil,
+            fileResourceIdentifier: nil, finderTags: [], lastKnownPath: path)
+        let imported = try await store.importVideos(sourceID: "file", discoveredVideos: [input])
+        let video = try XCTUnwrap(imported.importedVideos.first)
+        try await store.protectRecoveryLocations(videoIDs: [video.id])
+        let unspecified = try await store.restoreOriginalPathAccess(videoID: video.id, recordedPath: path,
+            relativePath: "", toSourceID: "file")
+        XCTAssertFalse(unspecified)
+        let wrong = try await store.restoreOriginalPathAccess(videoID: video.id, recordedPath: path,
+            relativePath: "", toSourceID: "file", authorizedFilePath: "/other/selected.m4v")
+        XCTAssertFalse(wrong)
+        let exact = try await store.restoreOriginalPathAccess(videoID: video.id, recordedPath: path,
+            relativePath: "", toSourceID: "file", authorizedFilePath: path)
+        XCTAssertTrue(exact)
+        let result = try await store.fetchVideoLocations(videoID: video.id)
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.first?.relativePath, "")
+        XCTAssertEqual(result.first?.requiresRecoveryVerification, false)
+    }
+
     private func makeDiscoveredVideo(
         path: String,
         size: Int64,

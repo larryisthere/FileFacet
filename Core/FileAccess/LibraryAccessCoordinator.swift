@@ -141,9 +141,11 @@ private enum RelinkConfirmationChoice {
 enum OriginalRecoveryExistence {
     // Only vnode metadata: this does not open the file, read its contents,
     // inspect duration, or request that a File Provider materialize it.
-    static func isRecordedFilePresent(_ file: URL, recordedPath: String, inside root: URL) throws -> Bool {
+    static func isRecordedFilePresent(_ file: URL, recordedPath: String, inside root: URL,
+                                      allowExactFileScope: Bool = false) throws -> Bool {
         guard !recordedPath.isEmpty, file.path == recordedPath,
-              RecoveryScope.recordedRelativePath(file: file, inside: root) != nil else { return false }
+              RecoveryScope.recordedRelativePath(file: file, inside: root,
+                  allowExactFileScope: allowExactFileScope) != nil else { return false }
         var info = stat()
         guard lstat(file.path, &info) == 0 else {
             if errno == ENOENT || errno == ENOTDIR { return false }
@@ -287,7 +289,6 @@ final class LibraryAccessCoordinator {
     private var relinkingVideoID: String?
     private var importRevision = 0
     private var isRestoringLibrary = false
-    private var automaticRecoveryObservations: [String: RecoveryFileObservation] = [:]
     private var sourceScopeGenerations: [String: UUID] = [:]
     private var maintenanceTask: Task<Void, Never>?
     private var maintenanceDebounceTask: Task<Void, Never>?
@@ -381,13 +382,9 @@ final class LibraryAccessCoordinator {
             let maintenance = maintenanceTask
             maintenanceDebounceTask?.cancel()
             maintenance?.cancel()
-            let media = mediaTask
-            media?.cancel()
             await maintenance?.value
-            await media?.value
-            mediaTask = nil
-            pendingMediaVideos.removeAll()
-            deferredMediaVideos.removeAll()
+            // Access-only recovery owns no media work. Existing unrelated queued
+            // processing continues, without enqueueing recovered originals.
             var succeeded = 0
             var checked = 0
             var failures = 0
@@ -423,7 +420,7 @@ final class LibraryAccessCoordinator {
                                 source = cached
                             } else {
                                 let current = sourceURLs.filter { id, folder in
-                                    resources[id] != nil && RecoveryScope.recordedRelativePath(file: file, inside: folder, checkResolvedPaths: false) != nil
+                                    resources[id] != nil && RecoveryScope.recordedRelativePath(file: file, inside: folder, checkResolvedPaths: false, allowExactFileScope: true) != nil
                                 }.max { $0.value.pathComponents.count < $1.value.pathComponents.count }
                                 if let current {
                                     root = current.value.standardizedFileURL
@@ -452,16 +449,17 @@ final class LibraryAccessCoordinator {
                                     createdAt: Date(), scansDescendants: sourceScansDescendants[id] ?? false)
                                 localSources[root] = source
                             }
-                            guard let relativePath = RecoveryScope.recordedRelativePath(file: file, inside: root, checkResolvedPaths: false) else {
+                            guard let relativePath = RecoveryScope.recordedRelativePath(file: file, inside: root, checkResolvedPaths: false, allowExactFileScope: true) else {
                                 throw RelinkFlowError.invalidVideo
                             }
                             let scopes = [localResources[root], resources[source.id]].compactMap { $0 }
                             guard try await verifyOriginalRecoveryPath(file: file, recordedPath: path,
-                                root: root, retaining: scopes) else { requiresReview = true; continue }
+                                root: root, retaining: scopes, allowExactFileScope: relativePath.isEmpty) else { requiresReview = true; continue }
                             try Task.checkCancellation()
                             guard try await database.restoreOriginalPathAccess(videoID: video.id,
                                 recordedPath: path, relativePath: relativePath,
-                                toSourceID: source.id, authorization: source) else { requiresReview = true; continue }
+                                toSourceID: source.id, authorizedFilePath: relativePath.isEmpty ? root.path : nil,
+                                authorization: source) else { requiresReview = true; continue }
                             // Count the committed result before any cancellable refresh.
                             succeeded += 1
                             restored = true
@@ -2288,11 +2286,13 @@ final class LibraryAccessCoordinator {
     }
 
     private func verifyOriginalRecoveryPath(file: URL, recordedPath: String, root: URL,
-                                            retaining scopes: [SecurityScopedResource]) async throws -> Bool {
+                                            retaining scopes: [SecurityScopedResource],
+                                            allowExactFileScope: Bool = false) async throws -> Bool {
         guard !scopes.isEmpty else { return false }
         let present = try await recoveryReadBudget.run(retaining: scopes) {
             try Task.checkCancellation()
-            return try OriginalRecoveryExistence.isRecordedFilePresent(file, recordedPath: recordedPath, inside: root)
+            return try OriginalRecoveryExistence.isRecordedFilePresent(file, recordedPath: recordedPath, inside: root,
+                allowExactFileScope: allowExactFileScope)
         }
         try Task.checkCancellation()
         return present
@@ -2318,36 +2318,26 @@ final class LibraryAccessCoordinator {
                 }
                 return left.key < right.key
             }
-            guard let (sourceID, root) = scopes.first, let resource = resources[sourceID],
-                  let generation = sourceScopeGenerations[sourceID] else { continue }
-            let originalFingerprint = video.contentFingerprint ?? Data()
-            let observationResult = try? await recoveryReadBudget.run(retaining: [resource]) { () throws -> RecoveryFileObservation? in
-                return RecoveryFileObservation(sourceID: sourceID, scopeGeneration: generation, path: file.path,
-                    size: nil, modified: nil, originalFingerprint: originalFingerprint)
-            }
-            guard let observation = observationResult, sourceScopeGenerations[sourceID] == generation else { continue }
-            let observationKey = location.videoID + "|" + file.path
-            guard observation.needsVerification(previous: automaticRecoveryObservations[observationKey],
-                authenticatedScope: sourceScopeGenerations[sourceID]) else { continue }
-            let relativePath = file.pathComponents.dropFirst(root.standardizedFileURL.pathComponents.count).joined(separator: "/")
-            do {
-                guard try await verifyOriginalRecoveryPath(file: file, recordedPath: path, root: root,
-                    retaining: [resource]) else {
-                    automaticRecoveryObservations[observationKey] = observation
-                    continue
+            for (sourceID, root) in scopes {
+                guard let resource = resources[sourceID], let generation = sourceScopeGenerations[sourceID],
+                      let relativePath = RecoveryScope.recordedRelativePath(file: file, inside: root,
+                        checkResolvedPaths: false, allowExactFileScope: true) else { continue }
+                do {
+                    // Do not memoize absence: a later normal availability pass may see the vnode again.
+                    guard try await verifyOriginalRecoveryPath(file: file, recordedPath: path, root: root,
+                        retaining: [resource], allowExactFileScope: relativePath.isEmpty) else { continue }
+                    try Task.checkCancellation()
+                    guard sourceScopeGenerations[sourceID] == generation else { continue }
+                    guard try await database.restoreOriginalPathAccess(videoID: video.id, recordedPath: path,
+                        relativePath: relativePath, toSourceID: sourceID,
+                        authorizedFilePath: relativePath.isEmpty ? root.path : nil) else { continue }
+                    restoredIDs.insert(video.id)
+                    break
+                } catch is CancellationError { throw CancellationError() }
+                catch is RecoveryReadDeferral { continue }
+                catch {
+                    AppLogger.library.notice("Automatic recovery left a video pending access")
                 }
-                try Task.checkCancellation()
-                // Scope might have been revoked or replaced during the off-main verification.
-                guard sourceScopeGenerations[sourceID] == generation else { continue }
-                guard try await database.restoreOriginalPathAccess(videoID: video.id, recordedPath: path,
-                    relativePath: relativePath, toSourceID: sourceID) else { continue }
-                automaticRecoveryObservations.removeValue(forKey: observationKey)
-                restoredIDs.insert(video.id)
-            } catch is CancellationError { throw CancellationError() }
-            catch is RecoveryReadDeferral { continue }
-            catch {
-                automaticRecoveryObservations[observationKey] = observation
-                AppLogger.library.notice("Automatic recovery left a video pending verification")
             }
         }
     }

@@ -154,5 +154,14 @@ final class RecoveryReadBudgetTests: XCTestCase {
         XCTAssertFalse(try OriginalRecoveryExistence.isRecordedFilePresent(siblingFile, recordedPath: siblingFile.path, inside: allowed))
         let missing = nested.appendingPathComponent("absent.mov")
         XCTAssertFalse(try OriginalRecoveryExistence.isRecordedFilePresent(missing, recordedPath: missing.path, inside: allowed))
+        try Data().write(to: missing)
+        XCTAssertTrue(try OriginalRecoveryExistence.isRecordedFilePresent(missing, recordedPath: missing.path, inside: allowed))
+        XCTAssertNil(RecoveryScope.recordedRelativePath(file: directFile, inside: directFile))
+        XCTAssertEqual(RecoveryScope.recordedRelativePath(file: directFile, inside: directFile,
+            allowExactFileScope: true), "")
+        XCTAssertTrue(try OriginalRecoveryExistence.isRecordedFilePresent(directFile, recordedPath: directFile.path,
+            inside: directFile, allowExactFileScope: true))
+        XCTAssertFalse(try OriginalRecoveryExistence.isRecordedFilePresent(nestedFile, recordedPath: nestedFile.path,
+            inside: directFile, allowExactFileScope: true))
     }
 }

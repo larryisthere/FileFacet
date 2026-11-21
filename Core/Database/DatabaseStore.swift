@@ -1595,15 +1595,16 @@ actor DatabaseStore {
     // and must never refresh identity, content fingerprint, metadata or tags.
     func restoreOriginalPathAccess(
         videoID: String, recordedPath: String, relativePath: String, toSourceID: String,
-        authorization: SourceAuthorizationRecord? = nil, verifiedAt: Date = Date()
+        authorizedFilePath: String? = nil, authorization: SourceAuthorizationRecord? = nil, verifiedAt: Date = Date()
     ) throws -> Bool {
         try prepareIfNeeded()
         try Task.checkCancellation()
         try execute("BEGIN IMMEDIATE")
         do {
-            guard let video = try fetchVideo(id: videoID), recordedPath.hasPrefix("/"), !relativePath.isEmpty,
-                  !relativePath.hasPrefix("/"), !relativePath.split(separator: "/").contains(".."),
-                  recordedPath.hasSuffix("/" + relativePath),
+            let matchesScope = relativePath.isEmpty ? authorizedFilePath == recordedPath :
+                authorizedFilePath == nil && !relativePath.hasPrefix("/") &&
+                !relativePath.split(separator: "/").contains("..") && recordedPath.hasSuffix("/" + relativePath)
+            guard let video = try fetchVideo(id: videoID), recordedPath.hasPrefix("/"), matchesScope,
                   authorization == nil || (authorization?.id == toSourceID && authorization?.libraryID == video.libraryID)
             else { try execute("ROLLBACK"); return false }
             let original = try prepare("SELECT 1 FROM video_locations WHERE video_id = ? AND last_known_path = ? LIMIT 1")

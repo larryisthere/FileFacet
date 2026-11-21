@@ -88,13 +88,16 @@ struct LibraryPicker {
 
 // This maps one recorded absolute path, never searches a selected folder.
 enum RecoveryScope {
-    static func recordedRelativePath(file: URL, inside root: URL, checkResolvedPaths: Bool = true) -> String? {
+    static func recordedRelativePath(file: URL, inside root: URL, checkResolvedPaths: Bool = true,
+                                     allowExactFileScope: Bool = false) -> String? {
         guard file.isFileURL, root.isFileURL else { return nil }
         let f = file.standardizedFileURL
         let r = root.standardizedFileURL
         let base = r.pathComponents
         let path = f.pathComponents
-        guard base.count > 1, path.count > base.count, path.starts(with: base) else { return nil }
+        guard base.count > 1, path.starts(with: base),
+              path.count > base.count || (allowExactFileScope && f.path == r.path)
+        else { return nil }
         if checkResolvedPaths {
             guard r.resolvingSymlinksInPath().standardizedFileURL.path == r.path,
                   f.resolvingSymlinksInPath().standardizedFileURL.path == f.path else { return nil }
