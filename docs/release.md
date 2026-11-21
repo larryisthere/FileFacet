@@ -11,7 +11,7 @@ bundle install
 Xcode 当前配置：
 
 - Team：`Q554G4S79A`
-- Bundle ID：`com.larryisthere.video-tag-manager`
+- Bundle ID：`com.larryisthere.tagivy`
 - 版本：由 Xcode 的 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION` 统一提供
 - App Sandbox、用户所选文件只读权限、App-scoped Bookmark 和 Hardened Runtime 保持启用
 
@@ -47,7 +47,7 @@ bundle exec fastlane mac local_release
 4. 将公证凭证存入钥匙串：
 
 ```bash
-xcrun notarytool store-credentials "FileFacet-Notary" \
+xcrun notarytool store-credentials "Tagivy-Notary" \
   --key-id "$APP_STORE_CONNECT_KEY_ID" \
   --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
   --key "$APP_STORE_CONNECT_KEY_PATH"
@@ -59,7 +59,7 @@ xcrun notarytool store-credentials "FileFacet-Notary" \
 
 ```bash
 export DEVELOPER_ID_APPLICATION="Developer ID Application: Your Name (TEAMID)"
-export NOTARYTOOL_KEYCHAIN_PROFILE="FileFacet-Notary"
+export NOTARYTOOL_KEYCHAIN_PROFILE="Tagivy-Notary"
 export GITHUB_REPOSITORY="owner/repository"
 bundle exec fastlane mac github_release
 ```

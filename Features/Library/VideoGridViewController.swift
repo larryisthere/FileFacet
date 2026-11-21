@@ -623,7 +623,7 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
             importStatusView.configureViewExisting(
                 title: String(
                     localized: "unavailable.relink.existing.title",
-                    defaultValue: "The selected file already exists in FileFacet"
+                    defaultValue: "The selected file already exists in Tagivy"
                 ),
                 detail: String(
                     localized: "unavailable.relink.existing.detail",
@@ -1042,13 +1042,13 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
             ? String(
                 format: String(
                     localized: "unavailable.remove.action.multiple",
-                    defaultValue: "Remove %lld Videos from FileFacet…"
+                    defaultValue: "Remove %lld Videos from Tagivy…"
                 ),
                 selected.count
             )
             : String(
                 localized: "unavailable.remove.action",
-                defaultValue: "Remove from FileFacet…"
+                defaultValue: "Remove from Tagivy…"
             )
         let removeItem = NSMenuItem(
             title: removeTitle,
@@ -1073,22 +1073,22 @@ final class VideoGridViewController: NSViewController, NSCollectionViewDataSourc
                 alert.messageText = String(
                     format: String(
                         localized: "unavailable.remove.title.multiple",
-                        defaultValue: "Remove %lld records from FileFacet?"
+                        defaultValue: "Remove %lld records from Tagivy?"
                     ),
                     selected.count
                 )
                 alert.informativeText = String(
                     localized: "unavailable.remove.detail.multiple",
-                    defaultValue: "The original tags and media information for these records will be deleted from FileFacet. This will not affect original files that may exist on your Mac."
+                    defaultValue: "The original tags and media information for these records will be deleted from Tagivy. This will not affect original files that may exist on your Mac."
                 )
             } else {
                 alert.messageText = String(
                     localized: "unavailable.remove.title",
-                    defaultValue: "Remove this record from FileFacet?"
+                    defaultValue: "Remove this record from Tagivy?"
                 )
                 alert.informativeText = String(
                     localized: "unavailable.remove.detail",
-                    defaultValue: "The original tags and media information will be deleted from FileFacet. This will not affect the original file that may exist on your Mac."
+                    defaultValue: "The original tags and media information will be deleted from Tagivy. This will not affect the original file that may exist on your Mac."
                 )
             }
         } else {

@@ -229,7 +229,7 @@
     "scan.empty.title" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No New Videos Found" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未发现新视频" } } } },
     "scan.error.failed" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The folders could not be scanned." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法扫描这些文件夹。" } } } },
     "scan.error.noFolderAccess" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected folders could not be checked." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法检查所选文件夹。" } } } },
-    "scan.folderPicker.message" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "FileFacet will look for new videos in these folders and their subfolders." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "FileFacet 将检查这些文件夹及其子文件夹中的新视频。" } } } },
+    "scan.folderPicker.message" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Tagivy will look for new videos in these folders and their subfolders." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Tagivy 将检查这些文件夹及其子文件夹中的新视频。" } } } },
     "scan.folderPicker.prompt" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择" } } } },
     "scan.folderPicker.title" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose Folders to Scan" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择需要扫描的文件夹" } } } },
     "scan.folderSetup.failed.detail" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The previous scan results are unchanged." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "原有扫描结果保持不变。" } } } },
@@ -245,7 +245,7 @@
     "scan.import.count.one" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Import 1 Video" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导入 1 个视频" } } } },
     "scan.import.failed.detail" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected videos remain in the scan results." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "所选视频仍保留在扫描结果中。" } } } },
     "scan.import.failed.title" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Could Not Import Selected Videos" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法导入所选视频" } } } },
-    "scan.import.progress.detail" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Saving the selected videos to FileFacet…" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在将所选视频保存到 FileFacet…" } } } },
+    "scan.import.progress.detail" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Saving the selected videos to Tagivy…" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在将所选视频保存到 Tagivy…" } } } },
     "scan.import.progress.title" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Importing Selected Videos" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在导入所选视频" } } } },
     "scan.import.selected" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Import Selected" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导入所选视频" } } } },
     "scan.inspector.empty" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Select a video to view its file information." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择视频后查看文件信息。" } } } },
@@ -282,7 +282,7 @@
     "unavailable.relink.checking" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Checking the selected file…" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在核对所选文件…" } } } },
     "unavailable.relink.confirm" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Relink" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新定位" } } } },
     "unavailable.relink.confirmation.connect" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect Anyway" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "仍然连接" } } } },
-    "unavailable.relink.confirmation.detail" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "FileFacet cannot confirm that these are the same video. Review the differences below." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "FileFacet 无法确认它们是同一个视频。请核对以下差异。" } } } },
+    "unavailable.relink.confirmation.detail" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Tagivy cannot confirm that these are the same video. Review the differences below." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Tagivy 无法确认它们是同一个视频。请核对以下差异。" } } } },
     "unavailable.relink.confirmation.duration" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Duration" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "时长" } } } },
     "unavailable.relink.confirmation.field" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Field" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "项目" } } } },
     "unavailable.relink.confirmation.filename" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Filename" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "文件名" } } } },
@@ -296,7 +296,7 @@
     "unavailable.relink.confirmation.title" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected file does not completely match the original record" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "所选文件与原记录不完全一致" } } } },
     "unavailable.relink.confirmation.unknown" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Unknown" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未知" } } } },
     "unavailable.relink.existing.detail" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The current unavailable record was not changed." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前失联记录保持不变。" } } } },
-    "unavailable.relink.existing.title" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected file already exists in FileFacet" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "所选文件已存在于 FileFacet" } } } },
+    "unavailable.relink.existing.title" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected file already exists in Tagivy" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "所选文件已存在于 Tagivy" } } } },
     "unavailable.relink.existing.view" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "View Existing Video" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看已有视频" } } } },
     "unavailable.relink.failed" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Could Not Relink Original" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法重新定位原文件" } } } },
     "unavailable.relink.fileChanged" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected file changed while it was being reviewed. Choose it again and retry." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "所选文件在核对期间发生了变化。请重新选择后重试。" } } } },
@@ -305,12 +305,12 @@
     "unavailable.relink.succeeded" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Relinked" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已重新连接" } } } },
     "unavailable.relink.succeeded.detail" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "“%@” is accessible again" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "“%@”已恢复访问" } } } },
     "unavailable.relink.title" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Relink %@" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新定位 %@" } } } },
-    "unavailable.remove.action" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove from FileFacet…" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从 FileFacet 移除…" } } } },
-    "unavailable.remove.action.multiple" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove %lld Videos from FileFacet…" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从 FileFacet 移除 %lld 个视频…" } } } },
-    "unavailable.remove.detail" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The original tags and media information will be deleted from FileFacet. This will not affect the original file that may exist on your Mac." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "原有标签和媒体信息将从 FileFacet 删除。此操作不会影响 Mac 上可能存在的原文件。" } } } },
-    "unavailable.remove.detail.multiple" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The original tags and media information for these records will be deleted from FileFacet. This will not affect original files that may exist on your Mac." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这些记录的原有标签和媒体信息将从 FileFacet 删除。此操作不会影响 Mac 上可能存在的原文件。" } } } },
-    "unavailable.remove.title" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove this record from FileFacet?" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从 FileFacet 移除这条记录？" } } } },
-    "unavailable.remove.title.multiple" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove %lld records from FileFacet?" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从 FileFacet 移除 %lld 条记录？" } } } },
+    "unavailable.remove.action" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove from Tagivy…" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从 Tagivy 移除…" } } } },
+    "unavailable.remove.action.multiple" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove %lld Videos from Tagivy…" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从 Tagivy 移除 %lld 个视频…" } } } },
+    "unavailable.remove.detail" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The original tags and media information will be deleted from Tagivy. This will not affect the original file that may exist on your Mac." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "原有标签和媒体信息将从 Tagivy 删除。此操作不会影响 Mac 上可能存在的原文件。" } } } },
+    "unavailable.remove.detail.multiple" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "The original tags and media information for these records will be deleted from Tagivy. This will not affect original files that may exist on your Mac." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这些记录的原有标签和媒体信息将从 Tagivy 删除。此操作不会影响 Mac 上可能存在的原文件。" } } } },
+    "unavailable.remove.title" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove this record from Tagivy?" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从 Tagivy 移除这条记录？" } } } },
+    "unavailable.remove.title.multiple" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove %lld records from Tagivy?" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从 Tagivy 移除 %lld 条记录？" } } } },
     "unavailable.resolve.empty.detail" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Select a video to see its status and available actions." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选中视频后，这里会显示当前状态和可执行操作。" } } } },
     "unavailable.resolve.empty.title" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Select a video to resolve" } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择一个视频进行处理" } } } },
     "unavailable.resolve.offline.detail" : { "extractionState" : "manual", "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "It will restore automatically after the device is connected. Original tags and media information will be preserved." } }, "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接设备后会自动恢复。原有标签和媒体信息会保留" } } } },
@@ -1792,13 +1792,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The app database is temporarily unavailable. Restart FileFacet."
+            "value" : "The app database is temporarily unavailable. Restart Tagivy."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "应用数据库暂时不可用，请重新启动 FileFacet。"
+            "value" : "应用数据库暂时不可用，请重新启动 Tagivy。"
           }
         }
       }
@@ -1843,13 +1843,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The video was removed, but the list could not be refreshed. Restart FileFacet to see the latest library."
+            "value" : "The video was removed, but the list could not be refreshed. Restart Tagivy to see the latest library."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "视频已从资料库移出，但列表未能刷新；重新启动 FileFacet 后会显示最新结果。"
+            "value" : "视频已从资料库移出，但列表未能刷新；重新启动 Tagivy 后会显示最新结果。"
           }
         }
       }
@@ -1877,13 +1877,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The video was restored, but the list could not be refreshed. Restart FileFacet to see the latest library."
+            "value" : "The video was restored, but the list could not be refreshed. Restart Tagivy to see the latest library."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "视频已经恢复，但列表未能刷新；重新启动 FileFacet 后会显示最新结果。"
+            "value" : "视频已经恢复，但列表未能刷新；重新启动 Tagivy 后会显示最新结果。"
           }
         }
       }
@@ -2406,7 +2406,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FileFacet could not retain access to the selected items."
+            "value" : "Tagivy could not retain access to the selected items."
           }
         },
         "zh-Hans" : {
@@ -2994,13 +2994,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld video and its FileFacet tags were restored to the library."
+                  "value" : "%lld video and its Tagivy tags were restored to the library."
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld videos and their FileFacet tags were restored to the library."
+                  "value" : "%lld videos and their Tagivy tags were restored to the library."
                 }
               }
             }
@@ -3026,13 +3026,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The existing video index could not be read. Restart FileFacet."
+            "value" : "The existing video index could not be read. Restart Tagivy."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "无法读取现有视频索引，请重新启动 FileFacet。"
+            "value" : "无法读取现有视频索引，请重新启动 Tagivy。"
           }
         }
       }
@@ -5076,13 +5076,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "These videos and their FileFacet tags will be removed from the library. The original videos will remain on your Mac."
+            "value" : "These videos and their Tagivy tags will be removed from the library. The original videos will remain on your Mac."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这些视频会从 FileFacet 及其标签中移除，Mac 上的原视频仍会保留。"
+            "value" : "这些视频会从 Tagivy 及其标签中移除，Mac 上的原视频仍会保留。"
           }
         }
       }
@@ -5093,13 +5093,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This video and its FileFacet tags will be removed from the library. The original video will remain on your Mac."
+            "value" : "This video and its Tagivy tags will be removed from the library. The original video will remain on your Mac."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "视频会从 FileFacet 及其标签中移除，Mac 上的原视频仍会保留。"
+            "value" : "视频会从 Tagivy 及其标签中移除，Mac 上的原视频仍会保留。"
           }
         }
       }

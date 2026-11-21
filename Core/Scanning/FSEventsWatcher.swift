@@ -2,7 +2,7 @@ import CoreServices
 import Foundation
 
 final class FSEventsWatcher: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.larryisthere.video-tag-manager.fsevents", qos: .utility)
+    private let queue = DispatchQueue(label: "com.larryisthere.tagivy.fsevents", qos: .utility)
     private let onChange: @Sendable () -> Void
     private var stream: FSEventStreamRef?
 

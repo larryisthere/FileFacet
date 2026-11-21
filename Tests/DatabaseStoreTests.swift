@@ -1,6 +1,6 @@
 import XCTest
 import SQLite3
-@testable import FileFacet
+@testable import Tagivy
 
 final class DatabaseStoreTests: XCTestCase {
     func testMigrationCreatesCurrentSchema() async throws {

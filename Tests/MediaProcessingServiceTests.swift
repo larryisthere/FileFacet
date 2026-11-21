@@ -1,5 +1,5 @@
 import XCTest
-@testable import FileFacet
+@testable import Tagivy
 
 final class MediaProcessingServiceTests: XCTestCase {
     func testInvalidMediaReturnsFailureWithoutLosingVideoIdentity() async throws {

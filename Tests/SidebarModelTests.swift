@@ -1,5 +1,5 @@
 import XCTest
-@testable import FileFacet
+@testable import Tagivy
 
 final class SidebarModelTests: XCTestCase {
     func testLibraryFiltersPreserveAssociatedTagIdentity() {

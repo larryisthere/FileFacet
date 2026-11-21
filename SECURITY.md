@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are applied to the latest published version of FileFacet.
+Security fixes are applied to the latest published version of Tagivy.
 
 ## Reporting a vulnerability
 

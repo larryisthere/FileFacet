@@ -70,7 +70,7 @@ struct LibraryPicker {
         )
         panel.message = String(
             localized: "scan.folderPicker.message",
-            defaultValue: "FileFacet will look for new videos in these folders and their subfolders."
+            defaultValue: "Tagivy will look for new videos in these folders and their subfolders."
         )
         panel.prompt = String(
             localized: "scan.folderPicker.prompt",
@@ -92,7 +92,7 @@ private final class RecoveryDirectoryValidation: NSObject, NSOpenSavePanelDelega
     func panel(_ sender: Any, validate url: URL) throws {
         guard url.standardizedFileURL == expected.standardizedFileURL,
               url.resolvingSymlinksInPath().standardizedFileURL == expected.standardizedFileURL else {
-            throw NSError(domain: "FileFacet.Recovery", code: 1, userInfo: [
+            throw NSError(domain: "Tagivy.Recovery", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: String(localized: "recovery.permission.exact", defaultValue: "Confirm the original folder shown here.")
             ])
         }
