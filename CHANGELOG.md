@@ -1,8 +1,15 @@
 # Changelog
 
-This file records the user-visible changes in FileFacet releases.
+This file records user-visible changes across Tagivy and earlier FileFacet releases.
 
 ## [Unreleased]
+
+## [1.0.13] - 2026-11-21
+
+### Changed
+
+- The macOS app is now called Tagivy.
+- Tagivy uses a new macOS app identity and starts with a separate local library. Existing FileFacet tags, preferences, thumbnails, and folder permissions are not imported automatically. Keep FileFacet if you still need your previous library.
 
 ## [1.0.12] - 2026-11-21
 
