@@ -65,6 +65,28 @@ final class MediaProcessingServiceTests: XCTestCase {
         XCTAssertTrue(deferred.takeReady(resolvedURLs: [video.id: sourceURL]).isEmpty)
     }
 
+    func testRecoveryReplayDrainsUnrelatedDeferredWorkWithoutEnqueuingRecoveredIDs() {
+        let recovered = makeVideo(id: "recovered")
+        let unrelated = makeVideo(id: "unrelated")
+        let url = URL(fileURLWithPath: "/synthetic/fixture.mp4")
+        let resolved = [recovered.id: url, unrelated.id: url]
+        var deferred = DeferredMediaVideos()
+        var exclusions = RecoveryMediaExclusions()
+        deferred.hold(recovered)
+        deferred.hold(unrelated)
+        exclusions.beginRecovery([recovered.id])
+        XCTAssertEqual(deferred.takeReady(resolvedURLs: resolved, excluding: exclusions.blockedIDs), [unrelated])
+        exclusions.beginAutomaticRecovery(recovered.id)
+        exclusions.recordRestored(recovered.id)
+        exclusions.finishAutomaticRecovery(recovered.id)
+        exclusions.finishRecovery()
+        for _ in 0..<2 {
+            XCTAssertTrue(deferred.takeReady(resolvedURLs: resolved, excluding: exclusions.blockedIDs).isEmpty)
+        }
+        XCTAssertTrue(exclusions.admit(recovered.id, explicitIntent: true))
+        XCTAssertEqual(deferred.takeReady(resolvedURLs: resolved, excluding: exclusions.blockedIDs), [recovered])
+    }
+
     func testFreshAndMissingCachedThumbnailGenerateWithoutPlayback() async throws {
         let fixture = try MediaFixture()
         defer { fixture.remove() }

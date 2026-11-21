@@ -318,6 +318,7 @@ final class LibraryAccessCoordinator {
     private let relocationReadBudget = RecoveryReadBudget()
     private var relocationCaptureTask: Task<Void, Never>?
     private var maintenanceReplay = RecoveryMaintenanceReplay()
+    private var recoveredMediaExclusions = RecoveryMediaExclusions()
     private var maintenanceGeneration: UUID?
     private var maintenanceTask: Task<Void, Never>?
     private var maintenanceDebounceTask: Task<Void, Never>?
@@ -403,6 +404,7 @@ final class LibraryAccessCoordinator {
         guard !isRestoringLibrary, recoveryTask == nil, importTask == nil, relinkTask == nil, scanTask == nil,
               pendingTagMutationCount == 0, !recoveryCandidates.isEmpty else { return }
         let candidates = recoveryCandidates
+        recoveredMediaExclusions.beginRecovery(candidates.map(\.id))
         discardVideoRemovalUndo()
         recoveryStatus = RecoveryStatus(candidateCount: candidates.count, running: true, total: candidates.count)
         publishRecoveryStatus()
@@ -498,6 +500,7 @@ final class LibraryAccessCoordinator {
                                 recordedPath: path, relativePath: relativePath,
                                 toSourceID: source.id, authorizedFilePath: relativePath.isEmpty ? root.path : nil,
                                 authorization: source) else { requiresReview = true; continue }
+                            excludeRecoveredMedia(id: video.id)
                             // Count the committed result before any cancellable refresh.
                             succeeded += 1
                             restored = true
@@ -554,7 +557,9 @@ final class LibraryAccessCoordinator {
             Task { [weak self] in
                 guard let self else { return }
                 try? await refreshResolvedVideoURLs()
+                recoveredMediaExclusions.finishRecovery()
                 recoveryTask = nil
+                drainReadyDeferredMedia()
                 for key in Array(relocationEvents.keys) {
                     relocationEvents[key]?.resumeAfterRecovery(at: ContinuousClock().now)
                 }
@@ -1061,7 +1066,7 @@ final class LibraryAccessCoordinator {
                 onTagAssignmentsChanged?()
                 tagStateRevision += 1
                 invalidateUndoHistoryUnlessVideoRemoval()
-                startMediaProcessing(videos: importedVideos)
+                startMediaProcessing(videos: importedVideos, explicitIntent: true)
             } catch {
                 AppLogger.database.error(
                     "Scanned video import refresh failed with category: \(String(describing: type(of: error)), privacy: .public)"
@@ -1333,7 +1338,7 @@ final class LibraryAccessCoordinator {
                 onTagAssignmentsChanged?()
                 tagStateRevision += 1
                 invalidateUndoHistoryUnlessVideoRemoval()
-                startMediaProcessing(videos: importedVideos)
+                startMediaProcessing(videos: importedVideos, explicitIntent: true)
                 guard importRevision == revision else { return }
                 let uniqueAddedVideoIDs = stableUniqueVideoIDs(addedVideoIDs)
                 let addedVideoIDSet = Set(uniqueAddedVideoIDs)
@@ -1756,7 +1761,11 @@ final class LibraryAccessCoordinator {
                     throw RelinkFlowError.invalidVideo
                 }
 
-                let allowAvailableRecord = video.unavailableReason == .accessLost
+                let allowAvailableRecord = RelocationRelinkEligibility.allowsAvailableRecord(
+                    reason: video.unavailableReason,
+                    hasRuntimeConflict: relocationConflictVideoIDs.contains(video.id),
+                    hasUsableLocation: resolvedVideoURLs[video.id] != nil || cloudPlaceholderIDs.contains(video.id)
+                )
                 if let existingVideoID = try await database.existingRelinkVideoID(
                     id: video.id,
                     sourceID: source.id,
@@ -1855,7 +1864,11 @@ final class LibraryAccessCoordinator {
                     id: video.id,
                     sourceID: source.id,
                     discoveredVideo: discoveredVideo,
-                    allowAvailableRecord: allowAvailableRecord,
+                    allowAvailableRecord: allowAvailableRecord && RelocationRelinkEligibility.allowsAvailableRecord(
+                        reason: video.unavailableReason,
+                        hasRuntimeConflict: relocationConflictVideoIDs.contains(video.id),
+                        hasUsableLocation: resolvedVideoURLs[video.id] != nil || cloudPlaceholderIDs.contains(video.id)
+                    ),
                     allowContentMismatch: allowContentMismatch
                 )
                 resolvedVideoURLs[restored.id] = source.url
@@ -1871,7 +1884,7 @@ final class LibraryAccessCoordinator {
                     )
                     onVideoChanged?(presentedVideo(restored))
                 }
-                startMediaProcessing(videos: [restored])
+                startMediaProcessing(videos: [restored], explicitIntent: true)
                 onOperationStatusChanged?(.relinkSucceeded(filename: restored.filename))
                 return true
             } catch is CancellationError {
@@ -2400,9 +2413,12 @@ final class LibraryAccessCoordinator {
                         retaining: [resource], allowExactFileScope: relativePath.isEmpty) else { continue }
                     try Task.checkCancellation()
                     guard sourceScopeGenerations[sourceID] == generation else { continue }
+                    recoveredMediaExclusions.beginAutomaticRecovery(video.id)
+                    defer { recoveredMediaExclusions.finishAutomaticRecovery(video.id) }
                     guard try await database.restoreOriginalPathAccess(videoID: video.id, recordedPath: path,
                         relativePath: relativePath, toSourceID: sourceID,
                         authorizedFilePath: relativePath.isEmpty ? root.path : nil) else { continue }
+                    excludeRecoveredMedia(id: video.id)
                     restoredIDs.insert(video.id)
                     break
                 } catch is CancellationError { throw CancellationError() }
@@ -2722,8 +2738,7 @@ final class LibraryAccessCoordinator {
         reachableSourceIDs = resolution.reachableSourceIDs
         if recoveryTask == nil {
             scheduleIndexedRelocationCapture(locations: locations, resolved: resolvedVideoURLs, cloud: cloudPlaceholderIDs)
-            let readyVideos = deferredMediaVideos.takeReady(resolvedURLs: resolvedVideoURLs)
-            if !readyVideos.isEmpty { startMediaProcessing(videos: readyVideos) }
+            drainReadyDeferredMedia()
         }
     }
 
@@ -3031,10 +3046,28 @@ final class LibraryAccessCoordinator {
         }.standardizedFileURL
     }
 
-    private func startMediaProcessing(videos: [VideoRecord]) {
+    private func drainReadyDeferredMedia() {
+        let readyVideos = deferredMediaVideos.takeReady(
+            resolvedURLs: resolvedVideoURLs, excluding: recoveredMediaExclusions.blockedIDs
+        )
+        if !readyVideos.isEmpty { startMediaProcessing(videos: readyVideos) }
+    }
+
+    private func holdProvisionalMedia(_ video: VideoRecord) {
+        if recoveredMediaExclusions.isProvisional(video.id) { deferredMediaVideos.hold(video) }
+    }
+
+    private func excludeRecoveredMedia(id: String) {
+        recoveredMediaExclusions.recordRestored(id)
+        pendingMediaVideos.removeValue(forKey: id)
+        deferredMediaVideos.remove(id: id)
+    }
+
+    private func startMediaProcessing(videos: [VideoRecord], explicitIntent: Bool = false) {
         guard recoveryTask == nil else { return }
         guard let mediaService else { return }
         for video in videos {
+            guard recoveredMediaExclusions.admit(video.id, explicitIntent: explicitIntent) else { continue }
             if resolvedVideoURLs[video.id] != nil {
                 deferredMediaVideos.remove(id: video.id)
                 pendingMediaVideos[video.id] = video
@@ -3060,24 +3093,43 @@ final class LibraryAccessCoordinator {
                 var generatedThumbnailID: String?
                 do {
                     try Task.checkCancellation()
+                    guard recoveredMediaExclusions.permitsAutomaticWork(queued.id) else {
+                        holdProvisionalMedia(queued)
+                        continue
+                    }
                     guard let fileURL = resolvedVideoURLs[queued.id] else {
                         deferredMediaVideos.hold(queued)
                         continue
                     }
                     let mediaSnapshot = try await database.mediaProcessingSnapshot(videoID: queued.id,
                             pathKey: fallbackPathKey(for: fileURL))
-                    guard let snapshot = mediaSnapshot,
-                          await mediaService.needsProcessing(snapshot.video) else { continue }
+                    guard recoveredMediaExclusions.permitsAutomaticWork(queued.id) else {
+                        holdProvisionalMedia(queued)
+                        continue
+                    }
+                    guard let snapshot = mediaSnapshot, await mediaService.needsProcessing(snapshot.video) else { continue }
+                    guard recoveredMediaExclusions.permitsAutomaticWork(queued.id) else {
+                        holdProvisionalMedia(queued)
+                        continue
+                    }
                     // A selectable URL can still point at an iCloud/File Provider placeholder.
                     guard await mediaService.hasLocalMedia(at: fileURL) else { continue }
+                    guard recoveredMediaExclusions.permitsAutomaticWork(queued.id) else {
+                        holdProvisionalMedia(queued)
+                        continue
+                    }
                     let video = snapshot.video
                     let result = await mediaService.process(video: video, fileURL: fileURL)
                     generatedThumbnailID = result.generatedThumbnailID
                     try Task.checkCancellation()
                     let stillSamePath = resolvedVideoURLs[video.id]?.standardizedFileURL == fileURL.standardizedFileURL
                     let updated: VideoRecord?
-                    if stillSamePath { updated = try await database.commitMediaProcessing(result, expected: snapshot) }
-                    else { updated = nil }
+                    if stillSamePath && recoveredMediaExclusions.permitsAutomaticWork(queued.id) {
+                        updated = try await database.commitMediaProcessing(result, expected: snapshot)
+                    } else {
+                        holdProvisionalMedia(queued)
+                        updated = nil
+                    }
                     if let updated {
                         generatedThumbnailID = nil // The database now owns this artifact.
                         onVideoChanged?(presentedVideo(updated))
@@ -3097,7 +3149,8 @@ final class LibraryAccessCoordinator {
                         // Requeue only a changed, still accessible snapshot, never a removed/protected record.
                         if let latestURL = resolvedVideoURLs[video.id],
                            let latest = try await database.mediaProcessingSnapshot(videoID: video.id,
-                             pathKey: fallbackPathKey(for: latestURL)), latest != snapshot {
+                             pathKey: fallbackPathKey(for: latestURL)), latest != snapshot,
+                           recoveredMediaExclusions.permitsAutomaticWork(video.id) {
                             pendingMediaVideos[video.id] = latest.video
                         }
                     }
@@ -3333,6 +3386,45 @@ struct RecoveryStatus: Equatable {
 }
 
 
+// Recovery is not an intent to read video bytes. Only subsequent explicit
+// import/relink of this exact item lifts its in-session exclusion.
+struct RecoveryMediaExclusions {
+    private var restoredIDs: Set<String> = []
+    private var provisionalIDs: Set<String> = []
+
+    mutating func beginRecovery(_ ids: [String]) { provisionalIDs = Set(ids) }
+    mutating func finishRecovery() { provisionalIDs.removeAll() }
+    private var automaticCounts: [String: Int] = [:]
+
+    mutating func beginAutomaticRecovery(_ id: String) { automaticCounts[id, default: 0] += 1 }
+    mutating func finishAutomaticRecovery(_ id: String) {
+        if let count = automaticCounts[id], count > 1 { automaticCounts[id] = count - 1 }
+        else { automaticCounts.removeValue(forKey: id) }
+    }
+
+    var blockedIDs: Set<String> { restoredIDs.union(provisionalIDs).union(automaticCounts.keys) }
+    func isProvisional(_ id: String) -> Bool {
+        !restoredIDs.contains(id) && (provisionalIDs.contains(id) || automaticCounts[id] != nil)
+    }
+
+    mutating func recordRestored(_ id: String) { restoredIDs.insert(id) }
+
+    func permitsAutomaticWork(_ id: String) -> Bool { !restoredIDs.contains(id) && !isProvisional(id) }
+
+    mutating func admit(_ id: String, explicitIntent: Bool) -> Bool {
+        if explicitIntent { restoredIDs.remove(id) }
+        return permitsAutomaticWork(id)
+    }
+}
+
+enum RelocationRelinkEligibility {
+    static func allowsAvailableRecord(reason: VideoRecord.UnavailableReason?, hasRuntimeConflict: Bool,
+                                      hasUsableLocation: Bool) -> Bool {
+        reason == .accessLost ||
+            (reason == .missingFromKnownLocation && hasRuntimeConflict && !hasUsableLocation)
+    }
+}
+
 // Record only unresolved work; permission and identity are rechecked by the worker once resolved.
 struct DeferredMediaVideos {
     private var videos: [String: VideoRecord] = [:]
@@ -3341,8 +3433,8 @@ struct DeferredMediaVideos {
     mutating func remove(id: String) { videos.removeValue(forKey: id) }
     mutating func removeAll() { videos.removeAll() }
 
-    mutating func takeReady(resolvedURLs: [String: URL]) -> [VideoRecord] {
-        let ids = videos.keys.filter { resolvedURLs[$0] != nil }
+    mutating func takeReady(resolvedURLs: [String: URL], excluding: Set<String> = []) -> [VideoRecord] {
+        let ids = videos.keys.filter { resolvedURLs[$0] != nil && !excluding.contains($0) }
         return ids.compactMap { videos.removeValue(forKey: $0) }
     }
 }

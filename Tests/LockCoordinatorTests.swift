@@ -181,6 +181,43 @@ final class RecoveryReadBudgetTests: XCTestCase {
         XCTAssertNil(destination(directoryEvents))
     }
 
+    func testRecoveryMediaExclusionSurvivesReplayAndStopUntilExactExplicitIntent() {
+        for restoreBeforeStop in [false, true] {
+            var exclusion = RecoveryMediaExclusions()
+            exclusion.beginRecovery(["recover", "other-candidate"])
+            XCTAssertFalse(exclusion.permitsAutomaticWork("recover"))
+            XCTAssertTrue(exclusion.isProvisional("recover"))
+            XCTAssertTrue(exclusion.permitsAutomaticWork("unrelated"))
+            if restoreBeforeStop { exclusion.recordRestored("recover") }
+            exclusion.finishRecovery()
+            for _ in 0..<2 {
+                XCTAssertEqual(exclusion.admit("recover", explicitIntent: false), !restoreBeforeStop)
+                XCTAssertTrue(exclusion.admit("other-candidate", explicitIntent: false))
+                XCTAssertTrue(exclusion.admit("unrelated", explicitIntent: false))
+            }
+            XCTAssertTrue(exclusion.admit("unrelated", explicitIntent: true))
+            XCTAssertEqual(exclusion.permitsAutomaticWork("recover"), !restoreBeforeStop)
+            XCTAssertTrue(exclusion.admit("recover", explicitIntent: true))
+            XCTAssertTrue(exclusion.permitsAutomaticWork("recover"))
+        }
+    }
+
+    func testRuntimeRelocationConflictAloneCanRelinkAnAvailableDatabaseRecord() {
+        for conflict in [false, true] {
+            for usable in [false, true] {
+                XCTAssertEqual(RelocationRelinkEligibility.allowsAvailableRecord(
+                    reason: .missingFromKnownLocation, hasRuntimeConflict: conflict, hasUsableLocation: usable
+                ), conflict && !usable)
+                XCTAssertFalse(RelocationRelinkEligibility.allowsAvailableRecord(
+                    reason: nil, hasRuntimeConflict: conflict, hasUsableLocation: usable
+                ))
+            }
+        }
+        XCTAssertTrue(RelocationRelinkEligibility.allowsAvailableRecord(
+            reason: .accessLost, hasRuntimeConflict: false, hasUsableLocation: false
+        ))
+    }
+
     func testRecoveryMaintenanceReplayCoalescesRequestsAndStopsWithoutSchedulingExtras() {
         var replay = RecoveryMaintenanceReplay()
         XCTAssertFalse(replay.takePending())
