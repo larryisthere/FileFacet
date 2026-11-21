@@ -155,6 +155,20 @@ enum OriginalRecoveryExistence {
     }
 }
 
+struct RecoveryMaintenanceReplay {
+    private var pending = false
+
+    mutating func shouldSchedule(recovering: Bool) -> Bool {
+        if recovering { pending = true }
+        return !recovering
+    }
+
+    mutating func takePending() -> Bool {
+        defer { pending = false }
+        return pending
+    }
+}
+
 enum RecoveryReadDeferral: Error, Equatable {
     case metadataUnavailable
     case deadlineExceeded
@@ -290,6 +304,8 @@ final class LibraryAccessCoordinator {
     private var importRevision = 0
     private var isRestoringLibrary = false
     private var sourceScopeGenerations: [String: UUID] = [:]
+    private var maintenanceReplay = RecoveryMaintenanceReplay()
+    private var maintenanceGeneration: UUID?
     private var maintenanceTask: Task<Void, Never>?
     private var maintenanceDebounceTask: Task<Void, Never>?
     private var volumeAvailabilityTask: Task<Void, Never>?
@@ -380,7 +396,11 @@ final class LibraryAccessCoordinator {
         recoveryTask = Task { [weak self] in
             guard let self else { return }
             let maintenance = maintenanceTask
+            if maintenanceDebounceTask != nil || maintenanceGeneration != nil {
+                _ = maintenanceReplay.shouldSchedule(recovering: true)
+            }
             maintenanceDebounceTask?.cancel()
+            maintenanceDebounceTask = nil
             maintenance?.cancel()
             await maintenance?.value
             // Access-only recovery owns no media work. Existing unrelated queued
@@ -514,6 +534,7 @@ final class LibraryAccessCoordinator {
                 guard let self else { return }
                 try? await refreshResolvedVideoURLs()
                 recoveryTask = nil
+                if maintenanceReplay.takePending() { scheduleMaintenance() }
                 publishRecoveryStatus()
                 try? await refreshVisibleVideosNow()
                 // Recovery associates existing locations; it does not enqueue content reads.
@@ -2343,24 +2364,37 @@ final class LibraryAccessCoordinator {
     }
 
     private func scheduleMaintenance() {
-        guard !isRestoringLibrary, recoveryTask == nil else { return }
+        guard !isRestoringLibrary,
+              maintenanceReplay.shouldSchedule(recovering: recoveryTask != nil) else { return }
         maintenanceDebounceTask?.cancel()
         maintenanceDebounceTask = Task { [weak self] in
             do {
                 try await Task.sleep(nanoseconds: 1_000_000_000)
-                self?.startMaintenance()
+                guard let self else { return }
+                maintenanceDebounceTask = nil
+                startMaintenance()
             } catch {}
         }
     }
 
     private func startMaintenance() {
-        guard !isRestoringLibrary, recoveryTask == nil, importTask == nil, relinkTask == nil else { return }
+        guard !isRestoringLibrary,
+              maintenanceReplay.shouldSchedule(recovering: recoveryTask != nil),
+              importTask == nil, relinkTask == nil else { return }
         maintenanceTask?.cancel()
         let discovery = self.discovery
         let database = self.database
+        let generation = UUID()
+        maintenanceGeneration = generation
         maintenanceTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            defer {
+                if maintenanceGeneration == generation {
+                    maintenanceGeneration = nil
+                    maintenanceTask = nil
+                }
+            }
             do {
-                guard let self else { return }
                 await refreshSourceURLsFromBookmarks()
                 try await refreshResolvedVideoURLs()
                 try await restoreAccessibleProtectedVideos()

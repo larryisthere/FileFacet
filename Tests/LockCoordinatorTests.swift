@@ -125,6 +125,21 @@ final class RecoveryReadBudgetTests: XCTestCase {
         await blocked.release()
     }
 
+    func testRecoveryMaintenanceReplayCoalescesRequestsAndStopsWithoutSchedulingExtras() {
+        var replay = RecoveryMaintenanceReplay()
+        XCTAssertFalse(replay.takePending())
+        XCTAssertTrue(replay.shouldSchedule(recovering: false))
+        XCTAssertFalse(replay.takePending())
+        // Both normal completion and Stop use the same teardown and drain.
+        for _ in 0..<2 {
+            XCTAssertFalse(replay.shouldSchedule(recovering: true))
+            XCTAssertFalse(replay.shouldSchedule(recovering: true))
+            XCTAssertTrue(replay.takePending())
+            XCTAssertTrue(replay.shouldSchedule(recovering: false))
+            XCTAssertFalse(replay.takePending())
+        }
+    }
+
     func testRecoveryScopeCoversNestedFilesWithoutAcceptingPrefixOrSymlink() throws {
         let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
             .appendingPathComponent(UUID().uuidString)
