@@ -1,8 +1,8 @@
 import Foundation
 
 enum AppConfiguration {
-    static let internalName = "FileFacet"
-    static let bundleIdentifier = "com.larryisthere.video-tag-manager"
+    static let internalName = "Tagivy"
+    static let bundleIdentifier = "com.larryisthere.tagivy"
     static let minimumSystemVersion = "14.0"
 
     static var displayName: String {

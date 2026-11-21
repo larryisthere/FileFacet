@@ -845,7 +845,7 @@ final class LibraryAccessCoordinator {
         )
         let detail = String(
             localized: "scan.import.progress.detail",
-            defaultValue: "Saving the selected videos to FileFacet…"
+            defaultValue: "Saving the selected videos to Tagivy…"
         )
         onScanStateChanged?(.importing(title: title, detail: detail, results: currentResults))
         onImportStateChanged?(.importing(title: title, detail: detail, progress: nil))
@@ -1800,7 +1800,7 @@ final class LibraryAccessCoordinator {
         )
         alert.informativeText = String(
             localized: "unavailable.relink.confirmation.detail",
-            defaultValue: "FileFacet cannot confirm that these are the same video. Review the differences below."
+            defaultValue: "Tagivy cannot confirm that these are the same video. Review the differences below."
         )
 
         let fieldTitle = String(

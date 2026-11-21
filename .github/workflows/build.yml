@@ -12,7 +12,7 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - name: Build FileFacet
+      - name: Build Tagivy
         run: >-
           xcodebuild
           -project VideoTagManager.xcodeproj

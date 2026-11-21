@@ -607,13 +607,13 @@ final class InspectorViewController: NSViewController {
             ? String(
                 format: String(
                     localized: "unavailable.remove.action.multiple",
-                    defaultValue: "Remove %lld Videos from FileFacet…"
+                    defaultValue: "Remove %lld Videos from Tagivy…"
                 ),
                 selectedCount
             )
             : String(
                 localized: "unavailable.remove.action",
-                defaultValue: "Remove from FileFacet…"
+                defaultValue: "Remove from Tagivy…"
             )
         let removeButton = NSButton(
             title: removeTitle,
@@ -652,22 +652,22 @@ final class InspectorViewController: NSViewController {
             alert.messageText = String(
                 format: String(
                     localized: "unavailable.remove.title.multiple",
-                    defaultValue: "Remove %lld records from FileFacet?"
+                    defaultValue: "Remove %lld records from Tagivy?"
                 ),
                 videos.count
             )
             alert.informativeText = String(
                 localized: "unavailable.remove.detail.multiple",
-                defaultValue: "The original tags and media information for these records will be deleted from FileFacet. This will not affect original files that may exist on your Mac."
+                defaultValue: "The original tags and media information for these records will be deleted from Tagivy. This will not affect original files that may exist on your Mac."
             )
         } else {
             alert.messageText = String(
                 localized: "unavailable.remove.title",
-                defaultValue: "Remove this record from FileFacet?"
+                defaultValue: "Remove this record from Tagivy?"
             )
             alert.informativeText = String(
                 localized: "unavailable.remove.detail",
-                defaultValue: "The original tags and media information will be deleted from FileFacet. This will not affect the original file that may exist on your Mac."
+                defaultValue: "The original tags and media information will be deleted from Tagivy. This will not affect the original file that may exist on your Mac."
             )
         }
         alert.addButton(withTitle: String(localized: .actionRemove))

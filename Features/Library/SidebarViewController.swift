@@ -2,8 +2,8 @@ import AppKit
 
 @MainActor
 final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate, NSTextFieldDelegate {
-    static let tagPasteboardType = NSPasteboard.PasteboardType("com.larryisthere.video-tag-manager.tag-id")
-    static let videoPasteboardType = NSPasteboard.PasteboardType("com.larryisthere.video-tag-manager.video-ids")
+    static let tagPasteboardType = NSPasteboard.PasteboardType("com.larryisthere.tagivy.tag-id")
+    static let videoPasteboardType = NSPasteboard.PasteboardType("com.larryisthere.tagivy.video-ids")
     private static let tagSortModeDefaultsKey = "sidebar.tagSortMode"
 
     private let outlineView = NSOutlineView()

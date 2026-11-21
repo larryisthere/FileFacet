@@ -11,8 +11,8 @@ default_platform(:mac)
 REPO_ROOT = File.expand_path("..", __dir__)
 PROJECT = File.join(REPO_ROOT, "VideoTagManager.xcodeproj")
 SCHEME = "VideoTagManager"
-PRODUCT_NAME = "FileFacet"
-DISPLAY_NAME = "FileFacet"
+PRODUCT_NAME = "Tagivy"
+DISPLAY_NAME = "Tagivy"
 
 def shell_escape(value)
   Shellwords.escape(value.to_s)
@@ -141,7 +141,7 @@ end
 def package_app!(app_path, output_directory)
   FileUtils.mkdir_p(output_directory)
   settings = release_build_settings
-  base_name = "FileFacet-#{settings['MARKETING_VERSION']}-#{settings['CURRENT_PROJECT_VERSION']}-macOS-universal"
+  base_name = "Tagivy-#{settings['MARKETING_VERSION']}-#{settings['CURRENT_PROJECT_VERSION']}-macOS-universal"
   zip_path = File.join(output_directory, "#{base_name}.zip")
   checksum_path = "#{zip_path}.sha256"
   FileUtils.rm_f([zip_path, checksum_path])
@@ -166,7 +166,7 @@ platform :mac do
     UI.user_error!("请提供版本号，例如：version:1.0.2") if version.empty?
 
     next_build = prepare_release_versions!(version)
-    UI.success("已准备 FileFacet #{version} (#{next_build})")
+    UI.success("已准备 Tagivy #{version} (#{next_build})")
     UI.important("请更新 CHANGELOG、完成验收并提交版本改动后，再执行正式发布 lane")
   end
 
@@ -233,7 +233,7 @@ platform :mac do
       "gh release create #{shell_escape(tag)} #{shell_escape(zip_path)} #{shell_escape(checksum_path)} " \
       "--repo #{shell_escape(ENV.fetch('GITHUB_REPOSITORY'))} " \
       "--target #{shell_escape(release_commit)} " \
-      "--title #{shell_escape("FileFacet #{settings['MARKETING_VERSION']}")} " \
+      "--title #{shell_escape("Tagivy #{settings['MARKETING_VERSION']}")} " \
       "--notes-file #{shell_escape(notes_path)}"
     )
   end
@@ -258,14 +258,14 @@ platform :mac do
       clean: true,
       export_method: "app-store",
       output_directory: output_directory,
-      output_name: "FileFacet.pkg",
+      output_name: "Tagivy.pkg",
       export_options: {
         signingStyle: "automatic",
         teamID: release_build_settings["DEVELOPMENT_TEAM"]
       },
       xcargs: "-allowProvisioningUpdates"
     )
-    pkg_path = File.join(output_directory, "FileFacet.pkg")
+    pkg_path = File.join(output_directory, "Tagivy.pkg")
     UI.user_error!("找不到 App Store 包：#{pkg_path}") unless File.file?(pkg_path)
     upload_to_app_store(
       api_key: api_key,

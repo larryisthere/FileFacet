@@ -1,6 +1,6 @@
-# Contributing to FileFacet
+# Contributing to Tagivy
 
-Thank you for helping improve FileFacet.
+Thank you for helping improve Tagivy.
 
 ## Before opening a pull request
 

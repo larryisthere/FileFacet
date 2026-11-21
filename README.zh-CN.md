@@ -1,55 +1,57 @@
-# FileFacet — macOS 本地优先视频标签管理器
+# Tagivy — macOS 本地优先视频标签管理器
+
+> Tagivy 使用新的 macOS 应用标识，不会自动导入 FileFacet 的图库、设置、缩略图或文件夹权限。如仍需旧图库，请保留 FileFacet 及其数据。
 
 <p align="center">
-  <img src="Resources/Assets.xcassets/AppIcon.appiconset/app-icon-256@2x.png" width="128" alt="FileFacet macOS 视频标签管理器 App 图标">
+  <img src="Resources/Assets.xcassets/AppIcon.appiconset/app-icon-256@2x.png" width="128" alt="Tagivy macOS 视频标签管理器 App 图标">
 </p>
 
 [English](README.md) | 简体中文
 
-FileFacet 是一款原生、以本地数据为基础的 macOS 视频标签管理器，可通过层级标签统一整理多个文件夹中的视频。所有原始文件均保留在原位置，并始终以只读方式访问。
+Tagivy 是一款原生、以本地数据为基础的 macOS 视频标签管理器，可通过层级标签统一整理多个文件夹中的视频。所有原始文件均保留在原位置，并始终以只读方式访问。
 
 [下载最新版本](https://github.com/larryisthere/FileFacet/releases/latest) · [查看版本历史](CHANGELOG.md)
 
-> FileFacet 支持英文和简体中文，并跟随 macOS 中为该 App 设置的语言。
+> Tagivy 支持英文和简体中文，并跟随 macOS 中为该 App 设置的语言。
 
 <p align="center">
-  <img src="docs/assets/readme/filefacet-video-tag-manager.png" alt="FileFacet macOS 本地视频标签管理器，展示层级标签树、可搜索视频网格和批量标签编辑">
+  <img src="docs/assets/readme/filefacet-video-tag-manager.png" alt="Tagivy macOS 本地视频标签管理器，展示层级标签树、可搜索视频网格和批量标签编辑">
 </p>
 
-## FileFacet 适合谁
+## Tagivy 适合谁
 
-FileFacet 面向在本地保存视频，并希望灵活整理视频且保持现有文件夹结构的用户：
+Tagivy 面向在本地保存视频，并希望灵活整理视频且保持现有文件夹结构的用户：
 
 - 管理多个项目和存储位置中视频素材的创作者
 - 整理个人或私密视频收藏的用户
 - 需要按人物、来源、用途、状态等多个维度分类的用户
 - 希望在 Finder 平铺标签之外建立应用内层级标签体系的 Mac 用户
 
-## 为什么选择 FileFacet
+## 为什么选择 Tagivy
 
 - **跨文件夹统一资料库**：可以导入单个视频、多个文件夹或两者的混合内容，并在同一个资料库中搜索和筛选。
 - **目录结构生成标签**：导入文件夹时可以将其中的目录转换为层级标签，并可选择是否将每个所选文件夹本身作为根标签。
-- **主动扫描新视频**：检查此前选择的文件夹中尚未进入 FileFacet 的视频，预览扫描结果，并选择部分或全部导入。
+- **主动扫描新视频**：检查此前选择的文件夹中尚未进入 Tagivy 的视频，预览扫描结果，并选择部分或全部导入。
 - **外置资料库离线可用**：外置磁盘断开后，已经索引的视频仍可浏览、搜索和整理标签；磁盘重新连接后会自动恢复原文件访问。
 - **层级视频标签**：支持多层级标签树、批量编辑、标签合并、颜色和拖拽整理。
 - **智能筛选与智能分类**：组合标签、文件名、日期、媒体属性和排序，并将常用组合保存为实时更新的智能分类。
-- **原始文件保留在原位置**：FileFacet 只读取视频，不会移动、重命名、修改或删除原始文件。
-- **本地优先与隐私保护**：资料库索引、标签、访问授权和缩略图均保存在 Mac 本机；FileFacet 默认不发起网络请求。
+- **原始文件保留在原位置**：Tagivy 只读取视频，不会移动、重命名、修改或删除原始文件。
+- **本地优先与隐私保护**：资料库索引、标签、访问授权和缩略图均保存在 Mac 本机；Tagivy 默认不发起网络请求。
 - **原生 macOS 工作流**：支持 Quick Look、默认播放器、Finder 定位，以及可选的系统身份验证保护。
 
-如果 FileFacet 适合你的视频整理方式，可以为[仓库添加 Star](https://github.com/larryisthere/FileFacet)，支持后续开发并方便再次找到它。
+如果 Tagivy 适合你的视频整理方式，可以为[仓库添加 Star](https://github.com/larryisthere/FileFacet)，支持后续开发并方便再次找到它。
 
 ## 使用方式
 
-1. 选择“文件 > 导入视频与文件夹…”，或将视频和文件夹拖入 FileFacet。
-2. 导入文件夹时，可以选择直接导入，或根据目录结构创建层级标签；FileFacet 可以记住这个偏好。
+1. 选择“文件 > 导入视频与文件夹…”，或将视频和文件夹拖入 Tagivy。
+2. 导入文件夹时，可以选择直接导入，或根据目录结构创建层级标签；Tagivy 可以记住这个偏好。
 3. 使用工具栏或“文件 > 扫描新视频”检查这些文件夹后来新增的视频，并选择部分或全部扫描结果导入。
 4. 视频首次加入资料库时，已有 Finder 标签会执行一次单向导入。
 5. 创建层级标签，为一个或多个视频批量打标，再组合文件名、标签、日期、时长、文件大小或分辨率筛选。
 6. 将常用组合保存为智能分类，也可以仅作为临时视图使用。
 7. 使用 Quick Look 预览、默认播放器打开视频，或在 Finder 中定位文件。
 
-重复导入会保持单条视频记录。父文件夹、子文件夹和单个视频存在重叠时，FileFacet 会自动合并重复范围。
+重复导入会保持单条视频记录。父文件夹、子文件夹和单个视频存在重叠时，Tagivy 会自动合并重复范围。
 
 ## 功能
 
@@ -60,7 +62,7 @@ FileFacet 面向在本地保存视频，并希望灵活整理视频且保持现�
 - 单个和多个视频的已选、未选与部分选中状态
 - 将视频拖到标签，或将标签拖到视频
 - 标签创建、重命名、调整层级、合并、颜色和单步撤销
-- 将 Finder 标签首次单向导入为独立的 FileFacet 标签
+- 将 Finder 标签首次单向导入为独立的 Tagivy 标签
 
 ### 查找与浏览
 
@@ -102,9 +104,9 @@ FileFacet 面向在本地保存视频，并希望灵活整理视频且保持现�
 ### 安装
 
 1. 打开[最新 GitHub Release](https://github.com/larryisthere/FileFacet/releases/latest)。
-2. 下载 `FileFacet-<版本>-<构建号>-macOS-universal.zip`。
-3. 解压后将 `FileFacet.app` 移入“应用程序”文件夹。
-4. 打开 FileFacet，并导入需要整理的视频或文件夹。
+2. 下载 `Tagivy-<版本>-<构建号>-macOS-universal.zip`。
+3. 解压后将 `Tagivy.app` 移入“应用程序”文件夹。
+4. 打开 Tagivy，并导入需要整理的视频或文件夹。
 
 公开发布版本为 Universal App，已经过 Developer ID 签名和 Apple 公证。每个版本同时提供 SHA-256 校验文件。
 
@@ -117,47 +119,47 @@ FileFacet 面向在本地保存视频，并希望灵活整理视频且保持现�
 - AVI
 - WebM
 
-媒体播放和预览能力可能受到当前 macOS 版本支持的编解码器及用户所选应用影响。AVFoundation 和 Quick Look 都无法解码画面时，FileFacet 会显示通用视频图标。
+媒体播放和预览能力可能受到当前 macOS 版本支持的编解码器及用户所选应用影响。AVFoundation 和 Quick Look 都无法解码画面时，Tagivy 会显示通用视频图标。
 
 ## 隐私与文件安全
 
-- FileFacet 默认不发起网络请求。
+- Tagivy 默认不发起网络请求。
 - 标签、文件索引、访问授权和缩略图保存在本机。
 - 日志不包含完整文件路径、文件名、标签内容和 Bookmark 数据。
 - 原始视频始终以只读方式访问。
-- 从 FileFacet 资料库移出视频时，原始文件继续保留。
+- 从 Tagivy 资料库移出视频时，原始文件继续保留。
 
-可选应用锁用于保护 FileFacet 的访问入口，不负责加密原始视频文件。
+可选应用锁用于保护 Tagivy 的访问入口，不负责加密原始视频文件。
 
 ## 常见问题
 
-### FileFacet 会移动或修改我的视频吗？
+### Tagivy 会移动或修改我的视频吗？
 
-不会。FileFacet 在视频现有位置建立索引，并保持对原始文件的只读访问。
+不会。Tagivy 在视频现有位置建立索引，并保持对原始文件的只读访问。
 
-### FileFacet 会写入 Finder 标签吗？
+### Tagivy 会写入 Finder 标签吗？
 
-不会。视频首次加入资料库时，FileFacet 只读取一次 Finder 标签。导入完成后，两套标签独立存在，任一侧的后续修改都不会影响另一侧。
+不会。视频首次加入资料库时，Tagivy 只读取一次 Finder 标签。导入完成后，两套标签独立存在，任一侧的后续修改都不会影响另一侧。
 
 ### 可以从多个文件夹导入吗？
 
 可以。视频、文件夹和混合选择共享同一个资料库、标签树、搜索范围和筛选空间。导入文件夹时可以保持直接导入，也可以根据目录结构创建层级标签。所选文件夹自身默认不进入标签树，也可以选择将其作为根标签。
 
-### FileFacet 会上传资料库数据吗？
+### Tagivy 会上传资料库数据吗？
 
-不会。FileFacet 默认不发起网络请求，资料库数据保存在 Mac 本机。
+不会。Tagivy 默认不发起网络请求，资料库数据保存在 Mac 本机。
 
 ### 视频移动后会怎样？
 
-FileFacet 通过文件身份和已授权来源位置，在检测到受支持的移动或重命名后维护原有资料库记录。
+Tagivy 通过文件身份和已授权来源位置，在检测到受支持的移动或重命名后维护原有资料库记录。
 
 ### 外置磁盘断开后会怎样？
 
-已经索引的视频会继续保留在资料库中，并显示缓存缩略图、媒体信息和 FileFacet 标签。离线视频仍可搜索和整理标签；需要原文件的操作会暂时不可用。已授权磁盘重新连接后，FileFacet 会自动恢复原文件访问。
+已经索引的视频会继续保留在资料库中，并显示缓存缩略图、媒体信息和 Tagivy 标签。离线视频仍可搜索和整理标签；需要原文件的操作会暂时不可用。已授权磁盘重新连接后，Tagivy 会自动恢复原文件访问。
 
 ## 从源码构建
 
-从源码构建 FileFacet 需要 Xcode 16 或兼容的更新版本。
+从源码构建 Tagivy 需要 Xcode 16 或兼容的更新版本。
 
 ```bash
 xcodebuild \
@@ -193,4 +195,4 @@ Ruby 和 Bundler 仅用于 [docs/release.md](docs/release.md) 中记录的 Fastl
 
 ## License
 
-FileFacet 使用 [MIT License](LICENSE)。
+Tagivy 使用 [MIT License](LICENSE)。
