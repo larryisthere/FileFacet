@@ -4,6 +4,13 @@ This file records user-visible changes across Tagivy and earlier FileFacet relea
 
 ## [Unreleased]
 
+## [1.0.14] - 2026-11-21
+
+### Fixed
+
+- Restoring access to a video at its original path no longer reads the video contents. Originals that only exist in iCloud can be associated without downloading them.
+- Restore access from an enclosing folder and continue checking other records when a file location does not respond.
+
 ## [1.0.13] - 2026-11-21
 
 ### Changed
