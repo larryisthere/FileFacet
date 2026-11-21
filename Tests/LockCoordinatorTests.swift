@@ -125,6 +125,62 @@ final class RecoveryReadBudgetTests: XCTestCase {
         await blocked.release()
     }
 
+    func testIndexedMoveHintsRequireUniqueInScopeFileIdentityAndRejectMissedEvents() throws {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+            .appendingPathComponent(UUID().uuidString)
+        let a = root.appendingPathComponent("one")
+        let b = root.appendingPathComponent("two")
+        try FileManager.default.createDirectory(at: a, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: b, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let old = a.appendingPathComponent("old.mov")
+        let moved = b.appendingPathComponent("new.mov")
+        try Data().write(to: old)
+        let first = try XCTUnwrap(IndexedFileIdentity.read(at: old, inside: root))
+        try FileManager.default.moveItem(at: old, to: moved)
+        let events = [IndexedFileEvent(path: old.path, flags: 0x10800, fileID: first.inode),
+                      IndexedFileEvent(path: moved.path, flags: 0x10800, fileID: first.inode)]
+        func destination(_ e: [IndexedFileEvent]) -> URL? {
+            IndexedMoveHint.destination(events: e, oldPath: old.path, identity: first, root: root) {
+                IndexedFileIdentity.read(at: $0, inside: root)
+            }
+        }
+        XCTAssertEqual(destination(events), moved)
+        XCTAssertFalse(IndexedFileIdentity.oldEntryAbsentForLiveMove(at: moved, inside: root))
+        XCTAssertTrue(IndexedFileIdentity.oldEntryAbsentForLiveMove(at: old, inside: root))
+        XCTAssertNil(destination([events[0]]))
+        let now = ContinuousClock().now
+        var held = IndexedRelocationHints()
+        held.append([events[0]], now: now)
+        XCTAssertNil(destination(held.retained(at: now)))
+        let next = now.advanced(by: .seconds(2))
+        held.append([events[1]], now: next)
+        XCTAssertEqual(destination(held.retained(at: next)), moved)
+        var duringRecovery = IndexedRelocationHints()
+        duringRecovery.append([events[0]], now: now)
+        duringRecovery.holdForRecovery(at: now)
+        let finish = now.advanced(by: .seconds(40))
+        duringRecovery.append([events[1]], now: finish)
+        duringRecovery.resumeAfterRecovery(at: finish)
+        XCTAssertEqual(destination(duringRecovery.retained(at: finish)), moved)
+        held.append([.unreliable], now: next)
+        XCTAssertNil(destination(held.retained(at: next)))
+        XCTAssertTrue(held.retained(at: next.advanced(by: .seconds(5))).isEmpty)
+        XCTAssertNil(destination(events + [.unreliable]))
+        XCTAssertNil(destination([events[0], IndexedFileEvent(path: root.path + "-outside/new.mov",
+            flags: 0x10800, fileID: first.inode)]))
+        XCTAssertNil(destination(events + [IndexedFileEvent(path: moved.path, flags: 0x10800,
+            fileID: first.inode + 1)]))
+        // Same name with replacement inode (including on a formerly matched destination).
+        let replacement = b.appendingPathComponent("replacement.mov")
+        try Data().write(to: replacement)
+        try FileManager.default.removeItem(at: moved)
+        try FileManager.default.moveItem(at: replacement, to: moved)
+        XCTAssertNil(destination(events))
+        let directoryEvents = events.map { IndexedFileEvent(path: $0.path, flags: 0x20800, fileID: $0.fileID) }
+        XCTAssertNil(destination(directoryEvents))
+    }
+
     func testRecoveryMaintenanceReplayCoalescesRequestsAndStopsWithoutSchedulingExtras() {
         var replay = RecoveryMaintenanceReplay()
         XCTAssertFalse(replay.takePending())

@@ -304,6 +304,19 @@ final class LibraryAccessCoordinator {
     private var importRevision = 0
     private var isRestoringLibrary = false
     private var sourceScopeGenerations: [String: UUID] = [:]
+    private struct WatchedRelocation: Sendable {
+        let location: VideoLocationRecord
+        let generation: UUID
+        let identity: IndexedFileIdentity
+    }
+    private var watchedRelocations: [String: WatchedRelocation] = [:]
+    private var relocationEvents: [String: IndexedRelocationHints] = [:]
+    private var watcherGenerations: [String: UUID] = [:]
+    private var relocationConflictPaths: Set<String> = []
+    private var relocationConflictVideoIDs: Set<String> = []
+
+    private let relocationReadBudget = RecoveryReadBudget()
+    private var relocationCaptureTask: Task<Void, Never>?
     private var maintenanceReplay = RecoveryMaintenanceReplay()
     private var maintenanceGeneration: UUID?
     private var maintenanceTask: Task<Void, Never>?
@@ -396,6 +409,11 @@ final class LibraryAccessCoordinator {
         recoveryTask = Task { [weak self] in
             guard let self else { return }
             let maintenance = maintenanceTask
+            relocationCaptureTask?.cancel()
+            relocationCaptureTask = nil
+            for key in Array(relocationEvents.keys) {
+                relocationEvents[key]?.holdForRecovery(at: ContinuousClock().now)
+            }
             if maintenanceDebounceTask != nil || maintenanceGeneration != nil {
                 _ = maintenanceReplay.shouldSchedule(recovering: true)
             }
@@ -483,6 +501,9 @@ final class LibraryAccessCoordinator {
                             // Count the committed result before any cancellable refresh.
                             succeeded += 1
                             restored = true
+                            let captureKey = source.id + "|" + path
+                            relocationConflictPaths.remove(captureKey)
+                            watchedRelocations.removeValue(forKey: captureKey)
                             sourceBookmarks[source.id] = source.rootBookmarkData
                             sourceDisplayNames[source.id] = source.displayName
                             sourceScansDescendants[source.id] = source.scansDescendants
@@ -534,8 +555,14 @@ final class LibraryAccessCoordinator {
                 guard let self else { return }
                 try? await refreshResolvedVideoURLs()
                 recoveryTask = nil
+                for key in Array(relocationEvents.keys) {
+                    relocationEvents[key]?.resumeAfterRecovery(at: ContinuousClock().now)
+                }
                 if maintenanceReplay.takePending() { scheduleMaintenance() }
                 publishRecoveryStatus()
+                if let locations = try? await database.fetchVideoLocations() {
+                    scheduleIndexedRelocationCapture(locations: locations, resolved: resolvedVideoURLs, cloud: cloudPlaceholderIDs)
+                }
                 try? await refreshVisibleVideosNow()
                 // Recovery associates existing locations; it does not enqueue content reads.
             }
@@ -2197,10 +2224,27 @@ final class LibraryAccessCoordinator {
            previousPath != watchPath,
            sourceWatchPaths.values.contains(previousPath) == false {
             watchersByPath.removeValue(forKey: previousPath)?.stop()
+            watcherGenerations.removeValue(forKey: previousPath)
+            relocationEvents.removeValue(forKey: previousPath)
         }
         guard watchersByPath[watchPath] == nil else { return }
-        let watcher = FSEventsWatcher { [weak self] in
-            Task { @MainActor [weak self] in self?.scheduleMaintenance() }
+        let generation = UUID()
+        watcherGenerations[watchPath] = generation
+        let watcher = FSEventsWatcher { [weak self] events in
+            Task { @MainActor [weak self] in
+                guard let self, watcherGenerations[watchPath] == generation else { return }
+                if sourceWatchPaths.contains(where: { id, path in
+                    path == watchPath && sourceScansDescendants[id] == false &&
+                    sourceURLs[id]?.hasDirectoryPath == true
+                }) {
+                    let now = ContinuousClock().now
+                    if recoveryTask != nil {
+                        relocationEvents[watchPath, default: IndexedRelocationHints()].holdForRecovery(at: now)
+                    }
+                    relocationEvents[watchPath, default: IndexedRelocationHints()].append(events, now: now)
+                }
+                scheduleMaintenance()
+            }
         }
         watchersByPath[watchPath] = watcher
         watcher.start(watching: watchURL)
@@ -2218,6 +2262,8 @@ final class LibraryAccessCoordinator {
         guard let watchPath = sourceWatchPaths.removeValue(forKey: sourceID),
               sourceWatchPaths.values.contains(watchPath) == false else { return }
         watchersByPath.removeValue(forKey: watchPath)?.stop()
+        relocationEvents.removeValue(forKey: watchPath)
+        watcherGenerations.removeValue(forKey: watchPath)
     }
 
     private func resetRuntimeSourceConnections() {
@@ -2229,6 +2275,11 @@ final class LibraryAccessCoordinator {
         }
         watchersByPath.removeAll()
         sourceWatchPaths.removeAll()
+        watchedRelocations.removeAll()
+        relocationEvents.removeAll()
+        watcherGenerations.removeAll()
+        relocationConflictPaths.removeAll()
+        relocationConflictVideoIDs.removeAll()
     }
 
     private func makeBookmark(for url: URL) throws -> Data {
@@ -2363,6 +2414,124 @@ final class LibraryAccessCoordinator {
         }
     }
 
+    private func scheduleIndexedRelocationCapture(
+        locations: [VideoLocationRecord], resolved: [String: URL], cloud: Set<String>
+    ) {
+        guard recoveryTask == nil else { return }
+        relocationCaptureTask?.cancel()
+        relocationCaptureTask = Task(priority: .utility) { [weak self] in
+            await self?.captureIndexedRelocations(locations: locations, resolved: resolved, cloud: cloud)
+        }
+    }
+
+    private func captureIndexedRelocations(
+        locations: [VideoLocationRecord], resolved: [String: URL], cloud: Set<String>
+    ) async {
+        for location in locations where !location.requiresRecoveryVerification && !cloud.contains(location.videoID) {
+            guard !Task.isCancelled, recoveryTask == nil else { return }
+            guard sourceScansDescendants[location.sourceID] == false,
+                  let root = sourceURLs[location.sourceID], root.hasDirectoryPath,
+                  let scope = resources[location.sourceID],
+                  let generation = sourceScopeGenerations[location.sourceID],
+                  let path = location.lastKnownPath, let file = resolved[location.videoID],
+                  file.path == path else { continue }
+            let key = location.sourceID + "|" + path
+            if watchedRelocations[key]?.generation == generation { continue }
+            guard let observed = try? await relocationReadBudget.run(retaining: [scope], {
+                IndexedFileIdentity.read(at: file, inside: root)
+            }), !Task.isCancelled, recoveryTask == nil,
+                sourceScopeGenerations[location.sourceID] == generation else { continue }
+            watchedRelocations[key] = WatchedRelocation(location: location, generation: generation, identity: observed)
+        }
+        guard !Task.isCancelled, recoveryTask == nil else { return }
+        let indexedPaths = Set(locations.compactMap { location in
+            location.lastKnownPath.map { location.sourceID + "|" + $0 }
+        })
+        watchedRelocations = watchedRelocations.filter {
+            indexedPaths.contains($0.key) &&
+            sourceScopeGenerations[$0.value.location.sourceID] == $0.value.generation
+        }
+        relocationConflictPaths.formIntersection(watchedRelocations.keys)
+    }
+
+    private func processIndexedRelocations() async throws {
+        let clock = ContinuousClock()
+        // Do not drain across awaits: maintenance can be canceled/restarted and
+        // the second half of a rename can arrive in a later callback.
+        for (key, old) in Array(watchedRelocations) {
+            try Task.checkCancellation()
+            let sourceID = old.location.sourceID
+            guard let path = old.location.lastKnownPath,
+                  sourceScopeGenerations[sourceID] == old.generation,
+                  sourceScansDescendants[sourceID] == false,
+                  let root = sourceURLs[sourceID], root.hasDirectoryPath,
+                  let scope = resources[sourceID],
+                  let watch = sourceWatchPaths[sourceID], let epoch = watcherGenerations[watch],
+                  let hints = relocationEvents[watch]?.retained(at: clock.now),
+                  !hints.contains(where: \.invalidatesLivePairing)
+            else { continue }
+            let file = URL(fileURLWithPath: path)
+            if hints.contains(where: { $0.path == path && $0.fileID != nil && $0.fileID != old.identity.inode }),
+               let current = try? await relocationReadBudget.run(retaining: [scope], {
+                   IndexedFileIdentity.read(at: file, inside: root)
+               }), current != old.identity, watcherGenerations[watch] == epoch,
+               sourceScopeGenerations[sourceID] == old.generation {
+                try Task.checkCancellation()
+                // Positive evidence of replacement in this session. Keep the
+                // database intact and let the existing explicit Relink UI handle it.
+                relocationConflictPaths.insert(key)
+                continue
+            }
+            guard hints.contains(where: { $0.path == path && $0.fileID == old.identity.inode && $0.isDirectFileRename })
+            else { continue }
+            let destination: URL?
+            do {
+                destination = try await relocationReadBudget.run(retaining: [scope]) {
+                    guard IndexedFileIdentity.oldEntryAbsentForLiveMove(at: file, inside: root) else { return nil }
+                    return IndexedMoveHint.destination(events: hints, oldPath: path, identity: old.identity, root: root) {
+                        IndexedFileIdentity.read(at: $0, inside: root)
+                    }
+                }
+            } catch is CancellationError { throw CancellationError() }
+            catch { continue }
+            guard let target = destination, sourceScopeGenerations[sourceID] == old.generation,
+                  watcherGenerations[watch] == epoch,
+                  let latestHints = relocationEvents[watch]?.retained(at: clock.now),
+                  IndexedMoveHint.destination(events: latestHints, oldPath: path, identity: old.identity,
+                      root: root, currentIdentity: { $0 == target ? old.identity : nil }) == target,
+                  let relative = RecoveryScope.recordedRelativePath(file: target, inside: root, checkResolvedPaths: false)
+            else { continue }
+            // Last recheck before the database actor. This is best effort across
+            // the filesystem/SQLite boundary; a later event must be checked again.
+            let stillExact: Bool
+            do {
+                stillExact = try await relocationReadBudget.run(retaining: [scope]) {
+                    IndexedFileIdentity.oldEntryAbsentForLiveMove(at: file, inside: root) &&
+                    IndexedFileIdentity.read(at: target, inside: root) == old.identity
+                }
+            } catch is CancellationError { throw CancellationError() }
+            catch { continue }
+            try Task.checkCancellation()
+            guard stillExact, sourceScopeGenerations[sourceID] == old.generation,
+                  watcherGenerations[watch] == epoch,
+                  let finalHints = relocationEvents[watch]?.retained(at: clock.now),
+                  IndexedMoveHint.destination(events: finalHints, oldPath: path, identity: old.identity,
+                      root: root, currentIdentity: { $0 == target ? old.identity : nil }) == target else { continue }
+            if try await database.moveIndexedVideoLocation(old.location, to: target.path,
+                    relativePath: relative, identity: old.identity) {
+                watchedRelocations.removeValue(forKey: key)
+                relocationConflictPaths.remove(key)
+                watchedRelocations[sourceID + "|" + target.path] = WatchedRelocation(
+                    location: VideoLocationRecord(videoID: old.location.videoID, sourceID: sourceID,
+                        relativePath: relative, fallbackPathKey: fallbackPathKey(for: target),
+                        volumeIdentifier: old.location.volumeIdentifier, lastKnownPath: target.path),
+                    generation: old.generation, identity: old.identity)
+            }
+            // A rename prefix, dropped batch or provider ambiguity never writes
+            // an unavailable/missing state; the original recorded path is preserved.
+        }
+    }
+
     private func scheduleMaintenance() {
         guard !isRestoringLibrary,
               maintenanceReplay.shouldSchedule(recovering: recoveryTask != nil) else { return }
@@ -2396,6 +2565,7 @@ final class LibraryAccessCoordinator {
             }
             do {
                 await refreshSourceURLsFromBookmarks()
+                try await processIndexedRelocations()
                 try await refreshResolvedVideoURLs()
                 try await restoreAccessibleProtectedVideos()
                 try await refreshResolvedVideoURLs()
@@ -2504,10 +2674,19 @@ final class LibraryAccessCoordinator {
         let activeSourceIDs = Set(resources.keys)
         let authorizedSourceIDs = Set(sourceBookmarks.keys)
         let displayNames = sourceDisplayNames
+        let conflicts = relocationConflictPaths
+        let usableLocations = locations.filter { location in
+            guard let path = location.lastKnownPath else { return true }
+            return !conflicts.contains(location.sourceID + "|" + path)
+        }
+        let usableCloudLocations = allLocations.filter { location in
+            guard let path = location.lastKnownPath else { return true }
+            return !conflicts.contains(location.sourceID + "|" + path)
+        }
         let resolution = await Task.detached(priority: .utility) {
             Self.resolveVideoAccess(
-                locations: locations,
-                cloudCandidateLocations: allLocations,
+                locations: usableLocations,
+                cloudCandidateLocations: usableCloudLocations,
                 sourceURLs: knownURLs,
                 activeSourceIDs: activeSourceIDs,
                 authorizedSourceIDs: authorizedSourceIDs,
@@ -2525,6 +2704,13 @@ final class LibraryAccessCoordinator {
         try Task.checkCancellation()
         resolvedVideoURLs = resolution.resolvedURLs
         cloudPlaceholderIDs = resolution.cloudPlaceholderIDs
+        relocationConflictVideoIDs = Set(locations.compactMap { location in
+            guard resolution.resolvedURLs[location.videoID] == nil,
+                  !resolution.cloudPlaceholderIDs.contains(location.videoID),
+                  let path = location.lastKnownPath,
+                  conflicts.contains(location.sourceID + "|" + path) else { return nil }
+            return location.videoID
+        })
         let lastKnownResolution = Self.resolveLastKnownVideoPaths(
             locations: allLocations,
             sourceURLs: knownURLs
@@ -2535,6 +2721,7 @@ final class LibraryAccessCoordinator {
         accessLostSourceNameByVideoID = resolution.accessLostSourceNames
         reachableSourceIDs = resolution.reachableSourceIDs
         if recoveryTask == nil {
+            scheduleIndexedRelocationCapture(locations: locations, resolved: resolvedVideoURLs, cloud: cloudPlaceholderIDs)
             let readyVideos = deferredMediaVideos.takeReady(resolvedURLs: resolvedVideoURLs)
             if !readyVideos.isEmpty { startMediaProcessing(videos: readyVideos) }
         }
@@ -3093,6 +3280,7 @@ final class LibraryAccessCoordinator {
         let unavailableVideoIDs = missingVideoIDs
             .union(accessLostSourceNameByVideoID.keys)
             .union(offlineSourceNameByVideoID.keys)
+            .union(relocationConflictVideoIDs)
         onSidebarFilterCountsChanged?(SidebarFilterCounts(
             all: databaseCounts.all,
             untagged: databaseCounts.untagged,
@@ -3120,6 +3308,9 @@ final class LibraryAccessCoordinator {
 
     private func presentedVideo(_ video: VideoRecord) -> VideoRecord {
         let cloud = cloudPlaceholderIDs.contains(video.id)
+        if !cloud, relocationConflictVideoIDs.contains(video.id) {
+            return video.withAvailability(.unavailable, unavailableReason: .missingFromKnownLocation)
+        }
         if !cloud, accessLostSourceNameByVideoID[video.id] != nil {
             return video.withAvailability(.unavailable, unavailableReason: .accessLost)
         }
